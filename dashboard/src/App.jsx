@@ -1,152 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as d3 from "d3";
 
-// ─── Sample Data (shown when no results.json is loaded) ───
-const SAMPLE_DATA = {
-  account_id: "123456789012",
-  region: "us-east-1",
-  timestamp: "2026-02-28T12:00:00Z",
-  summary: {
-    total_users: 14,
-    total_roles: 38,
-    total_policies: 22,
-    total_trust_relationships: 47,
-    critical_priv_esc_risks: 3,
-    wildcard_trust_policies: 1,
-    cross_account_trusts: 5,
-    users_without_mfa: 6,
-    risk_score: "HIGH",
-  },
-  graph: {
-    nodes: [
-      { id: "user:dev-intern", label: "dev-intern", type: "user", mfa: false },
-      { id: "user:ci-deploy", label: "ci-deploy", type: "user", mfa: false },
-      { id: "user:admin-ops", label: "admin-ops", type: "user", mfa: true },
-      { id: "user:data-analyst", label: "data-analyst", type: "user", mfa: false },
-      { id: "role:LambdaExecRole", label: "LambdaExecRole", type: "role", service_role: true },
-      { id: "role:AdminRole", label: "AdminRole", type: "role", service_role: false },
-      { id: "role:S3ReadRole", label: "S3ReadRole", type: "role", service_role: false },
-      { id: "role:CrossAccountAudit", label: "CrossAccountAudit", type: "role", service_role: false },
-      { id: "role:GlueServiceRole", label: "GlueServiceRole", type: "role", service_role: true },
-      { id: "role:EC2InstanceRole", label: "EC2InstanceRole", type: "role", service_role: true },
-      { id: "ext:arn:aws:iam::999888777666:root", label: "External Acct", type: "external" },
-      { id: "esc:iam:CreatePolicyVersion", label: "CreatePolicyVersion", type: "escalation" },
-      { id: "esc:iam:PassRole", label: "PassRole", type: "escalation" },
-      { id: "esc:iam:AttachUserPolicy", label: "AttachUserPolicy", type: "escalation" },
-      { id: "data:s3:prod-data-bucket", label: "prod-data-bucket", type: "data" },
-      { id: "data:secrets:db-credentials", label: "db-credentials", type: "data" },
-    ],
-    edges: [
-      { source: "user:dev-intern", target: "role:LambdaExecRole", trust_type: "same-account" },
-      { source: "user:dev-intern", target: "esc:iam:PassRole", edge_type: "priv_esc", severity: "high" },
-      { source: "user:ci-deploy", target: "role:AdminRole", trust_type: "same-account" },
-      { source: "user:ci-deploy", target: "esc:iam:CreatePolicyVersion", edge_type: "priv_esc", severity: "critical" },
-      { source: "user:ci-deploy", target: "esc:iam:AttachUserPolicy", edge_type: "priv_esc", severity: "critical" },
-      { source: "user:data-analyst", target: "role:S3ReadRole", trust_type: "same-account" },
-      { source: "role:LambdaExecRole", target: "role:AdminRole", trust_type: "service" },
-      { source: "role:LambdaExecRole", target: "data:secrets:db-credentials", edge_type: "data_access" },
-      { source: "role:AdminRole", target: "data:s3:prod-data-bucket", edge_type: "data_access" },
-      { source: "role:AdminRole", target: "data:secrets:db-credentials", edge_type: "data_access" },
-      { source: "role:S3ReadRole", target: "data:s3:prod-data-bucket", edge_type: "data_access" },
-      { source: "ext:arn:aws:iam::999888777666:root", target: "role:CrossAccountAudit", trust_type: "cross-account" },
-      { source: "role:CrossAccountAudit", target: "role:S3ReadRole", trust_type: "same-account" },
-      { source: "role:GlueServiceRole", target: "role:AdminRole", trust_type: "service" },
-      { source: "role:EC2InstanceRole", target: "data:s3:prod-data-bucket", edge_type: "data_access" },
-    ],
-  },
-  attack_paths: [
-    {
-      name: "CI/CD Pipeline to Full Admin",
-      severity: "critical",
-      description: "The ci-deploy user has CreatePolicyVersion and AttachUserPolicy permissions, allowing direct escalation to AdministratorAccess without MFA.",
-      steps: [
-        "Compromise ci-deploy credentials (no MFA required)",
-        "Use iam:CreatePolicyVersion to create a new version of an attached policy with Action:* Resource:*",
-        "Set the new version as default using iam:SetDefaultPolicyVersion",
-        "Now has full admin access to the account",
-      ],
-      mitre_techniques: ["T1078.004", "T1548", "T1098"],
-      affected_resources: ["user:ci-deploy", "role:AdminRole"],
-      detection_opportunities: [
-        "index=cloudtrail eventName=CreatePolicyVersion | where match(requestParameters, \"Effect.*Allow.*Action.*\\*\")",
-        "index=cloudtrail eventName=AttachUserPolicy | where match(requestParameters, \"AdministratorAccess\")",
-        "index=cloudtrail eventName=ConsoleLogin | where mfaAuthenticated=\"false\"",
-      ],
-      remediation: [
-        "SCP: Deny iam:CreatePolicyVersion except from admin OU",
-        "Remove iam:CreatePolicyVersion from ci-deploy",
-        "Enforce MFA via IAM policy condition",
-        "Use OIDC federation instead of long-lived keys",
-      ],
-    },
-    {
-      name: "Intern to Admin via Lambda Role Chain",
-      severity: "high",
-      description: "dev-intern can pass roles to Lambda, which has access to AdminRole trust. Chain: dev-intern -> PassRole -> Lambda -> AdminRole.",
-      steps: [
-        "Compromise dev-intern credentials (no MFA)",
-        "Use iam:PassRole to assign AdminRole to a new Lambda function",
-        "Invoke the Lambda function which now runs with AdminRole permissions",
-        "Use admin permissions to access any resource",
-      ],
-      mitre_techniques: ["T1078.004", "T1548", "T1098.003"],
-      affected_resources: ["user:dev-intern", "role:LambdaExecRole", "role:AdminRole"],
-      detection_opportunities: [
-        "index=cloudtrail eventName=CreateFunction* | where match(requestParameters, \"AdminRole\")",
-        "index=cloudtrail eventName=PassRole | where match(requestParameters, \"lambda\")",
-      ],
-      remediation: [
-        "SCP: Restrict iam:PassRole to specific non-admin roles",
-        "Add conditions limiting which roles can be passed",
-        "Enable MFA for dev-intern",
-      ],
-    },
-    {
-      name: "Cross-Account Pivot to Production Data",
-      severity: "high",
-      description: "External account 999888777666 can assume CrossAccountAudit, which chains to S3ReadRole accessing production data.",
-      steps: [
-        "Attacker compromises external account 999888777666",
-        "Assume CrossAccountAudit role in target account",
-        "Pivot to S3ReadRole via trust relationship",
-        "Exfiltrate data from prod-data-bucket",
-      ],
-      mitre_techniques: ["T1550.001", "T1078.004", "T1530"],
-      affected_resources: ["role:CrossAccountAudit", "role:S3ReadRole", "data:s3:prod-data-bucket"],
-      detection_opportunities: [
-        "index=cloudtrail eventName=AssumeRole | where userIdentity.accountId!=\"123456789012\"",
-        "index=cloudtrail eventName=AssumeRole | transaction requestParameters.roleArn maxspan=5m | where eventcount>1",
-        "index=cloudtrail eventName=GetObject | where bucket=\"prod-data-bucket\" | stats count by userIdentity.arn",
-      ],
-      remediation: [
-        "SCP: Require sts:ExternalId on cross-account trust",
-        "Restrict CrossAccountAudit to read-only specific resources",
-        "Remove trust chain from CrossAccountAudit to S3ReadRole",
-      ],
-    },
-    {
-      name: "Data Analyst Direct Data Access",
-      severity: "medium",
-      description: "data-analyst user without MFA can assume S3ReadRole and access production data bucket directly.",
-      steps: [
-        "Compromise data-analyst credentials (no MFA)",
-        "Assume S3ReadRole",
-        "Access and exfiltrate prod-data-bucket contents",
-      ],
-      mitre_techniques: ["T1078.004", "T1530"],
-      affected_resources: ["user:data-analyst", "role:S3ReadRole", "data:s3:prod-data-bucket"],
-      detection_opportunities: [
-        "index=cloudtrail eventName=ConsoleLogin | where mfaAuthenticated=\"false\" AND userIdentity.userName=\"data-analyst\"",
-        "index=cloudtrail eventName=GetObject | where bucket=\"prod-data-bucket\" | stats count by sourceIPAddress",
-      ],
-      remediation: [
-        "Enable MFA for data-analyst",
-        "Add MFA condition on S3ReadRole trust policy",
-        "SCP: Deny s3:GetObject without MFA for non-service principals",
-      ],
-    },
-  ],
-};
+// No sample data — dashboard only shows real audit results
 
 // ─── Theme & Style Constants ───
 const COLORS = {
@@ -537,26 +392,48 @@ function FileUpload({ onDataLoad }) {
 
 // ─── Main Dashboard ───
 export default function App() {
-  const [data, setData] = useState(SAMPLE_DATA);
+  const [data, setData] = useState(null);
   const [selectedPath, setSelectedPath] = useState(null);
   const [tab, setTab] = useState("graph");
   const [selectedNode, setSelectedNode] = useState(null);
-  const [dataSource, setDataSource] = useState("sample");
+  const [loading, setLoading] = useState(true);
 
   // Auto-load results.json from public/ on mount
   useEffect(() => {
     fetch("/results.json")
       .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((json) => { setData(json); setDataSource("live"); })
-      .catch(() => { /* no results.json, keep sample data */ });
+      .then((json) => {
+        if (json && json.account_id) setData(json);
+        setLoading(false);
+      })
+      .catch(() => { setLoading(false); });
   }, []);
 
   const handleDataLoad = useCallback((json) => {
     setData(json);
-    setDataSource("file");
     setSelectedPath(null);
     setSelectedNode(null);
   }, []);
+
+  // Empty state — no audit data loaded
+  if (loading) return (
+    <div style={{ fontFamily: "'IBM Plex Sans', -apple-system, sans-serif", background: COLORS.bg, color: COLORS.text, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: COLORS.textDim, fontSize: 14 }}>Loading...</div>
+    </div>
+  );
+
+  if (!data) return (
+    <div style={{ fontFamily: "'IBM Plex Sans', -apple-system, sans-serif", background: COLORS.bg, color: COLORS.text, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center", maxWidth: 480 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>{"\uD83D\uDEE1"}</div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>SCOPE</h1>
+        <p style={{ color: COLORS.textDim, fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+          No audit results loaded. Run <span style={{ color: COLORS.accent, fontFamily: "monospace" }}>/scope:audit</span> to generate results, then refresh this page.
+        </p>
+        <FileUpload onDataLoad={handleDataLoad} />
+      </div>
+    </div>
+  );
 
   const summary = data?.summary || {};
   const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[summary.risk_score] || COLORS.text;
@@ -580,7 +457,6 @@ export default function App() {
             </h1>
             <span style={{ fontSize: 11, color: COLORS.textDim }}>
               Attack Graph — Account {data.account_id} {"\u2022"} {data.region}
-              {dataSource === "sample" && " \u2022 Sample Data"}
             </span>
           </div>
         </div>
