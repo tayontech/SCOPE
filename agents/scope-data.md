@@ -119,9 +119,9 @@ For each path block, extract:
 Construct `graph.nodes[]` and `graph.edges[]` from the extracted attack path data:
 - Create nodes for each unique principal, role, escalation vector, and data resource referenced
 - Create edges for trust relationships, privilege escalation paths, and data access chains
-- Use the node ID conventions defined in scope-render (user:, role:, esc:, data:, ext:)
+- Use the node ID conventions: user:, role:, esc:, data:, ext:
 
-This graph is built by scope-data — scope-render later uses it to generate the HTML visualization. scope-data does NOT read `attack-graph.html` (that file is written by scope-render downstream).
+This graph is built by scope-data from findings.md data. scope-data does NOT need to worry about HTML — visualization is handled by the SCOPE dashboard at `http://localhost:3000`, which reads `results.json` and the normalized JSON files in `./data/`.
 
 ### Audit Payload Schema
 
@@ -327,6 +327,21 @@ If present, extract lateral movement section:
 - Cross-account role assumptions
 - Service-linked role abuse
 - Trust chain exploitation
+- Full attack chain traces (chains from initial principal through each hop to ultimate target)
+
+**Step 4: Extract persistence analysis**
+
+If present, extract the persistence analysis section:
+- For each of the 7 techniques: technique name, availability (available/unavailable), required permission, permission status (CONFIRMED/LIKELY/NOT AVAILABLE)
+- CLI commands for available techniques
+- Cleanup indicators
+
+**Step 5: Extract exfiltration analysis**
+
+If present, extract the exfiltration analysis section:
+- For each of the 6 vectors: vector name, availability, required permission, permission status
+- Enumeration commands for available vectors
+- Data reachable description and scope estimates
 
 ### Exploit Payload Schema
 
@@ -360,7 +375,49 @@ If present, extract lateral movement section:
   "lateral_movement": {
     "cross_account": ["string — role assumption chains"],
     "service_linked": ["string — SLR abuse paths"],
-    "trust_chain": ["string"]
+    "trust_chain": ["string"],
+    "full_chains": [
+      {
+        "chain_number": "int",
+        "initial_principal": "string — starting ARN",
+        "steps": [
+          {
+            "step_number": "int",
+            "type": "escalation | lateral",
+            "mechanism": "string — e.g., iam:PutUserPolicy, sts:AssumeRole, Lambda execution role",
+            "target": "string — ARN of role or resource reached"
+          }
+        ],
+        "ultimate_target": "string — final resource or action"
+      }
+    ]
+  },
+  "persistence": {
+    "techniques_available": "int — count of available techniques (0-7)",
+    "techniques": [
+      {
+        "name": "string — technique name",
+        "available": "bool",
+        "required_permission": "string — IAM permission needed",
+        "permission_status": "CONFIRMED | LIKELY | NOT_AVAILABLE",
+        "cli_command": "string | null — command if available",
+        "cleanup_indicator": "string | null — what makes this visible"
+      }
+    ]
+  },
+  "exfiltration": {
+    "vectors_available": "int — count of available vectors (0-6)",
+    "vectors": [
+      {
+        "name": "string — vector name",
+        "available": "bool",
+        "required_permission": "string — IAM permission needed",
+        "permission_status": "CONFIRMED | LIKELY | NOT_AVAILABLE",
+        "enumeration_command": "string | null — command if available",
+        "data_reachable": "string | null — description of accessible data",
+        "scope_estimate": "string | null — size/count estimate"
+      }
+    ]
   }
 }
 ```
@@ -468,7 +525,7 @@ The `summary` object is phase-specific:
 
 - **audit**: `{"risk_score": "...", "attack_paths": N, "target": "..."}`
 - **remediate**: `{"audit_runs_analyzed": N, "scps": N, "rcps": N, "detections": N}`
-- **exploit**: `{"target_arn": "...", "paths_found": N, "highest_priv": "..."}`
+- **exploit**: `{"target_arn": "...", "paths_found": N, "highest_priv": "...", "persistence_techniques": N, "exfiltration_vectors": N}`
 - **investigate**: `{"alert_type": "...", "steps_run": N, "mcp_mode": "..."}`
 
 ### Deduplication
