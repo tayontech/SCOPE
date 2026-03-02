@@ -153,8 +153,19 @@ function installCodex(skillName, skillMdContent, targetDir) {
 // Core install logic
 // ---------------------------------------------------------------------------
 
+// Agents that are user-invocable slash commands.
+// All others (verify-*, data, evidence, remediate) are auto-called internally
+// and should NOT be installed as skills.
+const INSTALLABLE_AGENTS = new Set([
+  'scope-audit',
+  'scope-exploit',
+  'scope-investigate',
+]);
+
 /**
- * Discover all agent .md files from the agents/ source directory.
+ * Discover installable agent .md files from the agents/ source directory.
+ * Only agents in INSTALLABLE_AGENTS are included — middleware, verification,
+ * and auto-called agents are skipped (they are read at runtime by source agents).
  * Returns array of { name: string, content: string }.
  */
 function discoverAgents(agentsDir) {
@@ -164,6 +175,7 @@ function discoverAgents(agentsDir) {
   }
 
   const agents = [];
+  const skipped = [];
   const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
@@ -175,7 +187,14 @@ function discoverAgents(agentsDir) {
       continue;
     }
     const name = entry.name.replace(/\.md$/, '');
+    if (!INSTALLABLE_AGENTS.has(name)) {
+      skipped.push(name);
+      continue;
+    }
     agents.push({ name, content });
+  }
+  if (skipped.length > 0) {
+    console.log(`Skipped ${skipped.length} internal agent(s): ${skipped.join(', ')}`);
   }
   return agents;
 }
