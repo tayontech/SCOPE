@@ -2530,9 +2530,14 @@ const DATA = {
 };
 ```
 
-### Also export results.json
+### Export results.json
 
-After writing the HTML dashboard, also write `$RUN_DIR/results.json` with the same DATA object (pretty-printed, 2-space indent). This allows re-loading results into the dashboard via the file upload button, or consumption by downstream agents.
+After completing the audit, write the DATA object to TWO locations:
+
+1. **`$RUN_DIR/results.json`** — archived with the run artifacts (pretty-printed, 2-space indent)
+2. **`dashboard/public/results.json`** — the live dashboard at `http://localhost:3000` auto-loads this on page refresh
+
+This means: run the audit, refresh the dashboard, and you see real results. The "Load Results JSON" button lets you load older runs from `$RUN_DIR/results.json` files.
 
 ### D3 Force Graph Details
 

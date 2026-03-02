@@ -23,3 +23,7 @@ audit/
 remediate/
 exploit/
 investigate/
+
+# Dashboard
+dashboard/node_modules/
+dashboard/public/results.json
