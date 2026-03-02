@@ -6,12 +6,12 @@
 
 SCOPE (Security Cloud Ops Purple Engagement) is an AI-powered purple team toolkit for AWS. Four agents cover the full security operations loop:
 
-- **Audit** — Enumerates IAM, STS, Lambda, S3, KMS, Secrets Manager, and EC2/VPC/EBS/ELB/SSM/VPN. Maps effective permissions, discovers privilege escalation and lateral movement paths, and produces interactive attack graphs.
-- **Exploit** — Takes a principal ARN and generates a red team playbook: escalation paths with ready-to-execute CLI commands, control circumvention analysis, and lateral movement options.
+- **Audit** — Enumerates IAM, STS, Lambda, S3, KMS, Secrets Manager, and EC2/VPC/EBS/ELB/SSM/VPN. Maps effective permissions, discovers privilege escalation and lateral movement paths, filters service-linked roles, and produces interactive attack graphs.
+- **Exploit** — Takes a principal ARN and generates a red team playbook: escalation paths with ready-to-execute CLI commands, control circumvention analysis, lateral movement with full attack chain tracing, persistence techniques (7 methods), and exfiltration vectors (6 data access paths).
 - **Remediate** — Reads audit findings and generates enterprise-scale SCPs/RCPs, security control recommendations, and Splunk SPL detection rules built against CloudTrail telemetry.
 - **Investigate** — Guides SOC analysts through CloudTrail-based alert investigation in Splunk with step-by-step queries, timeline building, and IOC correlation.
 
-The AI reasons about attack paths — it doesn't just run scripts. It decides what to enumerate, interprets results, pivots to interesting findings, and builds correlated detections. Every factual claim is traced to evidence (API output, policy evaluation) through a three-part verification system that classifies output as Guaranteed, Conditional, or Speculative. Each run produces self-contained HTML dashboards alongside structured artifacts.
+The AI reasons about attack paths — it doesn't just run scripts. It decides what to enumerate, interprets results, pivots to interesting findings, and builds correlated detections. Every factual claim is traced to evidence (API output, policy evaluation) through a three-part verification system that classifies output as Guaranteed, Conditional, or Speculative. Each run produces structured artifacts viewable in the SCOPE dashboard at `http://localhost:3000`.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ The AI reasons about attack paths — it doesn't just run scripts. It decides wh
 User-facing agents (slash commands):
   scope-audit         Enumerate AWS resources (IAM, STS, Lambda, S3, KMS, Secrets Manager, EC2/VPC/EBS/ELB/SSM/VPN), map permissions, discover attack paths
   scope-remediate     Generate SCPs, security controls, and detections from audit findings
-  scope-exploit       Privilege escalation playbooks and control circumvention analysis
+  scope-exploit       Privilege escalation playbooks, persistence analysis, exfiltration mapping
   scope-investigate   SOC alert investigation via Splunk (standalone, no cross-agent data)
 
 Verification agents (auto-called during execution):
@@ -30,7 +30,6 @@ Verification agents (auto-called during execution):
 Middleware agents (auto-called post-processing pipeline):
   scope-data          Normalize raw artifacts → structured JSON in ./data/
   scope-evidence      Validate evidence provenance → envelopes in ./evidence/
-  scope-render        Generate self-contained HTML dashboards in run directories
 ```
 
 ## Prerequisites
@@ -70,11 +69,10 @@ Once installed, use slash commands from inside your editor:
 
 | Command | Description |
 |---------|-------------|
-| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name (`iam`, `s3`, `kms`, `secrets`, `sts`, `lambda`, `ec2`), `--all`, or `@targets.csv` |
-| `/scope:remediate` | Generate SCPs, security controls, and SPL detections from prior audit findings |
-| `/scope:exploit <arn>` | Privilege escalation playbooks and control circumvention for a specific principal |
+| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name (`iam`, `s3`, `kms`, `secrets`, `sts`, `lambda`, `ec2`), `--all`, or `@targets.csv`. Auto-chains to remediation. |
+| `/scope:exploit <arn>` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
 | `/scope:investigate` | SOC alert investigation via Splunk — timeline building, IOC correlation |
-| `/scope:verify` | Re-verify existing artifacts (normally auto-called during execution) |
+| `/scope:help` | List available commands, show usage examples, and link to documentation |
 
 > **Gemini CLI users:** Skills appear as `$scope-audit` (dollar-sign prefix, hyphen instead of colon)
 >
@@ -99,29 +97,30 @@ Each run creates a timestamped directory with artifacts:
 ```
 ./audit/audit-20260301-143022-all/
   findings.md          # Three-layer findings report
+  results.json         # Structured data for SCOPE dashboard
   evidence.jsonl       # Structured evidence log
-  attack-graph.html    # Interactive D3 attack graph (generated by scope-render)
+
+./exploit/exploit-20260301-143022-user-alice/
+  playbook.md          # Red team playbook (escalation, persistence, exfiltration)
+  results.json         # Structured data for SCOPE dashboard
+  evidence.jsonl       # Structured evidence log
 ```
 
 The post-processing pipeline runs automatically after each agent:
 1. **scope-data** — normalizes output into structured JSON in `./data/`
 2. **scope-evidence** — validates and indexes evidence provenance in `./evidence/`
-3. **scope-render** — generates self-contained HTML dashboards in the run directory
 
-If any middleware step fails, the raw artifacts are still available. Dashboards are a visualization layer, not a gating requirement.
+If any middleware step fails, the raw artifacts are still available. Visualization is handled by the SCOPE dashboard at `http://localhost:3000`, which reads `results.json`.
 
-### Dashboards
+### Dashboard
 
-Every agent produces a self-contained HTML dashboard viewable in any browser:
+All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. Start it with:
 
 ```
-open ./audit/audit-20260301-143022-all/attack-graph.html
-open ./remediate/remediate-20260301-143022/dashboard.html
-open ./exploit/exploit-20260301-143022-user-alice/dashboard.html
-open ./investigate/investigate-20260301-180000/dashboard.html
+cd dashboard && npm run dev
 ```
 
-Dark theme, D3.js visualizations, no server or build tools required. Data is embedded directly in the HTML.
+The dashboard reads `results.json` and displays audit findings, attack graphs, remediation status, and investigation timelines in a unified React + D3 interface. Interactive features include severity filtering, search, sort (severity/steps/name), attack path edge highlighting on the graph, copy-to-clipboard for detections and remediation text, a node detail panel with connected edges and associated paths, and run history navigation.
 
 ### Verification
 

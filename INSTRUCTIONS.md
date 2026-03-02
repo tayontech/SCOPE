@@ -8,22 +8,20 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop agai
 
 ```
 agents/               Agent .md files — source format for all editors (flat, one file per agent)
-  scope-audit.md     Consolidated AWS audit — ARN routing, service enumeration, attack paths, HTML graph
-  scope-remediate.md Enterprise-scale SCPs, security controls, detection suggestions
-  scope-exploit.md   Privilege escalation policy generator, control circumvention advisor
+  scope-audit.md     Consolidated AWS audit — ARN routing, service enumeration, attack paths, results.json
+  scope-remediate.md Remediation generation — auto-called by scope-audit after enumeration
+  scope-exploit.md   Privilege escalation, persistence analysis, exfiltration mapping
   scope-investigate.md Splunk MCP threat hunting, timeline building, IOC correlation
   scope-verify-core.md   Core verification — claim ledger, output taxonomy, cross-agent consistency
   scope-verify-aws.md    AWS verification — API calls, IAM policy, SCP/RCP safety, attack path satisfiability
   scope-verify-splunk.md Splunk verification — SPL semantic lints, field validation, rerun recipes
   scope-data.md    Data normalization middleware — auto-called by agents, not a slash command
   scope-evidence.md Evidence provenance middleware — auto-called, indexes claims with provenance
-  scope-render.md  Dashboard rendering middleware — auto-called, generates HTML from normalized data
 commands/             Quick-reference docs for each slash command (synopsis, args, examples, artifacts)
-  audit.md          /scope:audit usage
-  remediate.md      /scope:remediate usage
+  audit.md          /scope:audit usage (includes auto-chained remediation)
   exploit.md        /scope:exploit usage
   investigate.md    /scope:investigate usage
-  verify.md         /scope:verify usage
+  help.md           /scope:help usage
 data/                 Normalized JSON output (runtime-generated, gitignored)
   index.json        Unified run registry — machine-readable index of all runs
   audit/            Normalized audit run JSON files
@@ -44,21 +42,21 @@ bin/
 
 | Command | Description |
 |---------|-------------|
-| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name (iam/s3/kms/secrets/sts/lambda/ec2), `--all` for full account audit, or `@targets.csv` for bulk targets. Produces layered output + interactive HTML attack graph. |
-| `/scope:remediate` | Generate enterprise-scale SCPs, security controls, and detection suggestions from audit findings |
+| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name (iam/s3/kms/secrets/sts/lambda/ec2), `--all` for full account audit, or `@targets.csv` for bulk targets. Auto-chains to remediation. |
+| `/scope:exploit <arn>` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
 | `/scope:investigate` | Splunk MCP threat hunting — timeline building, IOC correlation, detection verification |
-| `/scope:exploit` | Privilege escalation policy generator, control circumvention advisor for assessments and CTFs |
-| `/scope:verify` | Verification protocol — auto-called by agents to enforce claim accuracy, reproducibility, and safety |
+| `/scope:help` | List available commands, show usage examples, and link to documentation |
 
 ## Data Layer
 
-Three middleware agents run automatically as a post-processing pipeline after each source agent writes artifacts:
+Two middleware agents run automatically as a post-processing pipeline after each source agent writes artifacts:
 
 1. **scope-data** — reads raw markdown/HTML artifacts, writes normalized JSON to `./data/<phase>/<run-id>.json`, maintains `./data/index.json`
 2. **scope-evidence** — reads `$RUN_DIR/evidence.jsonl`, validates provenance chains, writes evidence envelopes to `./evidence/<phase>/<run-id>.json`, maintains `./evidence/index.json`
-3. **scope-render** — reads normalized JSON from `./data/`, generates self-contained HTML dashboards in `$RUN_DIR/`
 
-None are slash commands. All are auto-called, sequential, and non-blocking (failures log warnings but don't stop the source agent).
+Neither is a slash command. Both are auto-called, sequential, and non-blocking (failures log warnings but don't stop the source agent). All visualization is handled by the SCOPE dashboard at `http://localhost:3000`.
+
+**Audit → Remediate auto-chain:** After scope-audit completes its audit and middleware pipeline, it automatically invokes scope-remediate with the current run's findings. Remediate runs autonomously (no operator gates for remediate) and produces its own artifacts in `./remediate/`. The middleware pipeline then runs again for the remediate output.
 
 ### Pipeline Observability
 
@@ -66,9 +64,8 @@ The middleware pipeline is designed to fail gracefully — each step logs warnin
 
 - If scope-data fails: no normalized JSON. Downstream agents fall back to raw markdown parsing.
 - If scope-evidence fails: no provenance envelopes. Downstream agents use normalized JSON or raw artifacts.
-- If scope-render fails: no HTML dashboards. Raw artifacts and normalized data are still available.
 
-**Detecting failures:** After each run, check for expected output files. If `$RUN_DIR/attack-graph.html` or `$RUN_DIR/dashboard.html` is missing, the pipeline logged a warning during execution. Re-run the pipeline manually by reading the three middleware agents with the same PHASE and RUN_DIR.
+**Detecting failures:** After each run, check for expected output files. If `$RUN_DIR/results.json` is missing, check pipeline warnings. Re-run the pipeline manually by reading the middleware agents with the same PHASE and RUN_DIR.
 
 **Fallback hierarchy:** Every downstream agent (remediate, exploit) implements a three-tier fallback: evidence → normalized data → raw files. The agent always works, but fidelity decreases at each fallback level.
 
@@ -78,19 +75,23 @@ Downstream agents consume upstream output in this priority order:
 
 1. `./evidence/` — **Highest fidelity.** Claim-level provenance, coverage manifests, policy evaluation chains. Use when you need to understand WHY a claim was made and what evidence supports it.
 2. `./data/` — **Structured report data.** Summaries, graph structures, attack path lists. Use when you need WHAT was found but don't need provenance.
-3. `$RUN_DIR/` — **Raw artifacts.** Markdown reports, HTML dashboards, raw JSON. Fallback when normalized data is unavailable. Requires regex parsing.
+3. `$RUN_DIR/` — **Raw artifacts.** Markdown reports, results.json, raw JSON. Fallback when normalized data is unavailable. Requires regex parsing.
 
 Source agents write `$RUN_DIR/evidence.jsonl` during execution — one JSON line per evidence event (API calls, policy evaluations, claims, coverage checks). scope-evidence validates and indexes these into structured envelopes.
 
-## Dashboards
+## Dashboard
 
-Dashboard HTML is generated by `scope-render` as the last step of the post-processing pipeline:
-- scope-audit: `$RUN_DIR/attack-graph.html` — interactive D3 force-directed attack graph
-- scope-remediate: `$RUN_DIR/dashboard.html` — risk matrix, policy coverage, MITRE heatmap
-- scope-exploit: `$RUN_DIR/dashboard.html` — escalation path timelines, circumvention analysis
-- scope-investigate: `$RUN_DIR/dashboard.html` — event timeline, query log (only when analyst saves)
+All visualization is handled by the **SCOPE dashboard** — a React + D3 application at `http://localhost:3000`.
 
-Dashboards are self-contained HTML with inline CSS/JS and D3.js from CDN. Dark theme and severity colors are consistent across all agents. Data is embedded as a JS literal — no server required. Template and rendering logic live in `agents/scope-render.md` — source agents do not generate HTML inline.
+Agents export data as `results.json` to two locations:
+1. **`$RUN_DIR/results.json`** — archived with run artifacts
+2. **`dashboard/public/$RUN_ID.json`** — served to the SCOPE dashboard
+
+The dashboard reads `dashboard/public/index.json` to find the latest run and renders it. Both audit and exploit agents export to the dashboard — the index tracks `source` (audit/exploit) per run.
+
+**Dashboard features:** severity filter toggles, search bar (paths, techniques), sort (severity/steps/name), attack path edge highlighting on the graph, copy-to-clipboard for detections and remediation text, node detail panel (280px slide-out with ARN, MFA, connected edges, associated paths), and run history panel (320px slide-out for switching between past runs).
+
+**No standalone HTML files are generated.** Agents do not produce `attack-graph.html` or `dashboard.html` — all rendering is done by the SCOPE dashboard.
 
 ## Agent Isolation
 

@@ -550,5 +550,5 @@ When a downstream agent needs to consume upstream output, prefer data sources in
 
 1. `./evidence/` — Highest fidelity. Claim-level provenance, coverage manifests, policy evaluation chains. Use when you need to understand WHY a claim was made and what supports it.
 2. `./data/` — Structured report data. Summaries, graph structures, attack path lists. Use when you need WHAT was found but don't need provenance.
-3. `$RUN_DIR/` — Raw artifacts. Markdown reports, HTML dashboards, raw JSON. Fallback when normalized data is unavailable. Requires regex parsing.
+3. `$RUN_DIR/` — Raw artifacts. Markdown reports, results.json, raw JSON. Fallback when normalized data is unavailable. Requires regex parsing.
 </schema_reference>

@@ -6,8 +6,8 @@ Agent communication diagram for the 10-agent SCOPE system.
 
 **Source agents** (slash commands — operator-triggered):
 - `scope-audit` — AWS resource enumeration, attack path discovery
-- `scope-remediate` — SCP/RCP generation from audit findings
-- `scope-exploit` — Privilege escalation playbook generation
+- `scope-remediate` — SCP/RCP generation (auto-called by audit)
+- `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
 - `scope-investigate` — SOC alert investigation via Splunk
 
 **Verification agents** (auto-called during source agent execution):
@@ -18,15 +18,13 @@ Agent communication diagram for the 10-agent SCOPE system.
 **Middleware agents** (auto-called sequential pipeline after artifacts are written):
 - `scope-data` — Raw artifacts → normalized JSON in `./data/`
 - `scope-evidence` — `evidence.jsonl` → provenance envelopes in `./evidence/`
-- `scope-render` — Normalized JSON → HTML dashboards in `$RUN_DIR/`
 
 ## System Flow
 
 ```
   Operator
     │
-    ├── /scope:audit ─────────┐
-    ├── /scope:remediate ─────┤
+    ├── /scope:audit ─────────┐  (auto-chains → remediate)
     ├── /scope:exploit ───────┤     ┌──────────────────────┐
     └── /scope:investigate ───┼────►│   Source Agent        │
                               │     │                      │
@@ -45,9 +43,6 @@ Agent communication diagram for the 10-agent SCOPE system.
                               │     │       │               │
                               │     │       ▼               │
                               │     │  scope-evidence       │
-                              │     │       │               │
-                              │     │       ▼               │
-                              │     │  scope-render         │
                               │     └──────────────────────┘
 ```
 
@@ -70,13 +65,11 @@ Every source agent triggers this chain after writing artifacts:
     ┌──────────────┐       ./evidence/$PHASE/$RUN_ID.json
     │scope-evidence│──────► ./evidence/index.json
     └──────────────┘
-           │ reads: $RUN_DIR/evidence.jsonl
-           │        ./data/$PHASE/$RUN_ID.json
-           ▼
-    ┌─────────────┐        $RUN_DIR/attack-graph.html  (audit)
-    │ scope-render│───────► $RUN_DIR/dashboard.html     (others)
-    └─────────────┘
-             reads: ./data/$PHASE/$RUN_ID.json
+           reads: $RUN_DIR/evidence.jsonl
+                  ./data/$PHASE/$RUN_ID.json
+
+    Visualization: SCOPE dashboard at http://localhost:3000
+                   reads ./data/ and results.json
 ```
 
 Failures are non-blocking — each step logs warnings but never stops the source agent.
@@ -173,13 +166,12 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `evidence.jsonl`, `attack-graph.html` | verify-core → data → evidence → render |
-| **remediate** | `/scope:remediate` | `./audit/` (all runs) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `evidence.jsonl` | verify-core → data → evidence → render |
-| **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `evidence.jsonl` | verify-core → data → evidence → render |
-| **investigate** | `/scope:investigate` | Splunk MCP only | `$RUN_DIR/investigation.md`, `evidence.jsonl` | verify-core → data → evidence → render |
+| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `evidence.jsonl` | verify-core → data → evidence |
+| **remediate** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `evidence.jsonl` | verify-core → data → evidence |
+| **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
+| **investigate** | `/scope:investigate` | Splunk MCP only | `$RUN_DIR/investigation.md`, `evidence.jsonl` | verify-core → data → evidence |
 | **verify-core** | Called by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | verify-aws, verify-splunk |
 | **verify-aws** | Called by verify-core | AWS claims (in-memory) | Validation results (in-memory) | — |
 | **verify-splunk** | Called by verify-core | SPL queries (in-memory) | Validation results (in-memory) | — |
 | **data** | Auto after artifacts | `$RUN_DIR/` raw artifacts | `./data/$PHASE/$RUN_ID.json`, `./data/index.json` | — |
 | **evidence** | Auto after data | `$RUN_DIR/evidence.jsonl`, `./data/` | `./evidence/$PHASE/$RUN_ID.json`, `./evidence/index.json` | — |
-| **render** | Auto after evidence | `./data/$PHASE/$RUN_ID.json` | `$RUN_DIR/*.html` | — |
