@@ -127,6 +127,20 @@ WARNING — HIGH BLAST RADIUS: This SCP denies [action] without a break-glass co
 ```
 
 Classify as `[CONDITIONAL: requires break-glass condition before deployment]`.
+
+### Config-Sourced SCP Validation
+
+SCPs loaded from `config/scps/` (tagged `_source: "config"`) undergo the same structural safety checks above, plus these additional validation rules:
+
+| Check | Rule |
+|-------|------|
+| Version field | Must be `"2012-10-17"` — reject other versions |
+| Statement structure | `Statement` must be an array (not a single object) — SCPs require array format |
+| Targets structure | If `Targets` is present, each entry must have `TargetId` (string) and `Type` (one of `ACCOUNT`, `ORGANIZATIONAL_UNIT`, `ROOT`) |
+| No NotPrincipal | Flag any config SCP using `NotPrincipal` — SCPs do not support `NotPrincipal`. This indicates the config file is not a valid SCP (may be an IAM policy mislabeled as an SCP). |
+| PolicyId format | Should match `p-[a-z0-9]+` pattern. Warn (don't reject) on non-standard format. |
+
+On validation failure: log a warning with the filename and specific failure, skip the invalid SCP, and continue loading remaining files.
 </scp_rcp_safety>
 
 <satisfiability_checks>

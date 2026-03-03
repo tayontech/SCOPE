@@ -1,6 +1,6 @@
 ---
 name: scope-audit
-description: Consolidated AWS audit — enumerate IAM, STS, Lambda, S3, KMS, Secrets Manager, EC2/VPC/EBS/ELB/SSM/VPN. Accepts ARN, service name, --all, or @targets.csv. Produces layered output with attack path analysis. Invoke with /scope:audit <target>.
+description: Consolidated AWS audit — enumerate IAM, STS, Lambda, S3, KMS, Secrets Manager, EC2 (including VPC, EBS, ELB, SSM, VPN). Accepts ARN, service name, --all, or @targets.csv. Produces layered output with attack path analysis. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
 allowed-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
@@ -14,14 +14,14 @@ Given a target (ARN, service name, --all, or @targets.csv), you:
 2. Execute AWS CLI commands to gather service data, confirming each module with the operator (Gate 2 per module)
 3. Summarize enumeration findings and confirm next step (Gate 3)
 4. Reason about privilege escalation paths — both known patterns (Rhino Security, HackTricks) and novel combinations you discover
-5. Present analysis results and confirm graph generation (Gate 4)
+5. Present analysis results and confirm results export (Gate 4)
 6. Produce three-layer output: risk summary, policy details, attack path narratives
 7. Export results.json to `$RUN_DIR/` and `dashboard/public/` for the SCOPE dashboard
 8. Recommend actionable next steps based on findings severity
 
 If AWS credentials are not configured: output the credential error message with remediation options and stop.
 
-**Operator-in-the-loop:** You MUST pause and wait for operator approval before each major step. Never silently chain steps together. The operator controls the pace and can skip, adjust, or stop at any gate.
+**Operator-in-the-loop:** You MUST pause and wait for operator approval at every gate (Gates 2-4). Never silently chain steps together or batch multiple gates into one prompt. Each Gate 2 instance is a separate pause — one per module. The operator controls the pace and can skip, adjust, or stop at any gate.
 
 **Session isolation:** Every audit invocation is a fresh session. Create a unique run directory for all artifacts. Never reference, carry over, or mix data from previous audit runs.
 </role>
@@ -191,9 +191,9 @@ Wait for the operator to respond. Do NOT proceed until they answer. If the opera
 
 ### Gate Checkpoints
 
-**Gate 1 — Identity Confirmed** (after credential_check) — **AUTO-CONTINUE**
+**Gate 1 — Identity Confirmed** (after credential_check) — **AUTO-CONTINUE on success**
 
-Display identity info to the operator but proceed automatically. Do NOT pause or wait for approval.
+Display identity info to the operator and proceed automatically. Do NOT pause for approval. Note: this gate only fires after credential_check succeeds — if credentials are invalid or the API call fails (network error, timeout, etc.), the session stops per credential_check and generic_error_handling rules.
 
 ```
 ---
@@ -272,10 +272,10 @@ Options:
 
 ### Gate Behavior Rules
 
-1. **Always wait (except Gate 1).** Gates 2-4 require operator approval. Gate 1 (Identity Confirmed) displays identity info and auto-continues.
+1. **Always wait (except Gate 1).** Gates 2-4 require explicit operator approval — do NOT proceed until the operator responds. Gate 1 (Identity Confirmed) displays identity info and auto-continues after verifying credentials.
 2. **"skip" is not "stop."** Skip moves to the next gate; stop ends the session entirely.
 3. **Partial output on stop.** If the operator stops mid-session, render all data collected so far using the output format — even if only one module ran.
-4. **Gate 2 repeats.** There is one Gate 2 per module. In `--all` mode with 7 services, the operator sees 7 instances of Gate 2.
+4. **Gate 2 repeats — one pause per module.** There is one Gate 2 per module, each requiring its own operator approval. In `--all` mode with 7 services, the operator approves 7 separate Gate 2 prompts. Do NOT batch multiple modules into a single gate or assume approval carries forward from a previous module.
 5. **Natural language is fine.** The operator doesn't need to type "continue" literally. "yes", "go", "next", "proceed", "do it", "y" all mean continue. "no", "skip that", "pass" mean skip. Interpret intent, not exact keywords.
 6. **Context carries forward.** Each gate can reference findings from previous gates (e.g., Gate 3 references what Gate 2 modules found).
 </operator_gates>
@@ -363,7 +363,9 @@ If input is a plain service name, map directly to the corresponding module:
 - `secrets` or `secretsmanager` -> `<secrets_module>`
 - `sts` -> `<sts_module>`
 - `lambda` -> `<lambda_module>`
-- `ec2`, `vpc`, `ebs`, `ssm`, `elb`, `elbv2` -> `<ec2_module>`
+- `ec2` -> `<ec2_module>` (includes VPC, EBS, ELB/ELBv2, SSM, and VPN subsections)
+
+**Convenience aliases:** `vpc`, `ebs`, `ssm`, `elb`, `elbv2` are accepted as input and silently route to `<ec2_module>`. They are not separate services — they exist so operators can type a familiar name without needing to remember that everything is under `ec2`. The full EC2 module runs regardless of which alias is used.
 
 ### Multiple Inline Targets
 If multiple targets are provided space-separated, process each independently. Example:
@@ -439,6 +441,127 @@ Store the Account ID for use in subsequent enumeration modules.
 **-> GATE 1: Identity Confirmed.** Display the gate and auto-continue to module dispatch. Gate 1 does NOT pause for approval — it displays identity and proceeds immediately.
 </credential_check>
 
+<generic_error_handling>
+## Generic API / Network Error Handling
+
+Not all failures are AWS auth errors. Network timeouts, DNS failures, HTTP 5xx responses, rate limiting (HTTP 429), connection resets, and MCP tool failures can occur at any point during enumeration.
+
+### Detection
+
+If any AWS CLI command or API call returns an error that is NOT one of the credential errors above (NoCredentialsError, ExpiredToken, InvalidClientTokenId, AuthFailure) and is NOT AccessDenied, classify it as a **transient or infrastructure error**.
+
+Common patterns:
+- "Could not connect to the endpoint URL"
+- "Connection was closed before we received a valid response"
+- "Name or service not known" (DNS failure)
+- "Connection timed out"
+- "Throttling" / "Rate exceeded" / HTTP 429
+- "Internal server error" / HTTP 5xx
+- "fetch failed" or similar network-level errors
+- MCP tool returning an error instead of command output
+
+### Response
+
+1. **Log with context:** Always surface the error to the operator with what was being attempted:
+   ```
+   [ERROR] [Module name] — [command that failed]: [full error message]
+   ```
+2. **Do not silently swallow.** The operator must see every non-AccessDenied error, even if execution continues.
+3. **For throttling/rate errors:** Wait 2-5 seconds and retry once. If the retry also fails, log PARTIAL and continue.
+4. **For network/connection errors:** Do NOT retry. Log the error and continue to the next command. If the module's first discovery command fails with a network error, treat it the same as a module-level AccessDenied — log and skip the module.
+5. **Aggregate at gate:** When displaying Gate 3 (Enumeration Complete), include an error summary if any non-AccessDenied errors occurred:
+   ```
+   Errors encountered: [N] commands failed due to network/API errors (not permission-related)
+   ```
+</generic_error_handling>
+
+<account_context>
+## Account Context
+
+After Gate 1 succeeds, load the owned-accounts list from `config/accounts.json` (relative to the SCOPE repo root).
+
+### Loading
+
+1. Read `config/accounts.json`
+2. If the file exists and parses correctly, extract the `accounts` array
+3. Build a lookup set of owned account IDs (the `id` field from each entry)
+4. Add the current caller's account ID to the set (it is always owned)
+5. If the file is missing or empty, the set contains only the caller's account ID — no error, just proceed
+
+### Usage
+
+Throughout enumeration and analysis, use the owned-accounts set to classify external account IDs:
+
+- **Owned account** — account ID is in the set. Cross-account trusts to owned accounts are expected internal behavior.
+- **Unknown external account** — account ID is NOT in the set. Cross-account trusts to unknown accounts are higher risk.
+
+Display the loaded context at Gate 1:
+
+```
+Owned accounts loaded: [N] from config/accounts.json
+  - 123456789012 (production)
+  - 111222333444 (staging)
+  + [caller account ID] (current session)
+```
+
+If no config file: `Owned accounts: 1 (current session only — no config/accounts.json found)`
+</account_context>
+
+<scp_config>
+## SCP Configuration
+
+After loading account context, load pre-configured Service Control Policies from `config/scps/` (relative to the SCOPE repo root). This provides SCP data when the caller lacks Organizations API access.
+
+### Loading
+
+1. Glob `config/scps/*.json`
+2. Skip files with `_` prefix (e.g., `_example.json` is a template)
+3. For each file, parse JSON and validate schema:
+   - **Required:** `PolicyId` (string), `PolicyDocument` (object with `Version` and `Statement`)
+   - **Recommended:** `PolicyName`, `Description`, `Targets` (array of `{TargetId, Name, Type}`)
+   - On parse error or missing required fields: log warning with filename and skip the file
+4. Build a map keyed by `PolicyId` → full SCP object
+5. Tag each loaded SCP with `_source: "config"`
+
+If no config files found (directory missing, empty, or all `_`-prefixed): proceed silently — SCPs will come from live enumeration only.
+
+### Merge Strategy
+
+Config SCPs merge with live-enumerated SCPs using a union strategy:
+
+- **Live enumeration succeeds:** Union config SCPs into the live set. On `PolicyId` collision, the **live version wins** (it's more current). Tag collisions as `_source: "config+live"`, live-only as `_source: "live"`.
+- **Live enumeration denied (AccessDenied on organizations APIs):** Use config SCPs as the full dataset. All remain tagged `_source: "config"`. Log evidence record:
+  ```json
+  {"type": "config_fallback", "detail": "Organizations API denied — using config/scps/ as SCP dataset", "scp_count": N}
+  ```
+- **No config, no live:** No SCP data available. Attack paths report "SCP status unknown" with reduced confidence (existing behavior).
+
+### Gate 1 Display
+
+Display the loaded SCP context alongside owned accounts at Gate 1:
+
+```
+SCPs loaded: [N] from config/scps/
+  - p-FullAWSAccess (FullAWSAccess) → 2 targets
+  - p-DenyRoot (DenyRootActions) → 1 target
+```
+
+If no config SCPs: `SCPs: 0 pre-loaded (no config/scps/ files — will enumerate live)`
+
+### Evidence Logging
+
+Log SCP config loading as an evidence event:
+
+```json
+{"type": "config_load", "source": "config/scps/", "files_found": N, "files_loaded": M, "files_skipped": K, "policy_ids": ["p-xxx", ...]}
+```
+
+On fallback to config-only (live denied):
+
+```json
+{"type": "config_fallback", "detail": "Organizations API denied — using config/scps/ as SCP dataset", "scp_count": N, "policy_ids": ["p-xxx", ...]}
+```
+</scp_config>
 
 <module_dispatch>
 ## Module Dispatch
@@ -461,15 +584,15 @@ Route the parsed input to the appropriate enumeration module(s). No pre-filterin
 
 ### Service Name Aliases
 
-| User Input        | Maps To            |
-|-------------------|--------------------|
-| `secrets`         | `<secrets_module>` |
-| `secretsmanager`  | `<secrets_module>` |
-| `lambda`          | `<lambda_module>`  |
-| `vpc`             | `<ec2_module>`     |
-| `ebs`             | `<ec2_module>`     |
-| `elb`             | `<ec2_module>`     |
-| `elbv2`           | `<ec2_module>`     |
+| User Input        | Maps To            | Note |
+|-------------------|--------------------|------|
+| `secrets`         | `<secrets_module>` | Alias for `secretsmanager` |
+| `secretsmanager`  | `<secrets_module>` | Canonical name |
+| `lambda`          | `<lambda_module>`  | Canonical name |
+| `vpc`             | `<ec2_module>`     | Convenience alias — runs full EC2 module |
+| `ebs`             | `<ec2_module>`     | Convenience alias — runs full EC2 module |
+| `elb`             | `<ec2_module>`     | Convenience alias — runs full EC2 module |
+| `elbv2`           | `<ec2_module>`     | Convenience alias — runs full EC2 module |
 
 ### --all Mode Execution Order
 
@@ -516,7 +639,7 @@ for region in $(aws ec2 describe-regions --query "Regions[].RegionName" --output
     echo "### Sweeping region: $region ###"
     # Run the module's Step 1 (discovery) with --region $region
     # If resources found: run full module analysis for that region
-    # If empty or AccessDenied: skip region silently
+    # If empty: skip region. If AccessDenied: log PARTIAL and skip region.
 done
 ```
 
@@ -827,7 +950,7 @@ From the gold command output, extract and catalog every IAM entity:
 - Check for access keys: `aws iam list-access-keys --user-name <username>`
 
 **Roles:** For each role in `RoleDetailList`:
-- **First, check if `Path` starts with `/aws-service-role/`.** If so, skip this role entirely — service-linked roles are AWS-managed, cannot be modified by customers, and are not valid escalation or lateral movement targets. Increment a `service_linked_roles_skipped` counter. Do NOT create graph nodes, edges, or include in any analysis for skipped roles.
+- **First, check if `RoleName` starts with `AWSServiceRole`.** If so, skip this role entirely — service-linked roles are AWS-managed, cannot be modified by customers, and are not valid escalation or lateral movement targets. Increment a `service_linked_roles_skipped` counter. Do NOT create graph nodes, edges, or include in any analysis for skipped roles.
 - Name, ARN, CreateDate, MaxSessionDuration
 - `AssumeRolePolicyDocument` — the trust policy (WHO can assume this role)
 - `AttachedManagedPolicies` — attached managed policy ARNs
@@ -912,8 +1035,8 @@ For each role in the environment, parse the trust policy (`AssumeRolePolicyDocum
 **Flag dangerous trust configurations:**
 - **Wildcard trust:** `"Principal": "*"` or `"Principal": {"AWS": "*"}` — any AWS principal can assume this role. CRITICAL finding.
 - **Broad account trust:** `"Principal": {"AWS": "arn:aws:iam::ACCOUNT-ID:root"}` — any principal in that account can assume the role. Check if external account.
-- **Cross-account trust:** Trust policy contains a Principal with an account ID different from the current account. Flag as cross-account and note the external account ID.
-- **Missing conditions:** Cross-account trust without `sts:ExternalId` condition — vulnerable to confused deputy attacks.
+- **Cross-account trust:** Trust policy contains a Principal with an account ID different from the current account. If the external account ID is in the owned-accounts set, classify as **internal cross-account** (expected). If NOT in the set, classify as **external cross-account** (flag for review). Note the external account ID in either case.
+- **Missing conditions:** Cross-account trust without `sts:ExternalId` condition — vulnerable to confused deputy attacks (severity adjusted by owned-accounts status; see trust_misconfiguration scoring).
 - **Overly broad conditions:** `StringLike` with wildcards in condition values.
 
 **Build assumption graph:**
@@ -984,7 +1107,7 @@ Construct nodes and edges for the SCOPE dashboard. Use colon-separated IDs match
 
 **Nodes:**
 - Each IAM user: `{id: "user:<name>", label: "<name>", type: "user", mfa: true|false}`
-- Each IAM role (excluding service-linked roles with Path `/aws-service-role/`): `{id: "role:<name>", label: "<name>", type: "role", service_role: true|false}`
+- Each IAM role (excluding service-linked roles where RoleName starts with `AWSServiceRole`): `{id: "role:<name>", label: "<name>", type: "role", service_role: true|false}`
 - Each escalation method found: `{id: "esc:iam:<Action>", label: "<Action>", type: "escalation"}`
 - Each service principal: `{id: "svc:<service>.amazonaws.com", label: "<service>", type: "external"}`
 
@@ -1093,6 +1216,19 @@ aws organizations list-organizational-units-for-parent --parent-id <root-id> --o
 ```
 Map the OU hierarchy to understand which accounts share which SCPs.
 
+**Merge with config SCPs:**
+
+After live SCP enumeration completes (or fails with AccessDenied), merge with pre-loaded config SCPs:
+
+- **Live succeeded:** Union config SCPs by `PolicyId`. On collision, keep the live version (tag `_source: "config+live"`). Config-only SCPs get `_source: "config"`. Live-only get `_source: "live"`.
+- **Live denied:** Use config SCPs as the full dataset (all tagged `_source: "config"`). Log a `config_fallback` evidence record.
+- **Neither available:** Proceed without SCP data — flag "SCP status unknown" during analysis.
+
+Display merged count:
+```
+SCPs: [N] total ([L] live, [C] config-only, [O] merged/collision)
+```
+
 ### Step 4: Cross-Account Role Mapping
 
 Identify roles that can be assumed from external accounts. This is the key lateral movement surface.
@@ -1105,14 +1241,15 @@ aws iam list-roles --output json 2>&1
 ```
 For each role, parse the `AssumeRolePolicyDocument`.
 
-**For each cross-account trust found:**
-1. Note the external account ID from the Principal ARN
+**For each role trust relationship found:**
+1. Note the account ID from the Principal ARN (if applicable)
 2. Note any conditions on the trust (ExternalId, MFA, source IP, etc.)
 3. Note what permissions the role grants (from its attached/inline policies)
 4. Categorize the trust:
    - **Service trust** — trusted by an AWS service (lambda, ec2, etc.)
    - **Same-account trust** — trusted by a principal in the same account
-   - **Cross-account trust** — trusted by a principal in a DIFFERENT account
+   - **Internal cross-account trust** — trusted by a principal in a different account that IS in the owned-accounts set
+   - **External cross-account trust** — trusted by a principal in a different account that is NOT in the owned-accounts set
    - **Wildcard trust** — trusted by `*` or overly broad principal
 
 **Probe cross-account trust paths (non-invasive):**
@@ -1124,7 +1261,7 @@ aws sts assume-role --role-arn <ROLE_ARN> --role-session-name scope-probe 2>&1
 **IMPORTANT:** Do NOT proceed with the assumed credentials. Only check if the assumption succeeds or fails. This confirms whether the trust path is live.
 
 Interpret the result:
-- **Success** — Trust path is live. The caller CAN assume this role. Log the temporary credentials expiration but do not use them. CRITICAL finding.
+- **Success** — Trust path is live. The caller CAN assume this role. Log the temporary credentials expiration but do not use them. Severity follows trust-misconfiguration scoring rules (see Part 6A) — use owned-accounts context to determine whether this is CRITICAL, HIGH, MEDIUM, or LOW.
 - **AccessDenied** — Trust exists in the policy but conditions are not met (ExternalId required, MFA required, source IP restriction, etc.). Note the specific condition that blocked it.
 - **MalformedPolicyDocument** — Trust policy has syntax errors. Note for reporting.
 - **RegionDisabledException** — Role is in a disabled region. Note for completeness.
@@ -1148,12 +1285,13 @@ This reveals the full authorization context including which policy denied the ac
 Add STS-specific nodes and edges to the SCOPE dashboard graph:
 
 **Nodes:**
-- External account IDs discovered: `{id: "ext:arn:aws:iam::<account-id>:root", label: "Account <id>", type: "external"}`
+- Owned external accounts (in owned-accounts set): `{id: "ext:arn:aws:iam::<account-id>:root", label: "<name> (<id>)", type: "external", owned: true}`
+- Unknown external accounts (NOT in owned-accounts set): `{id: "ext:arn:aws:iam::<account-id>:root", label: "External <id>", type: "external", owned: false}`
 - Organization master account: `{id: "ext:arn:aws:iam::<master-id>:root", label: "Org Master", type: "external"}`
 
 **Edges:**
 - Cross-account trust: `{source: "ext:arn:aws:iam::<external-id>:root", target: "role:<role-name>", trust_type: "cross-account"}`
-- Verified assumption (caller can assume): `{source: "user:<caller>", target: "role:<role-name>", trust_type: "same-account"}` (or `edge_type: "priv_esc"` if the role is high-privilege)
+- Verified assumption (caller can assume): `{source: "<principal_type>:<caller>", target: "role:<role-name>", trust_type: "same-account"}` (or `edge_type: "priv_esc"` if the role is high-privilege). Use the caller's principal type from Gate 1: `user:<name>` for IAM users, `role:<role-name>` for assumed roles, `user:<federated-name>` for federated users, `user:root` for root. Match the source node type to the actual caller identity — do not hardcode `user:`.
 
 **Cross-reference with IAM module:** If both modules run, merge the graph data:
 - Connect external account nodes to the roles they can assume
@@ -1311,6 +1449,23 @@ aws s3api get-bucket-versioning --bucket BUCKET_NAME --output json 2>&1
 ```
 If versioning is enabled, previous object versions may contain old credentials or sensitive data even if the current version has been cleaned.
 
+### Step 4b: S3 Event Notification Discovery (Service Integration Edges)
+
+For each bucket, check for Lambda trigger configurations that create implicit service-to-service data flows:
+
+```bash
+aws s3api get-bucket-notification-configuration --bucket BUCKET_NAME --output json 2>&1
+```
+
+For each `LambdaFunctionConfiguration` found in the response, extract the Lambda function ARN from `LambdaFunctionArn`. These triggers mean that an `s3:PutObject` event on this bucket automatically invokes the connected Lambda function — a critical attack chain link: writing to a trigger bucket = code execution via Lambda.
+
+**Emit service integration edges:**
+- For each Lambda trigger: `{source: "data:s3:BUCKET_NAME", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access", access_level: "write", label: "s3_trigger"}` — S3 event notification triggers Lambda execution. The `access_level` is "write" because the trigger passes event data that the function processes.
+
+**Attack chain significance:** If a principal has s3:PutObject on a trigger bucket, they can indirectly execute code via the triggered Lambda function. The function then runs with its execution role's permissions — follow the `exec_role` edge to determine the blast radius. This is one of the most commonly overlooked escalation paths.
+
+If `get-bucket-notification-configuration` returns AccessDenied: log "PARTIAL: Could not read notification configuration for bucket [BUCKET_NAME] — AccessDenied" and continue. If no Lambda triggers are found, skip edge creation for this bucket.
+
 ### Step 5: Build Graph Data
 
 Construct nodes and edges for the SCOPE dashboard:
@@ -1319,9 +1474,14 @@ Construct nodes and edges for the SCOPE dashboard:
 - Each bucket: `{id: "data:s3:BUCKET_NAME", label: "BUCKET_NAME", type: "data"}`
 
 **Edges:**
-- IAM-based access: `{source: "user:<name>", target: "data:s3:BUCKET_NAME", edge_type: "data_access"}` or `{source: "role:<name>", target: "data:s3:BUCKET_NAME", edge_type: "data_access"}` — connect IAM principals that have S3 permissions to the buckets they can access
-- Public access: `{source: "ext:internet", target: "data:s3:BUCKET_NAME", edge_type: "data_access"}` — for publicly accessible buckets
+- IAM-based access: `{source: "user:<name>", target: "data:s3:BUCKET_NAME", edge_type: "data_access", access_level: "read|write|admin"}` or `{source: "role:<name>", target: "data:s3:BUCKET_NAME", edge_type: "data_access", access_level: "read|write|admin"}` — connect IAM principals that have S3 permissions to the buckets they can access
+- Public access: `{source: "ext:internet", target: "data:s3:BUCKET_NAME", edge_type: "data_access", access_level: "read|write|admin"}` — for publicly accessible buckets
 - Cross-account access: `{source: "ext:arn:aws:iam::<external-id>:root", target: "data:s3:BUCKET_NAME", trust_type: "cross-account"}` — for cross-account bucket policy grants
+
+**access_level classification for S3:**
+- `"read"` — principal has only s3:Get* and/or s3:List* actions (e.g., s3:GetObject, s3:ListBucket)
+- `"write"` — principal has s3:Put* and/or s3:Delete* actions (e.g., s3:PutObject, s3:DeleteObject)
+- `"admin"` — principal has s3:* (full S3 access) or a combination of read + write + management actions (s3:PutBucketPolicy, s3:PutBucketAcl)
 
 **Error handling reminder:** Every per-bucket AWS CLI call MUST be wrapped with error handling. On AccessDenied or any error:
 1. Log: "PARTIAL: Could not read [operation] for bucket [BUCKET_NAME] — [error message]"
@@ -1472,9 +1632,14 @@ Construct nodes and edges for the SCOPE dashboard:
 - Each customer-managed key: `{id: "data:kms:KEY_ID", label: "KMS: KEY_DESCRIPTION or KEY_ID", type: "data"}`
 
 **Edges:**
-- Key policy/IAM access: `{source: "user:<name>", target: "data:kms:KEY_ID", edge_type: "data_access"}` or `{source: "role:<name>", target: "data:kms:KEY_ID", edge_type: "data_access"}`
-- Grant-based access: `{source: "role:<grantee>", target: "data:kms:KEY_ID", edge_type: "data_access"}` — grants bypass IAM, note in attack paths
-- Encryption dependency: `{source: "data:kms:KEY_ID", target: "data:s3:BUCKET_NAME", edge_type: "data_access"}` — connects keys to resources they encrypt
+- Key policy/IAM access: `{source: "user:<name>", target: "data:kms:KEY_ID", edge_type: "data_access", access_level: "read|write|admin"}` or `{source: "role:<name>", target: "data:kms:KEY_ID", edge_type: "data_access", access_level: "read|write|admin"}`
+- Grant-based access: `{source: "role:<grantee>", target: "data:kms:KEY_ID", edge_type: "data_access", access_level: "read|write|admin"}` — grants bypass IAM, note in attack paths
+- Encryption dependency: `{source: "data:kms:KEY_ID", target: "data:s3:BUCKET_NAME", edge_type: "data_access", access_level: "read"}` — connects keys to resources they encrypt
+
+**access_level classification for KMS:**
+- `"read"` — principal has only kms:Decrypt, kms:DescribeKey, kms:ListGrants (consume encrypted data)
+- `"write"` — principal has kms:Encrypt, kms:GenerateDataKey, kms:CreateGrant (create encrypted data or delegate access)
+- `"admin"` — principal has kms:* or kms:PutKeyPolicy (full key control, can lock out other principals)
 
 **Error handling:** On AccessDenied or any error for a specific key:
 1. Log: "PARTIAL: Could not read [policy/grants] for key [KEY_ID] — [error message]"
@@ -1613,8 +1778,13 @@ Construct nodes and edges for the SCOPE dashboard:
 
 **Edges:**
 - Cross-account resource policy: `{source: "ext:arn:aws:iam::<external-id>:root", target: "data:secrets:SECRET_NAME", trust_type: "cross-account"}`
-- IAM-based access: `{source: "user:<name>", target: "data:secrets:SECRET_NAME", edge_type: "data_access"}` or `{source: "role:<name>", target: "data:secrets:SECRET_NAME", edge_type: "data_access"}`
-- KMS dependency: `{source: "data:kms:KEY_ID", target: "data:secrets:SECRET_NAME", edge_type: "data_access"}` — link secrets to their encryption keys
+- IAM-based access: `{source: "user:<name>", target: "data:secrets:SECRET_NAME", edge_type: "data_access", access_level: "read|write|admin"}` or `{source: "role:<name>", target: "data:secrets:SECRET_NAME", edge_type: "data_access", access_level: "read|write|admin"}`
+- KMS dependency: `{source: "data:kms:KEY_ID", target: "data:secrets:SECRET_NAME", edge_type: "data_access", access_level: "read"}` — link secrets to their encryption keys
+
+**access_level classification for Secrets Manager:**
+- `"read"` — principal has only secretsmanager:GetSecretValue, secretsmanager:DescribeSecret, secretsmanager:ListSecrets
+- `"write"` — principal has secretsmanager:PutSecretValue, secretsmanager:UpdateSecret, secretsmanager:CreateSecret
+- `"admin"` — principal has secretsmanager:* or secretsmanager:DeleteSecret + secretsmanager:PutResourcePolicy (full secret control)
 
 **Error handling:** On AccessDenied or any error for a specific secret:
 1. Log: "PARTIAL: Could not read [description/policy/value] for secret [SECRET_NAME] — [error message]"
@@ -1748,10 +1918,20 @@ After analyzing resource policies and execution roles, **recursively follow the 
 - Each function: `{id: "data:lambda:FUNCTION_NAME", label: "FUNCTION_NAME", type: "data"}`
 
 **Edges:**
-- Execution role: `{source: "data:lambda:FUNCTION_NAME", target: "role:ROLE_NAME", trust_type: "service"}` — connects function to its execution role
+- Execution role: `{source: "data:lambda:FUNCTION_NAME", target: "role:ROLE_NAME", trust_type: "service", label: "exec_role"}` — connects function to its execution role. For reachability: compromise function = get role permissions.
 - Resource policy (external): `{source: "ext:arn:aws:iam::EXTERNAL_ID:root", target: "data:lambda:FUNCTION_NAME", trust_type: "cross-account"}`
-- Resource policy (public): `{source: "ext:internet", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access"}`
+- Resource policy (public): `{source: "ext:internet", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access", access_level: "read"}`
 - Code injection vector: `{source: "user:ATTACKER", target: "data:lambda:FUNCTION_NAME", edge_type: "priv_esc", severity: "critical"}` — if principal has `lambda:UpdateFunctionCode` on a function with admin role
+- Lambda invoke: `{source: "user:<name>", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access", access_level: "read"}` or `{source: "role:<name>", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access", access_level: "read"}` — principals that can invoke the function
+- Lambda code modification: `{source: "user:<name>", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access", access_level: "write"}` — principals with lambda:UpdateFunctionCode or lambda:UpdateFunctionConfiguration
+
+**access_level classification for Lambda:**
+- `"read"` — principal can only lambda:InvokeFunction (execute existing code)
+- `"write"` — principal has lambda:UpdateFunctionCode or lambda:UpdateFunctionConfiguration (modify function behavior)
+
+**Service integration edges (from event source mappings and environment variable references):**
+- Event source → Lambda: `{source: "data:EVENT_SOURCE_SERVICE:EVENT_SOURCE_ID", target: "data:lambda:FUNCTION_NAME", edge_type: "data_access", access_level: "write", label: "triggers"}` — for each event source mapping discovered in Step 5 (SQS queues, DynamoDB streams, Kinesis streams, etc.). The event source triggers Lambda execution, making the function a downstream consumer.
+- Lambda → Secrets/SSM (environment variable references): If the function's environment variables reference Secrets Manager ARNs or SSM parameter names AND the execution role has the corresponding read permissions (secretsmanager:GetSecretValue or ssm:GetParameter), emit: `{source: "data:lambda:FUNCTION_NAME", target: "data:secrets:SECRET_NAME", edge_type: "data_access", access_level: "read", label: "env_ref"}` or `{source: "data:lambda:FUNCTION_NAME", target: "data:ssm:PARAM_NAME", edge_type: "data_access", access_level: "read", label: "env_ref"}`. Only emit these edges when the execution role's permissions confirm the function can actually access the referenced secret/parameter.
 
 **Error handling:** On AccessDenied or any error for a specific function:
 1. Log: `"PARTIAL: Could not read [configuration/policy/code] for function [FUNCTION_NAME] — [error message]"`
@@ -2056,9 +2236,15 @@ Construct nodes and edges for the SCOPE dashboard across all sub-sections:
 Note: Security groups, VPCs, and load balancers are infrastructure context — include them in findings but do NOT add them as graph nodes. The graph focuses on principals, escalation methods, and data stores to avoid visual clutter.
 
 **Edges:**
-- Instance profile linkage: `{source: "data:ec2:INSTANCE_ID", target: "role:ROLE_NAME", trust_type: "service"}` — connects instances to their IAM roles
-- Internet exposure (instance with sensitive role): `{source: "ext:internet", target: "data:ec2:INSTANCE_ID", edge_type: "data_access"}` — for instances reachable from internet with high-privilege roles
+- Instance profile linkage: `{source: "data:ec2:INSTANCE_ID", target: "role:ROLE_NAME", trust_type: "service", label: "instance_profile"}` — connects instances to their IAM roles. For reachability: compromise instance = get role permissions (same pattern as Lambda exec_role).
+- Internet exposure (instance with sensitive role): `{source: "ext:internet", target: "data:ec2:INSTANCE_ID", edge_type: "data_access", access_level: "read"}` — for instances reachable from internet with high-privilege roles
 - SSM command vector: `{source: "user:ATTACKER", target: "data:ec2:INSTANCE_ID", edge_type: "priv_esc", severity: "high"}` — if principal has ssm:SendCommand on instance with admin role
+- SSM parameter access: `{source: "role:<name>", target: "data:ssm:PARAM_NAME", edge_type: "data_access", access_level: "read|write|admin"}` — roles with ssm:GetParameter/PutParameter permissions
+
+**access_level classification for EC2/SSM:**
+- `"read"` — principal has ssm:GetParameter, ssm:DescribeInstanceInformation, ec2:Describe* (observe but not modify)
+- `"write"` — principal has ssm:PutParameter, ssm:SendCommand, ec2:RunInstances (modify state or execute commands)
+- `"admin"` — principal has ssm:* or ec2:* with broad resource scope
 
 **Error handling:** Every AWS CLI call in this module MUST be wrapped with error handling. On AccessDenied or any error:
 1. Log: "PARTIAL: Could not read [operation] for [resource] — [error message]"
@@ -2072,7 +2258,7 @@ Note: Security groups, VPCs, and load balancers are infrastructure context — i
 
 After completing enumeration across all modules, systematically work through this reasoning process. Read the enumeration data collected above, then apply each part in order to identify, validate, and score every viable privilege escalation path.
 
-**Service-linked role exclusion:** Roles with Path `/aws-service-role/` (service-linked roles) are excluded from analysis. They are not valid escalation targets, lateral movement pivots, or trust chain endpoints. They were already filtered during IAM enumeration in Step 2.
+**Service-linked role exclusion:** Roles where RoleName starts with `AWSServiceRole` (service-linked roles) are excluded from analysis. They are not valid escalation targets, lateral movement pivots, or trust chain endpoints. They were already filtered during IAM enumeration in Step 2.
 
 **Attack path focus:**
 
@@ -2092,7 +2278,12 @@ Any explicit `Deny` in ANY policy (identity, resource, SCP, RCP, boundary, sessi
 If the account is in AWS Organizations (detected by STS module org enumeration), check if RCPs restrict what resources allow. If no Allow in applicable RCPs, result is Deny. Query: `aws organizations list-policies --filter RESOURCE_CONTROL_POLICY`. RCPs are a 2024 AWS feature -- many organizations have not deployed them yet. If org access was denied during STS enumeration, flag as "RCP status unknown -- confidence reduced."
 
 **Step 3 -- Service Control Policies (SCPs):**
-If in Organizations, check if SCPs restrict what principals can do. If no Allow in applicable SCPs, result is Deny. Query: `aws organizations list-policies --filter SERVICE_CONTROL_POLICY`. If org access was denied during STS enumeration, flag as "SCP status unknown -- confidence reduced." SCPs do NOT affect the management account -- if the target is in the management account, SCPs do not apply.
+If in Organizations, check if SCPs restrict what principals can do. If no Allow in applicable SCPs, result is Deny. Query: `aws organizations list-policies --filter SERVICE_CONTROL_POLICY`. SCPs do NOT affect the management account -- if the target is in the management account, SCPs do not apply.
+
+Confidence tiers by SCP data source:
+- **Live SCPs** (`_source: "live"` or `"config+live"`): Full confidence — data is current from the Organizations API.
+- **Config-only SCPs** (`_source: "config"`): Apply a **-5% confidence penalty** to paths where this SCP is the sole basis for an allow/deny determination. Config data may be stale.
+- **No SCP data available** (neither live nor config): Flag as "SCP status unknown -- confidence reduced" (existing behavior).
 
 **Step 4 -- Resource-Based Policies:**
 For most services, a resource-based policy provides UNION with identity policy (either can independently allow access). EXCEPTIONS that require explicit allow in the resource-based policy:
@@ -2122,6 +2313,16 @@ If all checks pass -> ALLOWED
 ```
 
 Apply this template for EVERY required permission in EVERY escalation method below. Do not skip steps. If any step cannot be verified (e.g., SCP data unavailable), note it in the confidence score.
+
+**Blocked edge annotation:** When the 7-step policy evaluation determines that an SCP, RCP, or permission boundary blocks a permission that would otherwise be allowed by identity/resource policy, the graph edge is still created but annotated as blocked:
+
+```json
+{"source": "user:alice", "target": "esc:iam:CreatePolicyVersion",
+ "edge_type": "priv_esc", "severity": "critical",
+ "blocked": true, "blocked_by": "SCP: DenyIAMPolicyModification"}
+```
+
+This preserves the edge in the graph for visibility (the permission was granted but is currently neutralized) while preventing reachability traversal from following it. The `blocked_by` value identifies the specific control: `"SCP: <policy-name>"`, `"RCP: <policy-name>"`, or `"Boundary: <boundary-policy-name>"`. If multiple controls block the same edge, use the first one encountered in the 7-step evaluation order.
 
 ---
 
@@ -2387,7 +2588,6 @@ After checking the known patterns above, actively look for these less-documented
 **Instruction for novel discovery:** After checking all patterns above, reason about unusual permission groupings that do not match known patterns but could enable escalation. Look for:
 - Permissions that seem unrelated but combine to create an escalation path
 - Write access to resources consumed by automated processes with higher privileges
-- Service-linked roles with overly broad trust policies
 - Deprecated service integrations that still grant access
 - Tag-based access control with tag mutation permissions (`tag:TagResource` + tag-conditioned admin policies)
 This is the core differentiator from static tools. Static tools check a fixed list of rules. You reason about combinations.
@@ -2504,6 +2704,8 @@ Score every discovered attack path using both dimensions. These scores determine
 | **50-69%** | Permission present in policy, but resource-based policy and boundary not confirmed. Partial enumeration data. | Report as "likely viable" with explicit gaps |
 | **Below 50%** | Insufficient data to confirm the path. Too many unknowns. | Do NOT report as a finding. Note as "potential but unverified" in an appendix section |
 
+**Config SCP confidence adjustment:** When SCP data comes exclusively from `config/scps/` (no live enumeration), apply a 5% confidence penalty to any path where the SCP allow/deny determination is material. Rationale: config SCPs may be stale (policies updated since export, targets changed). A 5% penalty reflects this uncertainty while still being far more useful than "SCP status unknown" — config SCPs provide structural insight even if slightly outdated.
+
 **Important:** Exploitability and confidence are independent dimensions. A path can be CRITICAL exploitability but only 65% confidence (e.g., CreatePolicyVersion exists in identity policy but boundary status unknown). A path can be LOW exploitability but 95% confidence (e.g., theoretical chain but all components verified to exist).
 
 **Confidence weighting:**
@@ -2595,10 +2797,19 @@ After completing privilege escalation analysis and MITRE mapping, convert enumer
 #### 6A: Trust Misconfigurations (`trust_misconfiguration`)
 
 For each finding from IAM/STS enumeration:
-- **Wildcard trust (Principal: `"*"`)** → CRITICAL. Name: "Wildcard Trust on {role}". Steps: show `aws sts assume-role` command. Detection: CloudTrail AssumeRole for that role.
-- **Broad account root trust (Principal: `arn:aws:iam::ACCT:root`)** on a high-privilege role → HIGH. Name: "Broad Account Trust on {role}". Steps: show assume-role from any identity in the account.
-- **Cross-account trust without `sts:ExternalId` condition** → HIGH. Name: "Cross-Account Trust Without ExternalId on {role}". Steps: show confused deputy scenario.
-- **Cross-account trust without MFA condition on sensitive role** → MEDIUM. Name: "Cross-Account Trust Without MFA on {role}".
+- **Wildcard trust (Principal: `"*"` or `{"AWS": "*"}`)** → CRITICAL. Name: "Wildcard Trust on {role}". Steps: show `aws sts assume-role` command. Detection: CloudTrail AssumeRole for that role.
+- **Broad account root trust (Principal: `arn:aws:iam::ACCT:root`)** on a high-privilege role:
+  - If the trusting account is in owned-accounts set → MEDIUM (internal cross-account, expected but worth noting). Name: "Internal Cross-Account Trust on {role}".
+  - If the trusting account is NOT in owned-accounts set → HIGH (unknown external account). Name: "Broad Account Trust on {role}". Steps: show assume-role from any identity in the account.
+- **Broad account root trust (Principal: `arn:aws:iam::ACCT:root`)** on a non-high-privilege role:
+  - If the trusting account is in owned-accounts set → LOW (internal cross-account on a limited role).
+  - If the trusting account is NOT in owned-accounts set → MEDIUM (unknown external account, but role has limited permissions). Name: "External Account Trust on {role}". Steps: show assume-role from any identity in the account.
+- **Cross-account trust without `sts:ExternalId` condition:**
+  - If owned account → LOW (confused deputy is not a risk between your own accounts). Name: "Cross-Account Trust Without ExternalId on {role} (internal)".
+  - If unknown external → HIGH (confused deputy vulnerability). Name: "Cross-Account Trust Without ExternalId on {role}". Steps: show confused deputy scenario.
+- **Cross-account trust without MFA condition on sensitive role:**
+  - If owned account → LOW. Name: "Cross-Account Trust Without MFA on {role} (internal)".
+  - If unknown external → MEDIUM. Name: "Cross-Account Trust Without MFA on {role}".
 
 MITRE: T1078.004 (Valid Accounts: Cloud Accounts).
 
@@ -2772,6 +2983,105 @@ After analyzing persistence capabilities, evaluate what **post-exploitation acti
 
 ---
 
+### Part 9: Reachability Analysis (Assume-Breach Blast Radius)
+
+After Parts 1-8 have identified individual attack paths, Part 9 walks the full graph transitively from each principal to compute the complete blast radius under an assume-breach model. This answers: "If principal X is compromised, what can an attacker ultimately reach?"
+
+#### Scope
+
+- **`--all` mode:** Compute reachability for every principal (user and role) in the account.
+- **Specific ARN mode:** Compute reachability for the targeted principal(s) plus any roles they can transitively assume.
+
+#### Traversal Rules (BFS from each principal)
+
+For each principal, run a breadth-first search following these edge types in order. Maintain a `visited` set of node IDs for cycle detection — never visit the same node twice in a single principal's traversal.
+
+**Rule 1 — Trust edges (role assumption):**
+Follow `trust_type: "same-account"` and `trust_type: "cross-account"` edges. When a role is reached via a trust edge, assume that role and continue the walk with the role's outgoing edges. Add the role to `reachable_roles`.
+
+**Rule 2 — Service trust edges (compute → role):**
+Follow `trust_type: "service"` edges from compute nodes (Lambda functions, EC2 instances) to their IAM roles (edges with `label: "exec_role"` or `label: "instance_profile"`). Compromising the compute resource grants the attached role's permissions. Add the role to `reachable_roles` and continue the walk as that role.
+
+**Rule 3 — Privilege escalation edges:**
+Follow `edge_type: "priv_esc"` edges. Record the escalation method. If the escalation method is admin-equivalent (e.g., iam:CreatePolicyVersion, iam:AttachUserPolicy with AdministratorAccess, iam:PutUserPolicy with Action:*), set `max_privilege = "admin"` for this principal.
+
+**Rule 4 — Data access edges:**
+Follow `edge_type: "data_access"` edges. Record the data store node in `reachable_data` with the edge's `access_level`. If a data store has outgoing edges (e.g., an S3 bucket with `s3_trigger` edges to Lambda functions), continue the traversal through those edges — this captures chains like "write to S3 → trigger Lambda → get Lambda exec role → access secrets."
+
+**Rule 5 — Service integration edges:**
+Follow edges with labels `"s3_trigger"`, `"triggers"`, `"env_ref"`, `"exec_role"`, and `"instance_profile"`. These represent implicit service-to-service data flows:
+- `s3_trigger`: S3 event notification → Lambda (s3:PutObject = indirect code execution)
+- `triggers`: Event source mapping → Lambda (SQS/DynamoDB/Kinesis → function invocation)
+- `env_ref`: Lambda → Secrets Manager/SSM (function reads secrets at runtime)
+- `exec_role` / `instance_profile`: Compute → IAM role (function/instance runs as role)
+
+**Rule 6 — Blocked edges (DO NOT traverse):**
+Edges with `blocked: true` are NOT followed during traversal. Instead, record them in the principal's `blocked_paths` array with the full edge details including `blocked_by`. These represent paths that exist in policy but are currently neutralized by SCPs, RCPs, or permission boundaries. They are valuable for defenders to understand what would become reachable if a control were removed.
+
+**Rule 7 — Cycle detection:**
+Maintain a `visited` set of node IDs per principal traversal. When an edge leads to an already-visited node, skip it. This prevents infinite loops in graphs with mutual trust relationships or circular service integrations.
+
+#### Critical Path Identification
+
+After completing BFS for a principal, flag chains as **critical** if any of the following conditions are met:
+- **Admin through indirection:** The chain reaches `max_privilege: "admin"` through 2 or more hops (not direct admin attachment)
+- **Cross-boundary escalation:** The chain crosses a service boundary (e.g., Lambda → IAM role) or account boundary (cross-account trust)
+- **Secrets/PII reachable:** The chain reaches data stores of type `data:secrets:*`, `data:ssm:*`, or S3 buckets flagged with sensitive file patterns
+- **Trigger chains:** The chain includes a service integration edge (s3_trigger, triggers) — these are commonly overlooked paths
+
+For each critical path, record the full chain as an ordered list of edges with a human-readable description.
+
+#### Per-Principal Output
+
+For each principal, produce a `reachability` object:
+
+```json
+{
+  "reachable_roles": ["role:AdminRole", "role:DataProcessorRole"],
+  "reachable_data": [
+    {"id": "data:s3:prod-bucket", "access_level": "admin"},
+    {"id": "data:secrets:db-credentials", "access_level": "read"},
+    {"id": "data:lambda:data-processor", "access_level": "write"}
+  ],
+  "max_privilege": "admin",
+  "hop_count": 4,
+  "critical_paths": [
+    {
+      "chain": ["user:alice", "role:DevRole", "data:lambda:deployer", "role:AdminRole"],
+      "description": "alice → assume DevRole → invoke Lambda deployer → exec role AdminRole (admin equivalent)",
+      "reason": "admin_through_indirection"
+    }
+  ],
+  "blocked_paths": [
+    {
+      "source": "user:alice",
+      "target": "esc:iam:CreatePolicyVersion",
+      "edge_type": "priv_esc",
+      "blocked_by": "SCP: DenyIAMPolicyModification"
+    }
+  ]
+}
+```
+
+**Field definitions:**
+- `reachable_roles` — all roles transitively assumable from this principal (direct trust + indirect via compute)
+- `reachable_data` — all data store nodes reachable with the maximum `access_level` observed across all paths to that store
+- `max_privilege` — the highest privilege level reachable: `"admin"` (can escalate to full account control), `"write"` (can modify resources), `"read"` (can only observe), or `"none"` (no outgoing edges)
+- `hop_count` — the maximum BFS depth reached from this principal (measures lateral distance)
+- `critical_paths` — multi-hop chains that meet the critical path criteria above, with full chain and human-readable description
+- `blocked_paths` — edges that exist in policy but are blocked by SCPs/RCPs/boundaries, with `blocked_by` attribution
+
+#### Performance Guardrail
+
+For graphs with **500+ nodes**, limit full reachability computation to:
+1. High-risk principals — those flagged with `risk_flags` containing `"admin_equivalent"`, `"no_mfa"`, `"wildcard_trust"`, `"broad_account_trust"`, or `"console_access"`
+2. Explicitly targeted ARNs (from the operator's input)
+3. Principals with `priv_esc` outgoing edges
+
+For remaining principals in large graphs, compute only `max_privilege` and `hop_count` (1-hop BFS) without full path enumeration. Note in the summary: "Full reachability computed for N of M principals (large graph mode)."
+
+---
+
 #### Populating results.json with categories
 
 When building the `attack_paths` array in results.json:
@@ -2782,8 +3092,13 @@ When building the `attack_paths` array in results.json:
 5. Populate `summary.paths_by_category` with counts per category
 6. Populate `principals` array from Step 2 (Parse IAM State) + Step 3 (Resolve Effective Permissions) data — one entry per user and per role with their policies, MFA status, trust info, and risk flags
 7. Populate `trust_relationships` array from trust policy analysis — one entry per trust relationship with wildcard status, external ID check, and risk level
+8. Populate `reachability` object on each principal entry from Part 9 output — reachable_roles, reachable_data, max_privilege, hop_count, critical_paths, blocked_paths
+9. Populate `summary.reachability` with aggregate reachability stats — principals_with_admin_reach, principals_with_data_reach, max_blast_radius_principal, max_blast_radius_nodes, avg_hop_count, blocked_paths_total
 
-**-> GATE 4: Analysis Complete.** After finishing attack path reasoning, display Gate 4 with the count of paths by severity AND by category. Wait for operator approval before generating results.json. If operator says "skip", produce text-only output — the findings.md report is still written, but the results.json export and dashboard export are skipped.
+**-> GATE 4: Analysis Complete.** After finishing attack path reasoning (including Part 9 reachability), display Gate 4 with:
+- Count of paths by severity AND by category
+- **Reachability highlights:** number of principals with admin reach, the highest blast-radius principal (name + reachable node count), and total blocked paths
+Wait for operator approval before generating results.json. If operator says "skip", produce text-only output — the findings.md report is still written, but the results.json export and dashboard export are skipped.
 </attack_path_reasoning>
 
 <results_export>
@@ -2808,7 +3123,8 @@ Build the results object from ALL enumeration module graph data + attack path re
 - Module `edge_type: "trust"` with cross-account → `trust_type: "cross-account"`
 - Module `edge_type: "trust"` with service → `trust_type: "service"`
 - Escalation method links → `edge_type: "priv_esc"` with `severity`
-- Module `edge_type: "data_access"`, `"key_access"`, `"grant_access"` → `edge_type: "data_access"`
+- Module `edge_type: "data_access"`, `"key_access"`, `"grant_access"` → `edge_type: "data_access"`. Preserve `access_level` if present on the source edge; default to `"read"` if unset. Preserve `label` if present (e.g., `"s3_trigger"`, `"exec_role"`, `"triggers"`, `"env_ref"`).
+- Edges with `blocked: true` → preserve `blocked` and `blocked_by` fields. Dashboard renders these as dashed gray lines with a lock icon. Older dashboards that don't recognize these fields will ignore them gracefully.
 - Everything else (membership, policy, instance_profile, network, etc.) → no `edge_type` (renders as normal gray)
 
 The data structure:
@@ -2818,6 +3134,10 @@ The data structure:
   "account_id": "123456789012",
   "region": "us-east-1",
   "timestamp": "2026-03-02T...",
+  "owned_accounts": [
+    { "id": "123456789012", "name": "production" },
+    { "id": "111222333444", "name": "staging" }
+  ],
   "summary": {
     "total_users": 0, "total_roles": 0, "total_policies": 0,
     "total_trust_relationships": 0, "critical_priv_esc_risks": 0,
@@ -2834,6 +3154,14 @@ The data structure:
       "persistence": 0,
       "post_exploitation": 0,
       "lateral_movement": 0
+    },
+    "reachability": {
+      "principals_with_admin_reach": 0,
+      "principals_with_data_reach": 0,
+      "max_blast_radius_principal": "user:alice",
+      "max_blast_radius_nodes": 0,
+      "avg_hop_count": 0,
+      "blocked_paths_total": 0
     }
   },
   "graph": {
@@ -2842,12 +3170,13 @@ The data structure:
       { "id": "role:AdminRole", "label": "AdminRole", "type": "role", "service_role": false },
       { "id": "esc:iam:CreatePolicyVersion", "label": "CreatePolicyVersion", "type": "escalation" },
       { "id": "data:s3:prod-bucket", "label": "prod-bucket", "type": "data" },
-      { "id": "ext:arn:aws:iam::999888777666:root", "label": "External Acct", "type": "external" }
+      { "id": "ext:arn:aws:iam::999888777666:root", "label": "External 999888777666", "type": "external", "owned": false }
     ],
     "edges": [
       { "source": "user:alice", "target": "role:AdminRole", "trust_type": "same-account" },
-      { "source": "user:alice", "target": "esc:iam:CreatePolicyVersion", "edge_type": "priv_esc", "severity": "critical" },
-      { "source": "role:AdminRole", "target": "data:s3:prod-bucket", "edge_type": "data_access" },
+      { "source": "user:alice", "target": "esc:iam:CreatePolicyVersion", "edge_type": "priv_esc", "severity": "critical", "blocked": true, "blocked_by": "SCP: DenyIAMPolicyModification" },
+      { "source": "role:AdminRole", "target": "data:s3:prod-bucket", "edge_type": "data_access", "access_level": "admin" },
+      { "source": "data:s3:prod-bucket", "target": "data:lambda:data-processor", "edge_type": "data_access", "access_level": "write", "label": "s3_trigger" },
       { "source": "ext:arn:aws:iam::999888777666:root", "target": "role:AuditRole", "trust_type": "cross-account" }
     ]
   },
@@ -2869,10 +3198,10 @@ The data structure:
       ]
     },
     {
-      "name": "Wildcard Trust on AdminRole",
-      "severity": "critical",
+      "name": "Broad Account Trust on AdminRole",
+      "severity": "high",
       "category": "trust_misconfiguration",
-      "description": "role/AdminRole trusts any principal in the account (Principal: root). Any compromised identity can assume admin.",
+      "description": "role/AdminRole trusts any principal in account 999888777666 (Principal: arn:aws:iam::999888777666:root). Any identity in that account can assume admin.",
       "steps": ["aws sts assume-role --role-arn arn:aws:iam::123456789012:role/AdminRole --role-session-name abuse"],
       "mitre_techniques": ["T1078.004"],
       "affected_resources": ["role:AdminRole"],
@@ -2891,17 +3220,53 @@ The data structure:
       "groups": ["Developers", "ReadOnly"],
       "attached_policies": ["AmazonS3FullAccess"],
       "has_boundary": false,
-      "risk_flags": ["no_mfa", "console_access"]
+      "risk_flags": ["no_mfa", "console_access"],
+      "reachability": {
+        "reachable_roles": ["role:AdminRole", "role:DataProcessorRole"],
+        "reachable_data": [
+          {"id": "data:s3:prod-bucket", "access_level": "admin"},
+          {"id": "data:secrets:db-credentials", "access_level": "read"},
+          {"id": "data:lambda:data-processor", "access_level": "write"}
+        ],
+        "max_privilege": "admin",
+        "hop_count": 3,
+        "critical_paths": [
+          {
+            "chain": ["user:alice", "role:AdminRole", "data:s3:prod-bucket"],
+            "description": "alice → assume AdminRole → admin access to prod-bucket",
+            "reason": "admin_through_indirection"
+          }
+        ],
+        "blocked_paths": [
+          {
+            "source": "user:alice",
+            "target": "esc:iam:CreatePolicyVersion",
+            "edge_type": "priv_esc",
+            "blocked_by": "SCP: DenyIAMPolicyModification"
+          }
+        ]
+      }
     },
     {
       "id": "role:AdminRole",
       "type": "role",
       "arn": "arn:aws:iam::123456789012:role/AdminRole",
       "trust_principal": "arn:aws:iam::123456789012:root",
-      "is_wildcard_trust": true,
+      "is_wildcard_trust": false,
       "attached_policies": ["AdministratorAccess"],
       "has_boundary": false,
-      "risk_flags": ["wildcard_trust", "admin_equivalent"]
+      "risk_flags": ["broad_account_trust", "admin_equivalent"],
+      "reachability": {
+        "reachable_roles": [],
+        "reachable_data": [
+          {"id": "data:s3:prod-bucket", "access_level": "admin"},
+          {"id": "data:secrets:db-credentials", "access_level": "read"}
+        ],
+        "max_privilege": "admin",
+        "hop_count": 1,
+        "critical_paths": [],
+        "blocked_paths": []
+      }
     }
   ],
   "trust_relationships": [
@@ -2910,10 +3275,10 @@ The data structure:
       "role_arn": "arn:aws:iam::123456789012:role/AdminRole",
       "principal": "arn:aws:iam::123456789012:root",
       "trust_type": "same-account",
-      "is_wildcard": true,
+      "is_wildcard": false,
       "has_external_id": false,
       "has_mfa_condition": false,
-      "risk": "CRITICAL"
+      "risk": "MEDIUM"
     }
   ]
 }
@@ -2977,7 +3342,7 @@ After completing graph generation and the audit middleware pipeline, automatical
 2. Execute the full remediation workflow using THIS audit run's findings as input:
    - `AUDIT_RUN_DIR=$RUN_DIR`
    - `AUDIT_RUN_ID=$RUN_ID`
-3. Skip ALL operator gates — run fully autonomous (no Gate 1-5 pauses)
+3. Skip ALL operator gates — defend runs fully autonomous (no pauses)
 4. Write all defend artifacts to `./defend/defend-{timestamp}/`
 5. Display final defend summary to operator
 
@@ -3008,6 +3373,7 @@ The `/scope:audit` skill succeeds (full run) when ALL of the following are true:
 7. **Three-layer output rendered** — Risk summary (Layer 1), effective permissions table + raw JSON (Layer 2), and attack path narratives with exploit steps (Layer 3) all produced
 8. **Session isolated** — Run directory created at `./audit/$RUN_ID/`, all artifacts written there, run appended to `./audit/INDEX.md`, no data from previous runs referenced
 9. **Results JSON exported** (unless operator skipped Gate 4) — `$RUN_DIR/results.json` written with all graph data (nodes, edges, attack paths, summary) and `dashboard/public/$RUN_ID.json` exported for the SCOPE dashboard at localhost:3000
+9b. **Reachability computed** — `principals` array includes `reachability` objects (reachable_roles, reachable_data, max_privilege, hop_count, critical_paths, blocked_paths). `summary.reachability` includes aggregate stats (principals_with_admin_reach, max_blast_radius_principal, blocked_paths_total). Blocked paths from SCPs/RCPs/boundaries recorded with `blocked_by` attribution.
 10. **Findings report saved** — Full three-layer output written to `$RUN_DIR/findings.md`
 11. **Next action recommended** — Contextual recommendation based on findings severity provided to operator
 12. **Defensive controls auto-generated** — Defend workflow automatically invoked after audit completes, producing SCPs/RCPs, security controls, SPL detections, and prioritized defensive control plans

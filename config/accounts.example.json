@@ -1,0 +1,7 @@
+{
+  "_note": "List AWS accounts owned by your organization. Used by scope-audit to distinguish internal cross-account trusts from external ones.",
+  "accounts": [
+    { "id": "123456789012", "name": "example-production" },
+    { "id": "111222333444", "name": "example-staging" }
+  ]
+}

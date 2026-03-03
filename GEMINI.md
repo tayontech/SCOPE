@@ -16,13 +16,13 @@ In Gemini CLI, skills use dollar-sign prefix with hyphens (not colons):
 ## Agents
 
 ```
-scope-audit.md         AWS audit (slash command)
-scope-defend.md        Defensive controls generation (auto-called by scope-audit)
-scope-exploit.md       Privilege escalation playbooks (slash command)
-scope-investigate.md   SOC alert investigation (slash command)
-scope-verify-core.md   Core verification — claim ledger, taxonomy, cross-agent consistency (auto-called)
-scope-verify-aws.md    AWS verification — API, IAM, SCP/RCP, attack path satisfiability (auto-called)
-scope-verify-splunk.md Splunk verification — SPL lints, field validation, rerun recipes (auto-called)
-scope-data.md          Data normalization middleware (auto-called)
-scope-evidence.md      Evidence provenance middleware (auto-called)
+agents/scope-audit.md         AWS audit (slash command)
+agents/scope-defend.md        Defensive controls generation (auto-called by scope-audit)
+agents/scope-exploit.md       Privilege escalation playbooks (slash command)
+agents/scope-investigate.md   SOC alert investigation (slash command)
+agents/scope-verify-core.md   Core verification — claim ledger, taxonomy, cross-agent consistency (auto-called)
+agents/scope-verify-aws.md    AWS verification — API, IAM, SCP/RCP, attack path satisfiability (auto-called)
+agents/scope-verify-splunk.md Splunk verification — SPL lints, field validation, rerun recipes (auto-called)
+agents/scope-data.md          Data normalization middleware (auto-called)
+agents/scope-evidence.md      Evidence provenance middleware (auto-called)
 ```

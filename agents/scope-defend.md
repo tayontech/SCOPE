@@ -98,7 +98,7 @@ Every defend invocation is an independent session. Results from different defend
 
 ### Run Directory
 
-At the start of every defend run (after audit intake, before gate 1), create a unique run directory:
+At the start of every defend run (after audit intake, before any processing), create a unique run directory:
 
 ```bash
 # Generate run ID from timestamp
@@ -204,7 +204,7 @@ When AUDIT_RUN_DIR is not set, fall back to scanning all prior audit runs. This 
 Before checking normalized data, check if evidence data exists — it provides claim-level provenance and coverage information.
 
 1. Check if `./evidence/index.json` exists
-2. If it exists, filter for entries where `phase == "audit"`. If entries span multiple `account_id` values, warn the operator and list the distinct accounts — mixing unrelated accounts in one defend run produces incoherent policies. If an engagement directory is active, further filter to runs whose `run_dir` is under the current engagement path.
+2. If it exists, filter for entries where `phase == "audit"`. If entries span multiple `account_id` values, warn the operator and list the distinct accounts — mixing unrelated accounts in one defend run produces incoherent policies. If an engagement directory is active, further filter to runs whose `source_run_dir` is under the current engagement path.
 3. For each matching audit run, read `./evidence/audit/<run-id>.json`
 4. Extract claims with `confidence_reasoning` and `source_evidence_ids` — these tell you WHY each finding was asserted and what API calls support it
 5. Use `policy_evaluations` for permission attribution — the full 7-step evaluation chain

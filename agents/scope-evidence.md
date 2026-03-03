@@ -427,6 +427,7 @@ Add a new entry to the `runs` array:
   "phase": "string",
   "timestamp": "ISO8601",
   "status": "complete | partial | failed",
+  "account_id": "<from source run envelope or 'unknown'>",
   "evidence_file": "./evidence/<PHASE>/<RUN_ID>.json",
   "data_file": "./data/<PHASE>/<RUN_ID>.json",
   "source_run_dir": "string",
@@ -523,6 +524,7 @@ Each entry in `./evidence/index.json` `runs` array:
 | phase | string | yes | Matches envelope phase |
 | timestamp | string | yes | ISO8601 of evidence indexing |
 | status | string | yes | Matches envelope status |
+| account_id | string | yes | AWS account ID or "unknown" |
 | evidence_file | string | yes | Relative path to the evidence JSON file |
 | data_file | string | yes | Relative path to the scope-data JSON file |
 | source_run_dir | string | yes | Path to the original run directory |

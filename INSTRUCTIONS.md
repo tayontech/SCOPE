@@ -45,21 +45,21 @@ bin/
 
 | Command | Description |
 |---------|-------------|
-| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name (iam/s3/kms/secrets/sts/lambda/ec2), `--all` for full account audit, or `@targets.csv` for bulk targets. Auto-chains to defensive controls generation. |
+| `/scope:audit <target> [<target> ...]` | Enumerate AWS resources — accepts ARN, service name (`iam`, `s3`, `kms`, `secrets`, `sts`, `lambda`, `ec2`), `--all` for full account audit, `@targets.csv` for bulk targets, or multiple services inline (e.g., `iam s3 kms`). The `ec2` service includes VPC, EBS, ELB/ELBv2, SSM, and VPN enumeration. Auto-chains to defensive controls generation. |
 | `/scope:exploit <arn>` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `/scope:investigate` | Splunk MCP threat hunting — timeline building, IOC correlation, detection verification |
+| `/scope:investigate` | SOC alert investigation via Splunk — step-by-step guided queries, timeline building, IOC correlation |
 | `/scope:help` | List available commands, show usage examples, and link to documentation. Implemented by editors reading `commands/help.md` — not an agent file. |
 
 ## Data Layer
 
 Two middleware agents run automatically as a post-processing pipeline after audit, exploit, and defend write artifacts:
 
-1. **scope-data** — reads raw markdown/HTML artifacts, writes normalized JSON to `./data/<phase>/<run-id>.json`, maintains `./data/index.json`
+1. **scope-data** — reads raw agent artifacts (prefers `results.json`, falls back to markdown), writes normalized JSON to `./data/<phase>/<run-id>.json`, maintains `./data/index.json`
 2. **scope-evidence** — reads `$RUN_DIR/evidence.jsonl`, validates provenance chains, writes evidence envelopes to `./evidence/<phase>/<run-id>.json`, maintains `./evidence/index.json`
 
-Neither is a slash command. Both are auto-called, sequential, and non-blocking (failures log warnings but don't stop the source agent). **Investigate does not run this pipeline** — it produces `investigation.md` and `evidence.jsonl` directly (no middleware normalization) and maintains its own `./investigate/context.json` for cross-investigation learning. All visualization is handled by the SCOPE dashboard at `http://localhost:3000`.
+Neither is a slash command. Both are auto-called, sequential, and non-blocking (failures log warnings but don't stop the source agent). **Investigate does not run this pipeline** — if the analyst chooses to save, it writes `investigation.md` and `evidence.jsonl` to the run directory (no middleware normalization). `./investigate/context.json` is always updated for cross-investigation learning, regardless of save choice. All visualization is handled by the SCOPE dashboard at `http://localhost:3000`.
 
-**Audit → Defend auto-chain:** After scope-audit completes its audit and middleware pipeline, it automatically invokes scope-defend with the current run's findings. Defend runs autonomously (no operator gates for defend) and produces its own artifacts in `./defend/`. The middleware pipeline then runs again for the defend output.
+**Audit → Defend auto-chain:** After scope-audit completes its audit and middleware pipeline, it automatically invokes scope-defend with the current run's findings. Defend chains after any non-stopped audit completion — including when the operator skips export at Gate 4 (defend reads findings.md and enumeration data, not results.json). Defend runs autonomously — no enumeration gates (Gates 2-4) since it only reads audit output and writes remediation artifacts, never makes AWS API calls. It produces its own artifacts in `./defend/`. The middleware pipeline then runs again for the defend output.
 
 ### Pipeline Observability
 
@@ -68,7 +68,12 @@ The middleware pipeline is designed to fail gracefully — each step logs warnin
 - If scope-data fails: no normalized JSON. Downstream agents fall back to raw markdown parsing.
 - If scope-evidence fails: no provenance envelopes. Downstream agents use normalized JSON or raw artifacts.
 
-**Detecting failures:** After an audit, exploit, or defend run, check for expected output files. If `$RUN_DIR/results.json` is missing, check pipeline warnings. Re-run the pipeline manually by reading the middleware agents with the same PHASE and RUN_DIR. (Investigate runs do not produce `results.json` — check for `investigation.md` instead.)
+**Detecting failures:** After an audit, exploit, or defend run, check for expected output files. `$RUN_DIR/results.json` is produced by the source agent (audit/exploit/defend), not the pipeline. If it's missing, check the run context before assuming failure — some agents have intentional no-export paths:
+- **Exploit:** Zero-path results stop at Gate 3 with no playbook or results export. The operator can also say "stop" at Gate 4 to end before writing, or "skip" to display without saving. All three are intentional no-export paths. Check for `playbook.md` — if absent, check whether the run stopped at Gate 3 (zero findings) or Gate 4 (operator declined).
+- **Audit:** If the operator says "skip" at Gate 4, the findings.md report is written but results.json and dashboard export are intentionally skipped. The defend auto-chain still runs (it reads findings.md, not results.json). Check for `findings.md` to confirm the audit itself completed.
+- **Defend:** Always produces results.json on successful completion. If missing, the agent failed.
+
+If `./data/<phase>/<run-id>.json` or `./evidence/<phase>/<run-id>.json` is missing, check pipeline warnings — the middleware failed. Re-run the pipeline manually by reading the middleware agents with the same PHASE and RUN_DIR. (Investigate runs do not produce `results.json` — check for `investigation.md` instead.)
 
 **Fallback hierarchy:** Downstream agents (defend, exploit) implement a three-tier fallback: evidence → normalized data → raw files. The agent always works, but fidelity decreases at each fallback level.
 
@@ -80,7 +85,7 @@ Downstream agents consume upstream output in this priority order:
 2. `./data/` — **Structured report data.** Summaries, graph structures, attack path lists. Use when you need WHAT was found but don't need provenance.
 3. `$RUN_DIR/` — **Raw artifacts.** Markdown reports, results.json, raw JSON. Fallback when normalized data is unavailable. Requires regex parsing.
 
-Source agents write `$RUN_DIR/evidence.jsonl` during execution — one JSON line per evidence event (API calls, policy evaluations, claims, coverage checks). scope-evidence validates and indexes these into structured envelopes.
+Audit, exploit, and defend write `$RUN_DIR/evidence.jsonl` during execution — one JSON line per evidence event (API calls, policy evaluations, claims, coverage checks). scope-evidence validates and indexes these into structured envelopes. Investigate accumulates evidence in memory and flushes to disk only when the analyst saves.
 
 ## Dashboard
 
@@ -92,7 +97,7 @@ Three agents (audit, exploit, defend) export data as `results.json` to two locat
 
 Investigate does not export results.json — it produces a markdown determination (`investigation.md`) only.
 
-The dashboard reads `dashboard/public/index.json` to find the latest run and renders it. The index tracks `source` (audit/exploit/defend) per run. The dashboard auto-detects the phase and renders the appropriate view.
+The dashboard reads `dashboard/public/index.json` to find the latest run and renders it. If `index.json` is missing or has no `latest` entry, the dashboard falls back to loading `dashboard/public/results.json` directly. The index tracks `source` (audit/exploit/defend) per run. The dashboard auto-detects the phase and renders the appropriate view.
 
 **Dashboard features:** Phase tab bar (Audit, Exploit, Defend) with auto-detection from data source. **Audit/Exploit view:** severity filter toggles, category filter toggles (9 categories), search bar, sort (severity/steps/name), clickable stat cards with slide-out detail panel, attack graph with edge highlighting, node detail panel, copy-to-clipboard. **Defend view:** policy viewer (collapsible SCP/RCP cards with JSON syntax coloring, blast-radius badges, impact analysis), detection rules list (grouped by category with MITRE links), controls matrix (card grid with priority/effort badges), prioritization sidebar. **Run history:** phase-colored badges, auto-phase-switch on run selection, backwards compatibility (missing `source` defaults to "audit").
 
@@ -126,6 +131,17 @@ Agents can optionally run inside an engagement directory (`./engagements/<name>/
 
 Engagement directories are created manually by the operator before running agents. There is no engagement manifest or automated creation — v2 will add engagement orchestration.
 
+## Configuration Files
+
+The `config/` directory holds optional pre-loaded data that agents use when live enumeration is unavailable or incomplete.
+
+| File | Purpose | Consuming Agent |
+|------|---------|-----------------|
+| `config/accounts.json` | Owned AWS account IDs — distinguishes internal cross-account trusts from external ones. Copy `accounts.example.json` and fill in real IDs. | scope-audit |
+| `config/scps/*.json` | Pre-loaded Service Control Policies — provides SCP data when the caller lacks Organizations API access. Files prefixed with `_` are templates (skipped by loader). | scope-audit (loading + merge), scope-verify-aws (validation) |
+
+All config files are optional and gitignored (they contain environment-specific data). Example/template files are tracked. Without config files, agents fall back to live enumeration only (with reduced confidence where data is missing). See `config/scps/README.md` for SCP file format and sourcing instructions.
+
 ## v2 Deferred
 
 Full engagement orchestration (engage, detect, teardown, status) is planned for v2. See project roadmap for details.
@@ -134,7 +150,7 @@ Full engagement orchestration (engage, detect, teardown, status) is planned for 
 
 SCOPE inherits credentials from the shell environment — AWS_PROFILE, AWS_ACCESS_KEY_ID, or any mechanism boto3/AWS CLI picks up. No custom credential loading.
 
-Do NOT add a separate credential validation step before the workflow begins. The first AWS API call (sts:GetCallerIdentity in Gate 1) serves as the credential check. On failure, output this template:
+Do NOT add a separate credential validation step before the workflow begins. The first AWS API call (`sts:GetCallerIdentity`, run during audit's Gate 1 — the auto-continue identity verification step) serves as the credential check. On failure, output this template:
 
 ```
 AWS credential error: [error message]
@@ -146,6 +162,8 @@ To fix:
 ```
 
 ## Approval Gate Pattern
+
+Standard SCOPE agent workflows (audit, defend, investigate, exploit) are read-only — they enumerate, analyze, and generate artifacts but do not create, modify, or delete AWS resources. The approval gate below applies only when an operator explicitly directs a write operation (e.g., deploying a generated SCP). Exploit generates playbooks with write commands but does not execute them.
 
 Before ANY destructive AWS operation (resource creation, modification, or deletion):
 
@@ -164,6 +182,7 @@ Rules:
 - Per-step approval — never batch multiple destructive operations
 - On N: log "Skipped: [action] — denied by user" and continue with next step
 - On Y: proceed, then log the action and CloudTrail events to expect
+- **Agent-specific override:** scope-exploit prohibits CloudTrail event names in all output (detection analysis belongs to scope-defend and scope-investigate). This override takes precedence — exploit does not log expected CloudTrail events even for approved operations.
 
 ## Key Pitfalls to Avoid
 
@@ -184,7 +203,7 @@ Rules:
 ## Error Handling
 
 Stop and report on unexpected AWS errors:
-- API throttled → report, do not retry silently
+- API throttled → log the error visibly, retry once after 2-5 seconds. If the retry also fails, report and continue with partial results. Never retry silently — the operator must see every throttle event.
 - Permission denied (unexpected) → report with context (what was attempted, what permission is needed)
 - Resource limit hit → report and suggest cleanup
 - Any AWS CLI error → surface full error message, not just a summary

@@ -17,8 +17,9 @@ SCOPE — Security Cloud Ops Purple Engagement
 
 Available commands:
 
-  /scope:audit <target>     Enumerate AWS resources and discover attack paths
-                            Accepts: ARN, service name, --all, @targets.csv
+  /scope:audit <target> [<target> ...]
+                            Enumerate AWS resources and discover attack paths
+                            Accepts: ARN, service name, --all, @targets.csv, or multiple services inline
                             Auto-generates defensive controls (SCPs, detections, prioritized plan)
 
   /scope:exploit <arn>      Generate privilege escalation playbooks

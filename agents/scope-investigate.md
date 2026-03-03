@@ -51,8 +51,8 @@ This step is automatic and mandatory. Do not skip it. Do not present verificatio
 <evidence_protocol>
 ## Evidence Logging Protocol
 
-During execution, maintain a structured evidence log at `$RUN_DIR/evidence.jsonl`.
-Append one JSON line per evidence event. Note: for investigate, evidence logging begins only if the analyst chooses to save artifacts (since RUN_DIR is created at save time).
+During execution, accumulate evidence entries in memory following the schema below.
+If the analyst chooses to save, flush all accumulated entries to `$RUN_DIR/evidence.jsonl` (one JSON line per entry) during the save flow. Since RUN_DIR is created at save time, no file I/O occurs until then.
 
 ### When to log
 1. Every Splunk query execution — immediately after return
@@ -1146,7 +1146,11 @@ Section 3: Queries Run appendix — a list of every SPL query executed during th
 
 Include skipped steps in the appendix with a note that they were skipped.
 
-**3. Update INDEX.md:**
+**3. Write evidence.jsonl:**
+
+Flush all accumulated evidence entries to `$RUN_DIR/evidence.jsonl`, one JSON line per entry. This includes every `api_call` and `claim` record accumulated during the session. If no evidence was accumulated, write an empty file.
+
+**4. Update INDEX.md:**
 
 Append to `./investigate/INDEX.md`. If the file does not exist, create it with the header:
 
@@ -1181,11 +1185,11 @@ Read `./investigate/index.json`, parse the `runs` array, upsert by `run_id`, wri
 
 **Note:** Investigate does NOT run the scope-data/scope-evidence post-processing pipeline. Those middleware agents process audit, exploit, and defend output only. Investigation artifacts are self-contained in `$RUN_DIR/`.
 
-**4. Post-investigation learning:**
+**5. Post-investigation learning:**
 
 After writing artifacts, run the post-investigation learning pipeline per `<post_investigation_learning>`. This extracts environmental knowledge from the `investigation_findings` accumulator (in-memory) and updates `./investigate/context.json`. The learning pipeline includes an analyst review step — the analyst can correct classifications before the context write.
 
-**5. Confirm save:**
+**6. Confirm save:**
 
 ```
 Saved to: ./investigate/investigate-YYYYMMDD-HHMMSS/
@@ -1287,7 +1291,7 @@ After review (or if analyst says "no — save as-is"), apply the updates to `./i
 
 ### Learning Failure Handling
 
-If context.json write fails, log a warning and continue. Learning must never block the investigation completion flow. The investigation artifacts are already saved at this point.
+If context.json write fails, log a warning and continue. Learning must never block the investigation completion flow. If the analyst chose to save, investigation artifacts are already written at this point; if not, results remain in the conversation only.
 </post_investigation_learning>
 
 

@@ -1,6 +1,6 @@
 # SCOPE Architecture
 
-Agent communication diagram for the 10-agent SCOPE system.
+Agent communication diagram for the 9-agent SCOPE system.
 
 ## Agent Overview
 
@@ -62,7 +62,7 @@ Agent communication diagram for the 10-agent SCOPE system.
 
 ## Post-Processing Pipeline
 
-Source agents (audit, exploit, defend) trigger this chain after writing artifacts. Investigate is standalone and does not run the post-processing pipeline — it produces investigation.md only.
+Source agents (audit, exploit, defend) trigger this chain after writing artifacts. Investigate is standalone and does not run the post-processing pipeline — if the analyst saves, it writes `investigation.md` and `evidence.jsonl` to the run directory. `./investigate/context.json` is always updated regardless of save choice.
 
 ```
   $RUN_DIR/findings.md          ./data/$PHASE/$RUN_ID.json
@@ -82,7 +82,7 @@ Source agents (audit, exploit, defend) trigger this chain after writing artifact
                   ./data/$PHASE/$RUN_ID.json
 
     Visualization: SCOPE dashboard at http://localhost:3000
-                   reads ./data/ and results.json
+                   reads dashboard/public/index.json + $RUN_ID.json
 ```
 
 Failures are non-blocking — each step logs warnings but never stops the source agent.
@@ -170,7 +170,7 @@ Downstream agents consume upstream output in this priority order:
   │    Summaries, graphs, attack paths          │  WHAT was found
   ├─────────────────────────────────────────────┤
   │ 3. $RUN_DIR/ (raw artifacts)                │  Fallback
-  │    Markdown, HTML, raw JSON                 │  Requires regex parsing
+  │    Markdown, raw JSON                       │  Requires regex parsing
   └─────────────────────────────────────────────┘
 
   Fallback: if evidence missing → use data → if data missing → parse raw
@@ -180,8 +180,8 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `evidence.jsonl` | verify-core → data → evidence |
-| **defend** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run, auto) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `evidence.jsonl` | verify-core → data → evidence |
+| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
+| **defend** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run, auto) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
 | **investigate** | `/scope:investigate` | Splunk MCP, `./investigate/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/evidence.jsonl` (if saved), `./investigate/context.json` | verify-core (standalone — no post-processing pipeline) |
 | **verify-core** | Called by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | verify-aws, verify-splunk |

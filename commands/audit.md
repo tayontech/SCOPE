@@ -5,14 +5,14 @@ Enumerate AWS resources, map permissions, and discover attack paths.
 ## Synopsis
 
 ```
-/scope:audit <target>
+/scope:audit <target> [<target> ...]
 ```
 
 ## Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<target>` | Yes | ARN, service name (`iam`, `s3`, `kms`, `secrets`, `sts`, `lambda`, `ec2`), `--all`, or `@targets.csv` |
+| `<target>` | Yes (at least one) | ARN, service name (`iam`, `s3`, `kms`, `secrets`, `sts`, `lambda`, `ec2`), `--all`, or `@targets.csv`. Multiple targets can be space-separated. The `ec2` service includes VPC, EBS, ELB/ELBv2, SSM, and VPN enumeration. |
 
 ## Examples
 
@@ -21,6 +21,7 @@ Enumerate AWS resources, map permissions, and discover attack paths.
 /scope:audit iam                                      # All IAM principals
 /scope:audit arn:aws:iam::123456789012:user/alice     # Specific principal
 /scope:audit @targets.csv                             # Bulk targets from CSV
+/scope:audit iam s3 kms                               # Multiple services inline
 ```
 
 ## Gate Flow
@@ -28,13 +29,13 @@ Enumerate AWS resources, map permissions, and discover attack paths.
 1. **Gate 1** — Identity display (auto-continues, no pause)
 2. **Gate 2** — Pre-module enumeration approval (per module)
 3. **Gate 3** — Enumeration complete, confirm analysis
-4. **Gate 4** — Analysis complete, confirm results export (skip = text-only output)
+4. **Gate 4** — Analysis complete, confirm results export (skip = no results.json or dashboard export, findings.md still written)
 
-The operator can say "stop" at any gate to end the session early. A stopped run produces partial output — whatever was collected up to that point. The defend auto-chain only runs after a full (non-stopped) completion.
+The operator can say **"stop"** at any gate to end the session early. A stopped run produces partial output — whatever was collected up to that point. **"Skip" at Gate 4 is not a stop** — the audit completed successfully, only the JSON export is declined. The defend auto-chain runs after any non-stopped completion, including Gate 4 skip.
 
 ## Defend Auto-Chain
 
-After the audit completes (findings, attack graph, results.json), the defend workflow runs automatically:
+After the audit completes (findings and attack path analysis), the defend workflow runs automatically. Defend runs regardless of Gate 4 skip — it reads findings.md and enumeration data, not results.json.
 
 - **Fully autonomous** — no operator gates, no pauses
 - Reads only the current audit run's findings (not all prior runs)
@@ -62,6 +63,7 @@ The operator reviews the final combined output (audit findings + defensive plan)
 | Technical remediation | `$DEFEND_RUN_DIR/technical-remediation.md` | scope-defend | Full engineer-facing plan with SCP/RCP, controls, detections |
 | SCP policies | `$DEFEND_RUN_DIR/policies/scp-*.json` | scope-defend | Deployable SCP JSON files |
 | RCP policies | `$DEFEND_RUN_DIR/policies/rcp-*.json` | scope-defend | Deployable RCP JSON files |
+| Results JSON | `$DEFEND_RUN_DIR/results.json` | scope-defend | Structured data for SCOPE dashboard — defensive controls, policy summaries |
 | Evidence log | `$DEFEND_RUN_DIR/evidence.jsonl` | scope-defend | Structured evidence log (claims, coverage) |
 
 All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. No standalone HTML files are generated.

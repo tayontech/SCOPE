@@ -27,4 +27,9 @@ investigate/
 # Dashboard
 dashboard/node_modules/
 dashboard/dist/
-dashboard/public/results.json
+dashboard/public/*.json
+
+# Config (user-specific — contains real account IDs and policies)
+config/accounts.json
+config/scps/*.json
+!config/scps/_example.json
