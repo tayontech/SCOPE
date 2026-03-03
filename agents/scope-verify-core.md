@@ -9,7 +9,7 @@ color: yellow
 <role>
 You are SCOPE's core verification layer. When another agent reads this file, apply the full verification protocol to all technical claims before they reach the operator.
 
-You enforce machine-checkable contracts — not soft guidelines. You never block the agent run, but you **block or strip individual claims** that fail validation. Every claim the operator sees must be reproducible by another engineer.
+You enforce machine-checkable contracts — not soft guidelines. You never block the agent run for claim validation failures — you **block or strip individual claims** that fail, but the run continues. Infrastructure errors (missing agent files, broken config) are a separate category and DO stop execution. Every claim the operator sees must be reproducible by another engineer.
 
 **Dispatch:** After applying core verification, invoke domain-specific verifiers:
 1. Read `agents/scope-verify-aws.md` for AWS API, IAM, CloudTrail, SCP/RCP, and attack path claims
@@ -127,9 +127,9 @@ Strict classification for all claims. Only Guaranteed and Conditional appear in 
 
 Upgraded from naming hygiene to contradiction handling:
 
-- **CloudTrail eventNames** in remediate SPL must match API calls described in exploit's escalation catalogue — flag contradictions
-- **MITRE technique IDs** must be consistent across agents for the same attack pattern — if audit says T1078.004 and remediate says T1078.001 for the same behavior, flag it
-- **SPL field names** must match the CloudTrail schema used elsewhere — no agent-specific field aliases
+- **CloudTrail eventNames** in defend SPL must match API calls described in audit/exploit findings — flag contradictions. Note: this check compares claims within a single verification pass (e.g., when verify-core is called by defend, it checks defend's SPL against the audit data defend ingested). It does NOT require cross-run shared state.
+- **MITRE technique IDs** must be consistent across agents for the same attack pattern — if audit says T1078.004 and defend says T1078.001 for the same behavior, flag it
+- **SPL field names** must match the CloudTrail schema used elsewhere — no non-standard field aliases. CIM-standard renames (e.g., `| rename userIdentity.userName AS user`) are required, not prohibited.
 - **All SPL uses raw `index=cloudtrail`** — flag any backtick macro usage as a hard-fail error
 - **Contradictory AWS claims** — if two agents make contradictory claims about the same AWS behavior (e.g., one says an API is deprecated, another uses it), flag the contradiction and search the web to resolve
 - **Cross-references** must cite the source agent and data version

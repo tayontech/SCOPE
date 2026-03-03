@@ -20,10 +20,11 @@ engagements/
 data/
 evidence/
 audit/
-remediate/
+defend/
 exploit/
 investigate/
 
 # Dashboard
 dashboard/node_modules/
+dashboard/dist/
 dashboard/public/results.json

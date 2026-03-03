@@ -6,9 +6,11 @@ Agent communication diagram for the 10-agent SCOPE system.
 
 **Source agents** (slash commands — operator-triggered):
 - `scope-audit` — AWS resource enumeration, attack path discovery
-- `scope-remediate` — SCP/RCP generation (auto-called by audit)
 - `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
 - `scope-investigate` — SOC alert investigation via Splunk
+
+**Auto-chained agents** (triggered by source agents, not operator-invoked):
+- `scope-defend` — Defensive controls generation (auto-called by audit after enumeration)
 
 **Verification agents** (auto-called during source agent execution):
 - `scope-verify-core` — Claim ledger, taxonomy, cross-agent consistency
@@ -24,36 +26,47 @@ Agent communication diagram for the 10-agent SCOPE system.
 ```
   Operator
     │
-    ├── /scope:audit ─────────┐  (auto-chains → remediate)
+    ├── /scope:audit ─────────┐  (auto-chains → defend)
     ├── /scope:exploit ───────┤     ┌──────────────────────┐
-    └── /scope:investigate ───┼────►│   Source Agent        │
-                              │     │                      │
-                              │     │  1. Enumerate / Analyze
-                              │     │  2. Call verify-core ─┼──► Verification
-                              │     │  3. Write artifacts   │    (see below)
-                              │     │  4. Write evidence.jsonl
-                              │     └──────────┬───────────┘
-                              │                │
-                              │                ▼
-                              │     ┌──────────────────────┐
-                              │     │  Post-Processing      │
-                              │     │  Pipeline (sequential) │
-                              │     │                      │
-                              │     │  scope-data           │
-                              │     │       │               │
-                              │     │       ▼               │
-                              │     │  scope-evidence       │
-                              │     └──────────────────────┘
+    │                         └────►│   Source Agent        │
+    │                               │                      │
+    │                               │  1. Enumerate / Analyze
+    │                               │  2. Call verify-core ─┼──► Verification
+    │                               │  3. Write artifacts   │    (see below)
+    │                               │  4. Write evidence.jsonl
+    │                               └──────────┬───────────┘
+    │                                          │
+    │                                          ▼
+    │                               ┌──────────────────────┐
+    │                               │  Post-Processing      │
+    │                               │  Pipeline (sequential) │
+    │                               │                      │
+    │                               │  scope-data           │
+    │                               │       │               │
+    │                               │       ▼               │
+    │                               │  scope-evidence       │
+    │                               └──────────────────────┘
+    │
+    └── /scope:investigate ────────►┌──────────────────────┐
+                                    │  Standalone Agent     │
+                                    │                      │
+                                    │  1. Load context.json │
+                                    │  2. Query Splunk      │
+                                    │  3. Write artifacts   │
+                                    │  4. Update context.json
+                                    │                      │
+                                    │  (no post-processing  │
+                                    │   pipeline)           │
+                                    └──────────────────────┘
 ```
 
 ## Post-Processing Pipeline
 
-Every source agent triggers this chain after writing artifacts:
+Source agents (audit, exploit, defend) trigger this chain after writing artifacts. Investigate is standalone and does not run the post-processing pipeline — it produces investigation.md only.
 
 ```
   $RUN_DIR/findings.md          ./data/$PHASE/$RUN_ID.json
   $RUN_DIR/playbook.md     ┌──►  ./data/index.json
-  $RUN_DIR/investigation.md│
   $RUN_DIR/policies/*.json │
            │               │
            ▼               │
@@ -79,7 +92,7 @@ Failures are non-blocking — each step logs warnings but never stops the source
 `scope-verify-core` is called inline during source agent execution and dispatches to domain verifiers:
 
 ```
-  Source Agent (audit / remediate / exploit / investigate)
+  Source Agent (audit / defend / exploit / investigate)
        │
        │  inline call
        ▼
@@ -126,17 +139,18 @@ Verification results are in-memory — verifiers return corrections to the calli
               │               │               │
               ▼               ▼               │
   ┌───────────────┐ ┌────────────────┐        │
-  │scope-remediate│ │ scope-exploit  │        │
+  │ scope-defend  │ │ scope-exploit  │        │
   │               │ │                │        │
-  │reads ALL audit│ │reads audit data│        │
-  │runs from      │ │(optional, skip │        │
-  │./audit/       │ │with --fresh)   │        │
+  │reads current  │ │reads audit data│        │
+  │audit run (auto│ │(optional, skip │        │
+  │) or all (man.)│ │with --fresh)   │        │
   └───────────────┘ └────────────────┘        │
                                               │
   ┌───────────────────────────────────────────┘
   │
   │   scope-investigate is STANDALONE
   │   • No reads from ./audit/, ./exploit/, ./evidence/
+  │   • Reads ./investigate/context.json (environment knowledge)
   │   • Analyst brings alert context, queries Splunk
   │   • Intentional isolation: SOC ≠ pentest
   └──────────────────────────────────────────────────
@@ -167,9 +181,9 @@ Downstream agents consume upstream output in this priority order:
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
 | **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `evidence.jsonl` | verify-core → data → evidence |
-| **remediate** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `evidence.jsonl` | verify-core → data → evidence |
+| **defend** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run, auto) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `evidence.jsonl` | verify-core → data → evidence |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
-| **investigate** | `/scope:investigate` | Splunk MCP only | `$RUN_DIR/investigation.md`, `evidence.jsonl` | verify-core → data → evidence |
+| **investigate** | `/scope:investigate` | Splunk MCP, `./investigate/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/evidence.jsonl` (if saved), `./investigate/context.json` | verify-core (standalone — no post-processing pipeline) |
 | **verify-core** | Called by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | verify-aws, verify-splunk |
 | **verify-aws** | Called by verify-core | AWS claims (in-memory) | Validation results (in-memory) | — |
 | **verify-splunk** | Called by verify-core | SPL queries (in-memory) | Validation results (in-memory) | — |

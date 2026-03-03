@@ -19,7 +19,7 @@ Available commands:
 
   /scope:audit <target>     Enumerate AWS resources and discover attack paths
                             Accepts: ARN, service name, --all, @targets.csv
-                            Auto-generates remediation (SCPs, detections, prioritized plan)
+                            Auto-generates defensive controls (SCPs, detections, prioritized plan)
 
   /scope:exploit <arn>      Generate privilege escalation playbooks
                             Tests exploitability of audit findings for a specific principal
@@ -40,10 +40,11 @@ Examples:
 Dashboard:
   The SCOPE dashboard runs at http://localhost:3000
   Start it: cd dashboard && npm run dev
-  Audit results are automatically exported to the dashboard after each run.
+  Audit, exploit, and defend export results to the dashboard.
+  Investigate is standalone — it produces markdown only (no dashboard export).
 
 Auto-called agents (not user-invocable):
-  scope-remediate    Remediation generation — auto-called by audit
+  scope-defend       Defensive controls generation — auto-called by audit
   scope-verify-*     Verification protocol — auto-called during execution
   scope-data         Data normalization middleware
   scope-evidence     Evidence provenance middleware

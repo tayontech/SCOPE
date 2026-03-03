@@ -6,7 +6,7 @@ Read and follow all instructions in `INSTRUCTIONS.md` in this repository root. T
 
 ```
 scope-audit.md       AWS audit (slash command)
-scope-remediate.md   Remediation generation (auto-called by scope-audit)
+scope-defend.md      Defensive controls generation (auto-called by scope-audit)
 scope-exploit.md     Privilege escalation playbooks (slash command)
 scope-investigate.md SOC alert investigation (slash command)
 scope-verify-core.md Core verification — claim ledger, taxonomy, cross-agent consistency (auto-called)

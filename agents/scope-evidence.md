@@ -244,7 +244,7 @@ The output file `./evidence/<phase>/<run-id>.json` contains the validated, struc
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | version | string | yes | Schema version — always `"1.0.0"` |
-| phase | string | yes | One of: `audit`, `remediate`, `exploit`, `investigate` |
+| phase | string | yes | One of: `audit`, `defend`, `exploit` |
 | run_id | string | yes | Unique run identifier from the run directory name |
 | timestamp | string | yes | ISO8601 when evidence indexing completed |
 | source_run_dir | string | yes | Path to the original run directory |
@@ -269,7 +269,7 @@ The output file `./evidence/<phase>/<run-id>.json` contains the validated, struc
 
 When invoked, the calling agent provides two values:
 
-- **PHASE**: one of `audit`, `remediate`, `exploit`, `investigate`
+- **PHASE**: one of `audit`, `defend`, `exploit` (investigate does not call this middleware — it writes evidence.jsonl directly)
 - **RUN_DIR**: path to the run directory containing raw artifacts
 
 ### Dispatch
@@ -315,13 +315,13 @@ When invoked, the calling agent provides two values:
 <validation>
 ## Validation Rules
 
-After parsing all records, validate the following constraints. Records that fail validation are logged as warnings and excluded from the envelope. If more than 50% of records fail, set status to `partial`.
+After parsing all records, validate the following constraints. Records that fail validation are logged as warnings and excluded from the envelope. If more than 50% of records fail validation, set status to `partial`. (Note: the 10% threshold in Parse Failure applies to JSON parse errors specifically — malformed lines are a more severe signal than individual claim validation failures, so the threshold is lower.)
 
 ### Claim Validation
 
 For every `claim` record:
 
-1. **Source evidence required:** `source_evidence_ids` must contain at least one ID that matches an `api_call`, `policy_eval`, or another `claim` record in the same JSONL file.
+1. **Source evidence required:** `source_evidence_ids` must contain at least one ID that matches an `api_call`, `policy_eval`, or another `claim` record in the same JSONL file. Exception: IDs in `<run-id>:<evidence-id>` format are cross-run references — validate these against `./evidence/index.json` instead of the local JSONL.
    - Violation: `"Warning: claim {id} has no valid source_evidence_ids — excluding"`
 
 2. **Conditional claims need gating conditions:** If `classification` is `"conditional"`, `gating_conditions` must contain at least one non-empty string.
@@ -369,13 +369,14 @@ For every `coverage_check` record:
 <cross_run_linking>
 ## Cross-Run Linking
 
-Some evidence records may reference upstream runs (e.g., exploit referencing audit data, remediate referencing audit runs).
+Some evidence records may reference upstream runs (e.g., exploit referencing audit data, defend referencing audit runs).
 
 ### Detection
 
 When parsing `evidence.jsonl`, look for:
 1. Claim records whose `source_evidence_ids` contain references in the format `<run-id>:<evidence-id>` (cross-run reference)
-2. Explicit `depends_on` entries in the JSONL metadata
+
+Note: Cross-run dependencies are inferred from `<run-id>:<evidence-id>` references in `source_evidence_ids`. There is no separate `depends_on` record type — dependencies are extracted from claim references during validation.
 
 ### Validation
 
@@ -499,7 +500,7 @@ All evidence files share this top-level structure:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | version | string | yes | Schema version — always "1.0.0" |
-| phase | string | yes | One of: audit, remediate, exploit, investigate |
+| phase | string | yes | One of: audit, defend, exploit |
 | run_id | string | yes | Unique run identifier from the run directory name |
 | timestamp | string | yes | ISO8601 of evidence indexing |
 | source_run_dir | string | yes | Path to the original run directory |
@@ -536,8 +537,8 @@ Each entry in `./evidence/index.json` `runs` array:
   audit/
     audit-20260301-143022-all.json              # One file per audit run
     audit-20260301-150510-user-alice.json
-  remediate/
-    remediate-20260301-160000.json              # One file per remediate run
+  defend/
+    defend-20260301-160000.json                 # One file per defend run
   exploit/
     exploit-20260301-170000-user-alice.json     # One file per exploit run
   investigate/

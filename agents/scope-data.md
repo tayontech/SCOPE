@@ -31,7 +31,7 @@ You are SCOPE's data normalization layer. Your mission: read raw agent artifacts
 
 When invoked, the calling agent provides two values:
 
-- **PHASE**: one of `audit`, `remediate`, `exploit`, `investigate`
+- **PHASE**: one of `audit`, `defend`, `exploit`
 - **RUN_DIR**: path to the run directory containing raw artifacts (e.g., `./audit/audit-20260301-143022-all/`)
 
 ### Dispatch
@@ -48,9 +48,10 @@ When invoked, the calling agent provides two values:
 
 3. Route to the phase-specific normalizer:
    - `audit` → `<audit_normalizer>`
-   - `remediate` → `<remediate_normalizer>`
+   - `defend` → `<defend_normalizer>`
    - `exploit` → `<exploit_normalizer>`
-   - `investigate` → `<investigate_normalizer>`
+
+   Note: Investigate does not run the post-processing pipeline — it produces investigation.md only and does not call scope-data.
 
 4. Each normalizer returns a `payload` object. Wrap it in the common envelope:
    ```json
@@ -84,11 +85,16 @@ If status is `partial` or `failed`, log a warning with the specific files that w
 ## Audit Normalizer
 
 **Input files:**
-- `$RUN_DIR/findings.md` — three-layer findings report
+- `$RUN_DIR/results.json` — structured audit data (preferred if available)
+- `$RUN_DIR/findings.md` — three-layer findings report (fallback)
 
 ### Extraction Steps
 
-**Step 1: Read findings.md**
+**Step 0: Check for results.json**
+
+If `$RUN_DIR/results.json` exists and contains `"source": "audit"` (or no `source` field for legacy runs), read it directly. The results.json is already in the correct schema — extract the payload fields and skip markdown parsing.
+
+**Step 1: Read findings.md (fallback)**
 
 Extract from headings and content:
 
@@ -140,7 +146,18 @@ This graph is built by scope-data from findings.md data. scope-data does NOT nee
     "users_without_mfa": "int",
     "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
     "services_analyzed": "int",
-    "top_findings": ["string — one-line summary of each critical/high finding"]
+    "top_findings": ["string — one-line summary of each critical/high finding"],
+    "paths_by_category": {
+      "privilege_escalation": "int",
+      "trust_misconfiguration": "int",
+      "data_exposure": "int",
+      "credential_risk": "int",
+      "excessive_permission": "int",
+      "network_exposure": "int",
+      "persistence": "int",
+      "post_exploitation": "int",
+      "lateral_movement": "int"
+    }
   },
   "graph": {
     "nodes": [
@@ -154,36 +171,59 @@ This graph is built by scope-data from findings.md data. scope-data does NOT nee
     {
       "name": "string",
       "severity": "critical | high | medium | low",
+      "category": "privilege_escalation | trust_misconfiguration | data_exposure | credential_risk | excessive_permission | network_exposure | persistence | post_exploitation | lateral_movement",
+      "description": "string",
       "exploitability": "string — e.g., 'high — requires only iam:CreatePolicyVersion'",
       "confidence_pct": "int — 0-100",
       "steps": ["string"],
       "mitre_techniques": ["string — e.g., T1078.004"],
-      "detection_opportunities": ["string — CloudTrail eventName"],
+      "detection_opportunities": ["string — CloudTrail eventName + SPL"],
       "remediation": ["string — specific fix"],
       "affected_resources": ["string — node IDs or ARNs"]
     }
   ],
-  "principals": {
-    "<principal-arn>": {
+  "principals": [
+    {
+      "id": "string — e.g., user:alice or role:AdminRole",
       "type": "user | role",
-      "policies": ["string — policy names"],
-      "effective_permissions": ["string — action patterns"],
-      "boundary": "string — boundary policy ARN or null",
-      "mfa_enabled": "bool or null",
-      "enumerated_at": "string — ISO8601 timestamp when this principal was enumerated"
+      "arn": "string — full IAM ARN",
+      "mfa_enabled": "bool (users only)",
+      "console_access": "bool (users only)",
+      "access_keys": "int (users only)",
+      "groups": ["string — group names (users only)"],
+      "trust_principal": "string — trust policy principal (roles only)",
+      "is_wildcard_trust": "bool (roles only)",
+      "attached_policies": ["string — policy names"],
+      "has_boundary": "bool",
+      "risk_flags": ["string — e.g., no_mfa, wildcard_trust, admin_equivalent"]
     }
-  }
+  ],
+  "trust_relationships": [
+    {
+      "role_id": "string — e.g., role:AdminRole",
+      "role_arn": "string — full IAM ARN",
+      "principal": "string — trusted principal ARN or *",
+      "trust_type": "same-account | cross-account | service",
+      "is_wildcard": "bool",
+      "has_external_id": "bool",
+      "has_mfa_condition": "bool",
+      "risk": "CRITICAL | HIGH | MEDIUM | LOW"
+    }
+  ]
 }
 ```
 </audit_normalizer>
 
-<remediate_normalizer>
-## Remediate Normalizer
+<defend_normalizer>
+## Defend Normalizer
 
 **Input files:**
+- `$RUN_DIR/results.json` — structured defend data (preferred if available)
 - `$RUN_DIR/executive-summary.md` — leadership risk scorecard
 - `$RUN_DIR/technical-remediation.md` — full engineer-facing remediation plan
 - `$RUN_DIR/policies/*.json` — SCP and RCP JSON files
+
+If `$RUN_DIR/results.json` exists and contains `"source": "defend"`, read it directly — the results.json is already in the correct schema. Skip markdown parsing and extract payload fields directly.
 
 ### Extraction Steps
 
@@ -210,7 +250,7 @@ For each `$RUN_DIR/policies/*.json`:
 - Classify as SCP or RCP from filename prefix
 - Include the parsed policy JSON in the payload
 
-### Remediate Payload Schema
+### Defend Payload Schema
 
 ```json
 {
@@ -284,17 +324,22 @@ For each `$RUN_DIR/policies/*.json`:
   ]
 }
 ```
-</remediate_normalizer>
+</defend_normalizer>
 
 <exploit_normalizer>
 ## Exploit Normalizer
 
 **Input files:**
-- `$RUN_DIR/playbook.md` — full red team playbook
+- `$RUN_DIR/results.json` — structured exploit data (preferred if available)
+- `$RUN_DIR/playbook.md` — full red team playbook (fallback)
 
 ### Extraction Steps
 
-**Step 1: Read playbook.md**
+**Step 0: Check for results.json**
+
+If `$RUN_DIR/results.json` exists and contains `"source": "exploit"`, read it directly. The results.json is already in the correct schema — extract the payload fields and skip markdown parsing.
+
+**Step 1: Read playbook.md (fallback)**
 
 Extract from headings and content:
 
@@ -423,64 +468,6 @@ If present, extract the exfiltration analysis section:
 ```
 </exploit_normalizer>
 
-<investigate_normalizer>
-## Investigate Normalizer
-
-**Input files:**
-- `$RUN_DIR/investigation.md` — full investigation summary + event table + queries run
-
-### Extraction Steps
-
-**Step 1: Read investigation.md**
-
-Extract:
-
-```
-Alert type: from the investigation header or introduction
-MCP mode: "CONNECTED" or "MANUAL" — from the session info
-Time range: the time window investigated
-
-Narrative: the full narrative summary section (Section 1)
-
-Timeline: from the chronological event table (Section 2)
-  - Parse the markdown table rows
-  - Each row: timestamp, event (API call or action), principal, source IP
-
-Queries run: from the Queries Run appendix (Section 3)
-  - Parse the markdown table rows
-  - Each row: step number, name, SPL query, status (executed/skipped)
-```
-
-### Investigate Payload Schema
-
-```json
-{
-  "alert_type": "string — e.g., CreateAccessKey, ConsoleLogin",
-  "mcp_mode": "CONNECTED | MANUAL",
-  "time_range": {
-    "earliest": "string — ISO8601 or Splunk relative time",
-    "latest": "string"
-  },
-  "narrative": "string — full investigation narrative",
-  "timeline": [
-    {
-      "timestamp": "string — ISO8601",
-      "event": "string — API call or action",
-      "principal": "string — ARN or username",
-      "source_ip": "string"
-    }
-  ],
-  "queries_run": [
-    {
-      "step": "int",
-      "name": "string",
-      "spl": "string — full SPL query",
-      "status": "executed | skipped | pivoted"
-    }
-  ]
-}
-```
-</investigate_normalizer>
 
 <index_management>
 ## Index Management — ./data/index.json
@@ -517,16 +504,15 @@ Add a new entry to the `runs` array:
   "account_id": "<from envelope>",
   "data_file": "./data/<PHASE>/<RUN_ID>.json",
   "run_dir": "<RUN_DIR>",
-  "summary": {}
+  "summary": {}  // phase-specific quick-look fields — see below. Empty {} is valid for failed/partial runs.
 }
 ```
 
-The `summary` object is phase-specific:
+The `summary` object is phase-specific (populate from the normalized data):
 
 - **audit**: `{"risk_score": "...", "attack_paths": N, "target": "..."}`
-- **remediate**: `{"audit_runs_analyzed": N, "scps": N, "rcps": N, "detections": N}`
+- **defend**: `{"audit_runs_analyzed": N, "scps": N, "rcps": N, "detections": N}`
 - **exploit**: `{"target_arn": "...", "paths_found": N, "highest_priv": "...", "persistence_techniques": N, "exfiltration_vectors": N}`
-- **investigate**: `{"alert_type": "...", "steps_run": N, "mcp_mode": "..."}`
 
 ### Deduplication
 
@@ -601,7 +587,7 @@ All normalized files share this top-level structure:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | version | string | yes | Schema version — always "1.0.0" |
-| phase | string | yes | One of: audit, remediate, exploit, investigate |
+| phase | string | yes | One of: audit, defend, exploit |
 | run_id | string | yes | Unique run identifier from the run directory name |
 | timestamp | string | yes | ISO8601 timestamp of normalization |
 | status | string | yes | One of: complete, partial, failed |
@@ -633,11 +619,9 @@ Each entry in `./data/index.json` `runs` array:
   audit/
     audit-20260301-143022-all.json              # One file per audit run
     audit-20260301-150510-user-alice.json
-  remediate/
-    remediate-20260301-160000.json              # One file per remediate run
+  defend/
+    defend-20260301-160000.json                 # One file per defend run
   exploit/
     exploit-20260301-170000-user-alice.json     # One file per exploit run
-  investigate/
-    investigate-20260301-180000.json            # One file per investigate run
 ```
 </schema_reference>

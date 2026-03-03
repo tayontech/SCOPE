@@ -92,7 +92,7 @@ Every IAM policy document must be structurally valid:
 <scp_rcp_safety>
 ## SCP/RCP Structural Safety (Category 6)
 
-The remediate agent generates SCPs, RCPs, and security controls. The verifier prevents dangerous guidance even though it can't simulate deployment.
+The defend agent generates SCPs, RCPs, and security controls. The verifier prevents dangerous guidance even though it can't simulate deployment.
 
 ### Structural Safety Checks for SCPs
 
@@ -134,6 +134,24 @@ Classify as `[CONDITIONAL: requires break-glass condition before deployment]`.
 
 Attack path claims must pass constraint satisfiability — not just "is this technically possible in theory."
 
+### Category Validation
+
+Every attack path must include a `category` field with one of these values:
+
+| Category | Valid Values |
+|----------|-------------|
+| Privilege escalation | `privilege_escalation` |
+| Trust misconfiguration | `trust_misconfiguration` |
+| Data exposure | `data_exposure` |
+| Credential risk | `credential_risk` |
+| Excessive permission | `excessive_permission` |
+| Network exposure | `network_exposure` |
+| Persistence | `persistence` |
+| Post-exploitation | `post_exploitation` |
+| Lateral movement | `lateral_movement` |
+
+**On missing or invalid category:** Default to `privilege_escalation` for escalation paths. For others, infer from path content and silently correct. Flag if ambiguous.
+
 ### Classification Rules
 
 | Condition | Classification |
@@ -159,6 +177,31 @@ For paths that span multiple AWS services (e.g., IAM → Lambda → S3):
 - Verify each service's API exists and action names are correct
 - Verify the chain of trust is logically sound (role A can assume role B, role B has the needed permission)
 - Flag if any link in the chain is unverified
+
+### Category-Specific Satisfiability
+
+**Persistence paths (`persistence`):**
+- Verify the principal has the required permissions to establish the persistence mechanism (e.g., `iam:CreateUser` for backdoor user, `lambda:PublishLayerVersion` for layer backdoor, `kms:CreateGrant` for eternal grants)
+- For cross-account persistence (trust policy backdoor, resource policy grants), verify the trust relationship is writable by the principal
+- For scheduled persistence (SSM associations, EventBridge rules, spot fleet requests), verify the scheduling permission exists
+- Classification: Guaranteed only if all required permissions are confirmed and no SCP/boundary blocks the action
+
+**Post-exploitation paths (`post_exploitation`):**
+- Verify the principal can actually access the target data (e.g., `s3:GetObject` + relevant KMS key access for encrypted buckets)
+- For destructive paths (ransomware, deletion), verify both the modification permission and the absence of protective controls (Object Lock, deletion protection, backup policies)
+- For exfiltration paths, verify the principal can reach the target resource (VPC endpoints, resource policies)
+- Classification: Guaranteed only if the full exfiltration/destruction chain is confirmed end-to-end
+
+**Lateral movement paths (`lateral_movement`):**
+- Verify each hop in the chain: trust policy allows assumption, required permissions exist at each level
+- For SSM-based pivots, verify `ssm:StartSession` and that the target instance is SSM-managed
+- For cross-account movement, verify the trust relationship exists AND the principal can satisfy trust conditions (external ID, MFA, source IP)
+- For service-based pivots (Lambda → ECS, EC2 → IMDS), verify the service configuration enables the pivot
+- Classification: Conditional if any hop depends on unverified configuration; Guaranteed only if all hops are confirmed
+
+**Misconfiguration paths (`trust_misconfiguration`, `data_exposure`, `credential_risk`, `excessive_permission`, `network_exposure`):**
+- These are observation-based — the finding IS the evidence (e.g., wildcard trust policy exists, MFA is disabled, security group is open)
+- Classification: Guaranteed if enumeration data confirms the misconfiguration; Conditional if inferred from partial data
 </satisfiability_checks>
 
 <error_handling>

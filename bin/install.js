@@ -154,8 +154,9 @@ function installCodex(skillName, skillMdContent, targetDir) {
 // ---------------------------------------------------------------------------
 
 // Agents that are user-invocable slash commands.
-// All others (verify-*, data, evidence, remediate) are auto-called internally
+// All others (verify-*, data, evidence, defend) are auto-called internally
 // and should NOT be installed as skills.
+// Note: /scope:help is not an agent — editors serve it by reading commands/help.md directly.
 const INSTALLABLE_AGENTS = new Set([
   'scope-audit',
   'scope-exploit',
