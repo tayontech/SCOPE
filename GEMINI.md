@@ -4,9 +4,9 @@
 
 Each agent file is self-contained for project context, credentials, pipeline rules, and error handling. Source agents (audit, exploit, investigate) read verification and middleware agents (`agents/scope-verify-*.md`, `agents/scope-data.md`, `agents/scope-evidence.md`) from the repo at runtime — these files must be accessible from the working directory.
 
-## Skill Naming
+## Skills
 
-Gemini CLI commands use the same `/scope:audit` convention as Claude Code. The installer creates TOML files in `.gemini/commands/scope/` — subdirectory paths are converted to colon-separated names (e.g., `scope/audit.toml` → `/scope:audit`).
+Gemini CLI supports the Agent Skills open standard. Skills are `SKILL.md` files in `.gemini/skills/` or `.agents/skills/` (`.agents/` takes precedence). Users invoke via `/scope:audit` — directory paths are converted to colon-separated names (e.g., `.gemini/skills/scope-audit/SKILL.md` → `/scope:audit`).
 
 ## Agents
 
@@ -18,14 +18,15 @@ agents/scope-investigate.md   SOC alert investigation (slash command)
 agents/scope-verify-core.md   Core verification — claim ledger, taxonomy, cross-agent consistency (auto-called)
 agents/scope-verify-aws.md    AWS verification — API, IAM, SCP/RCP, attack path satisfiability (auto-called)
 agents/scope-verify-splunk.md Splunk verification — SPL lints, field validation, rerun recipes (auto-called)
-agents/scope-data.md          Data normalization middleware (auto-called)
-agents/scope-evidence.md      Evidence provenance middleware (auto-called)
+agents/scope-data.md          Data normalization middleware (invoked by source agent)
+agents/scope-evidence.md      Evidence provenance middleware (invoked by source agent)
 ```
 
 ## Architecture
 
 ```
 agents/               Agent .md files — source format for all editors (flat, one file per agent)
+agents/modules/       Extracted audit modules — loaded on-demand via Read (IAM, STS, S3, KMS, Secrets, Lambda, EC2, attack-paths)
 commands/             Quick-reference docs for each slash command (synopsis, args, examples, artifacts)
 data/                 Normalized JSON output (runtime-generated, gitignored)
 evidence/             Evidence provenance data (runtime-generated, gitignored)
@@ -33,7 +34,19 @@ investigate/          Investigation artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard at http://localhost:3000
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js deploys agents to editor config directories)
+.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, artifact check, evidence logger
 ```
+
+## Hooks
+
+SCOPE uses lifecycle hooks configured in `.gemini/settings.json`. Shared scripts live in `.scope/hooks/`.
+
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `scope-safety-guard.sh` | BeforeTool (shell) | Block destructive AWS operations — agents are read-only |
+| `scope-spl-lint.sh` | AfterTool (write_file\|replace) | Hard-fail on SPL anti-patterns |
+| `scope-artifact-check.sh` | AfterAgent | Verify mandatory artifacts exist before completion |
+| `scope-evidence-logger.sh` | AfterTool (shell) | Auto-log AWS CLI calls to evidence.jsonl |
 
 ## Slash Commands
 

@@ -22,12 +22,12 @@ const EDITOR_DIRS = {
     local: path.join(process.cwd(), '.claude', 'skills'),
   },
   gemini: {
-    global: path.join(os.homedir(), '.gemini', 'commands', 'scope'),
-    local: path.join(process.cwd(), '.gemini', 'commands', 'scope'),
+    global: path.join(os.homedir(), '.gemini', 'skills'),
+    local: path.join(process.cwd(), '.gemini', 'skills'),
   },
   codex: {
-    global: path.join(os.homedir(), '.codex', 'skills'),
-    local: path.join(process.cwd(), '.codex', 'skills'),
+    global: path.join(os.homedir(), '.agents', 'skills'),
+    local: path.join(process.cwd(), '.agents', 'skills'),
   },
 };
 
@@ -92,11 +92,9 @@ function installClaude(skillName, skillMdContent, targetDir) {
 }
 
 /**
- * Gemini CLI: convert SKILL.md to TOML.
- * - Extracts description from frontmatter
- * - Replaces ${ARGUMENTS} with {{args}}
- * - Strips scope- prefix from skill name for the filename
- * - Uses literal multi-line strings '''...''' to avoid escape issues
+ * Gemini CLI: write SKILL.md using the Agent Skills open standard.
+ * - Strips Claude-specific frontmatter fields (argument-hint, disable-model-invocation)
+ * - Retains: name, description, allowed-tools
  */
 function installGemini(skillName, skillMdContent, targetDir) {
   const parsed = parseFrontmatter(skillMdContent);
@@ -105,30 +103,22 @@ function installGemini(skillName, skillMdContent, targetDir) {
     return null;
   }
   const { frontmatter, body } = parsed;
-  const description = frontmatter.description || '';
 
-  // Strip the 'scope-' prefix for the TOML filename
-  // e.g., scope-engage -> engage.toml, scope-audit -> audit.toml
-  const tomlName = skillName.replace(/^scope-/, '');
+  const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'color', 'compatibility'];
+  const cleanedFm = rebuildFrontmatter(frontmatter, GEMINI_STRIP_KEYS);
+  const cleanedContent = `---\n${cleanedFm}\n---\n\n${body}`;
 
-  // Replace ${ARGUMENTS} or $ARGUMENTS style substitutions with {{args}}
-  const prompt = body
-    .replace(/\$\{ARGUMENTS\}/g, '{{args}}')
-    .replace(/\$ARGUMENTS/g, '{{args}}');
-
-  // Build TOML content using literal multi-line strings (''' ''') to avoid escape issues
-  const tomlContent = `description = "${description.replace(/"/g, '\\"')}"\nprompt = '''\n${prompt}\n'''\n`;
-
-  fs.mkdirSync(targetDir, { recursive: true });
-  const destFile = path.join(targetDir, `${tomlName}.toml`);
-  fs.writeFileSync(destFile, tomlContent, 'utf8');
+  const dest = path.join(targetDir, skillName);
+  fs.mkdirSync(dest, { recursive: true });
+  const destFile = path.join(dest, 'SKILL.md');
+  fs.writeFileSync(destFile, cleanedContent, 'utf8');
   return destFile;
 }
 
 /**
  * Codex: copy SKILL.md but strip Claude-specific frontmatter fields.
- * Retains: name, description, compatibility
- * Strips: color, disable-model-invocation, allowed-tools, tools
+ * Retains: name, description
+ * Strips: argument-hint, disable-model-invocation, allowed-tools, tools, color, compatibility
  */
 function installCodex(skillName, skillMdContent, targetDir) {
   const parsed = parseFrontmatter(skillMdContent);
@@ -138,7 +128,7 @@ function installCodex(skillName, skillMdContent, targetDir) {
   }
   const { frontmatter, body } = parsed;
 
-  const CODEX_STRIP_KEYS = ['color', 'disable-model-invocation', 'allowed-tools', 'tools'];
+  const CODEX_STRIP_KEYS = ['argument-hint', 'color', 'compatibility', 'disable-model-invocation', 'allowed-tools', 'tools'];
   const cleanedFm = rebuildFrontmatter(frontmatter, CODEX_STRIP_KEYS);
   const cleanedContent = `---\n${cleanedFm}\n---\n\n${body}`;
 
@@ -248,13 +238,13 @@ Usage:
 
 Editors (pick one or more, or --all):
   --claude    Install to Claude Code (.claude/skills/)
-  --gemini    Install to Gemini CLI (.gemini/commands/scope/)
-  --codex     Install to Codex (.codex/skills/)
+  --gemini    Install to Gemini CLI (.gemini/skills/)
+  --codex     Install to Codex (.agents/skills/)
   --all       Install to all three editors
 
 Scope:
-  --global    Install to ~/.<editor>/ (default)
-  --local     Install to ./.<editor>/ in current directory
+  --global    Install to user home directory (default)
+  --local     Install to current project directory
 
 Options:
   --help      Print this usage message
@@ -346,6 +336,33 @@ function main() {
   runInstall(editors, scope);
 }
 
+/**
+ * Copy hook settings.json for an editor if installing locally.
+ * Only copies the project-level settings file — global hooks are not deployed.
+ */
+function installHooks(editor, scope) {
+  if (scope !== 'local') return;
+  if (editor === 'codex') return; // Codex does not support hooks
+
+  const settingsMap = {
+    claude: '.claude/settings.json',
+    gemini: '.gemini/settings.json',
+  };
+  const srcSettings = path.join(__dirname, '..', settingsMap[editor]);
+  if (!fs.existsSync(srcSettings)) return;
+
+  const destDir = path.join(process.cwd(), path.dirname(settingsMap[editor]));
+  const destFile = path.join(destDir, 'settings.json');
+  if (fs.existsSync(destFile)) {
+    console.log(`  Hook settings already exist: ${settingsMap[editor]} (skipped)`);
+    return;
+  }
+
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.copyFileSync(srcSettings, destFile);
+  console.log(`  Installed hook settings -> ${settingsMap[editor]}`);
+}
+
 function runInstall(editors, scope) {
   const agentsDir = path.join(__dirname, '..', 'agents');
   const agents = discoverAgents(agentsDir);
@@ -359,6 +376,7 @@ function runInstall(editors, scope) {
 
   for (const editor of editors) {
     installForEditor(editor, scope, agents);
+    installHooks(editor, scope);
   }
 }
 

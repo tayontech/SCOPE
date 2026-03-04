@@ -1183,7 +1183,7 @@ Also update `./investigate/index.json` (machine-readable). Create if it doesn't 
 
 Read `./investigate/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
 
-**Note:** Investigate does NOT run the scope-data/scope-evidence post-processing pipeline. Those middleware agents process audit, exploit, and defend output only. Investigation artifacts are self-contained in `$RUN_DIR/`.
+**Note:** Investigate does NOT run the scope-data/scope-evidence post-processing pipeline. Those middleware agents process audit, exploit, and defend output only. Investigation artifacts are self-contained in `$RUN_DIR/`. Evidence from investigate runs is NOT indexed into `./evidence/` — raw `evidence.jsonl` remains in `$RUN_DIR/` for local reference only. Other SCOPE agents cannot automatically reference investigate evidence.
 
 **5. Post-investigation learning:**
 

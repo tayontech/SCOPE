@@ -14,14 +14,15 @@ agents/scope-investigate.md SOC alert investigation (slash command)
 agents/scope-verify-core.md Core verification — claim ledger, taxonomy, cross-agent consistency (auto-called)
 agents/scope-verify-aws.md  AWS verification — API, IAM, SCP/RCP, attack path satisfiability (auto-called)
 agents/scope-verify-splunk.md Splunk verification — SPL lints, field validation, rerun recipes (auto-called)
-agents/scope-data.md        Data normalization middleware (auto-called)
-agents/scope-evidence.md    Evidence provenance middleware (auto-called)
+agents/scope-data.md        Data normalization middleware (invoked by source agent)
+agents/scope-evidence.md    Evidence provenance middleware (invoked by source agent)
 ```
 
 ## Architecture
 
 ```
 agents/               Agent .md files — source format for all editors (flat, one file per agent)
+agents/modules/       Extracted audit modules — loaded on-demand via Read (IAM, STS, S3, KMS, Secrets, Lambda, EC2, attack-paths)
 commands/             Quick-reference docs for each slash command (synopsis, args, examples, artifacts)
 data/                 Normalized JSON output (runtime-generated, gitignored)
 evidence/             Evidence provenance data (runtime-generated, gitignored)
@@ -29,7 +30,21 @@ investigate/          Investigation artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard at http://localhost:3000
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js deploys agents to editor config directories)
+.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, artifact check, evidence logger
 ```
+
+## Hooks
+
+SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hooks are shared scripts in `.scope/hooks/` with platform-specific configuration in `.claude/settings.json` and `.gemini/settings.json`.
+
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `scope-safety-guard.sh` | PreToolUse (Bash) | Block destructive AWS operations — agents are read-only |
+| `scope-spl-lint.sh` | PostToolUse (Write\|Edit) | Hard-fail on SPL anti-patterns (missing index, wrong fields, transaction in composites) |
+| `scope-artifact-check.sh` | Stop | Verify mandatory artifacts exist before agent completes |
+| `scope-evidence-logger.sh` | PostToolUse (Bash, async) | Auto-log AWS CLI calls to evidence.jsonl |
+
+Codex does not support lifecycle hooks — safety constraints are enforced through AGENTS.md guidance only.
 
 ## Slash Commands
 

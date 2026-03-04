@@ -25,6 +25,7 @@ const COLORS = {
   lowBg: "rgba(34,197,94,0.12)",
   nodeUser: "#8b5cf6",
   nodeRole: "#06b6d4",
+  detection: "#06b6d4",
   nodeEsc: "#ef4444",
   nodeData: "#22c55e",
   nodeExternal: "#f59e0b",
@@ -61,6 +62,95 @@ const PHASE_CONFIG = {
   exploit:     { label: "Exploit",     color: "#ef4444" },
   defend:      { label: "Defend",      color: "#22c55e" },
 };
+
+// ─── Data Normalization ───
+// Handles multiple defend data formats produced by different agents:
+//   1. Rich results.json (per spec: has scps[], rcps[], detections[] with severity/spl, etc.)
+//   2. Thin results.json (summary counts + policies.scp_files + basic detections without spl)
+//   3. Data layer format (fields nested under payload, from data/defend/*.json)
+//   4. Flat policies[] format (policies as single array with type: "SCP"/"RCP", no scps[]/rcps[])
+// Also fixes audit source field: json.source may be service-specific (e.g., "svc:ec2.amazonaws.com")
+function normalizeForDashboard(json, indexSource) {
+  let data = { ...json };
+
+  // Unwrap data layer payload format (data/<phase>/*.json nests fields under payload)
+  if (data.payload && typeof data.payload === "object") {
+    const { payload, ...meta } = data;
+    data = { ...meta, ...payload };
+  }
+
+  // Resolve canonical phase key: prefer index.json source over json.source when
+  // json.source is not a recognized phase (e.g., "svc:ec2.amazonaws.com" for audit)
+  const VALID_PHASES = ["audit", "exploit", "defend"];
+  const source = (indexSource && VALID_PHASES.includes(indexSource))
+    ? indexSource
+    : (VALID_PHASES.includes(data.source) ? data.source : (indexSource || "audit"));
+  data.source = source;
+
+  // Audit-specific normalization
+  if (source === "audit") {
+    if (data.summary) {
+      const s = data.summary;
+      if (s.total_users == null && s.users != null) s.total_users = s.users;
+      if (s.total_roles == null && s.roles != null) s.total_roles = s.roles;
+      if (s.total_attack_paths == null && s.attack_paths != null) s.total_attack_paths = s.attack_paths;
+      if (s.total_attack_paths == null) s.total_attack_paths = data.attack_paths?.length ?? 0;
+    }
+  }
+
+  // Exploit-specific normalization
+  if (source === "exploit") {
+    if (!data.summary) data.summary = {};
+    const s = data.summary;
+    if (s.total_attack_paths == null) s.total_attack_paths = s.paths_found ?? data.attack_paths?.length ?? 0;
+    if (s.persistence_techniques == null) s.persistence_techniques = 0;
+    if (s.exfiltration_vectors == null) s.exfiltration_vectors = 0;
+  }
+
+  // Defend-specific normalization
+  if (source === "defend") {
+    // Map summary field variants to dashboard-expected names
+    if (data.summary) {
+      const s = data.summary;
+      if (s.scps_generated == null && s.scps != null) s.scps_generated = s.scps;
+      if (s.rcps_generated == null && s.rcps != null) s.rcps_generated = s.rcps;
+      if (s.detections_generated == null) {
+        s.detections_generated = s.detections ?? s.spl_detections ?? data.detections?.length ?? 0;
+      }
+      if (s.controls_recommended == null) {
+        s.controls_recommended = data.security_controls?.length ?? 0;
+      }
+    }
+
+    // Split flat policies[] array by type into separate scps[]/rcps[] arrays
+    // Some agents produce policies: [{ file, type: "SCP", ... }] instead of scps[]/rcps[]
+    if (!data.scps && !data.rcps && Array.isArray(data.policies)) {
+      const mapPolicy = (p) => ({
+        name: p.name || p.file?.replace(/^policies\//, "").replace(/\.json$/, "") || "Unnamed",
+        policy_json: p.policy_json || null,
+        source_attack_paths: p.source_attack_paths || [],
+        impact_analysis: p.impact_analysis || {
+          prevents: [],
+          blast_radius: (p.blast_radius || "unknown").toLowerCase(),
+          break_glass: "none",
+        },
+      });
+      data.scps = data.policies
+        .filter((p) => (p.type || "").toUpperCase() === "SCP")
+        .map(mapPolicy);
+      data.rcps = data.policies
+        .filter((p) => (p.type || "").toUpperCase() === "RCP")
+        .map(mapPolicy);
+    }
+  }
+
+  // Map technical_remediation → technical_recommendations (data layer uses former)
+  if (data.technical_remediation && !data.technical_recommendations) {
+    data.technical_recommendations = data.technical_remediation;
+  }
+
+  return { data, source };
+}
 
 // ─── Copy Button ───
 function CopyButton({ text }) {
@@ -148,9 +238,9 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
     feMerge.append("feMergeNode").attr("in", "blur");
     feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
-    const nodes = data.graph.nodes.map((d) => ({ ...d }));
+    const nodes = (data.graph.nodes || []).map((d) => ({ ...d }));
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-    const links = data.graph.edges
+    const links = (data.graph.edges || [])
       .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
       .map((d) => ({ ...d }));
 
@@ -396,6 +486,73 @@ function PathDetail({ path }) {
           ))}
         </>
       )}
+
+      {/* Exploit: Lateral Movement */}
+      {path.lateral_movement_chain?.length > 0 && (
+        <>
+          <SectionHeader title="Lateral Movement Chain" icon={"\u21C4"} />
+          {path.lateral_movement_chain.map((hop, i) => (
+            <div key={i} style={{
+              display: "flex", gap: 8, alignItems: "center", marginBottom: 6,
+              background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
+              borderRadius: 6, padding: "8px 12px",
+            }}>
+              <span style={{ color: COLORS.nodeUser, fontFamily: "monospace", fontSize: 11 }}>{hop.from}</span>
+              <span style={{ color: COLORS.edgeCrossAccount }}>{"\u2192"}</span>
+              <span style={{ color: COLORS.nodeRole, fontFamily: "monospace", fontSize: 11 }}>{hop.to}</span>
+              <span style={{ color: COLORS.textDim, fontSize: 10, marginLeft: "auto" }}>{hop.mechanism}</span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Exploit: Persistence */}
+      {path.persistence_techniques?.length > 0 && (
+        <>
+          <SectionHeader title="Persistence Techniques" icon={"\uD83D\uDD12"} />
+          {path.persistence_techniques.map((t, i) => (
+            <div key={i} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginBottom: 6, padding: "6px 10px", borderRadius: 6,
+              background: t.available ? COLORS.criticalBg : COLORS.bgCard,
+              border: `1px solid ${t.available ? COLORS.critical + "33" : COLORS.border}`,
+            }}>
+              <span style={{ fontSize: 12, color: COLORS.text }}>{t.technique}</span>
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 4,
+                color: t.available ? COLORS.critical : COLORS.low,
+                background: t.available ? COLORS.criticalBg : COLORS.lowBg,
+              }}>{t.available ? "AVAILABLE" : "BLOCKED"}</span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Exploit: Exfiltration */}
+      {path.exfiltration_vectors?.length > 0 && (
+        <>
+          <SectionHeader title="Exfiltration Vectors" icon={"\uD83D\uDCE4"} />
+          {path.exfiltration_vectors.map((v, i) => (
+            <div key={i} style={{
+              marginBottom: 6, padding: "8px 10px", borderRadius: 6,
+              background: v.available ? COLORS.highBg : COLORS.bgCard,
+              border: `1px solid ${v.available ? COLORS.high + "33" : COLORS.border}`,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: COLORS.text }}>{v.vector}</span>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 4,
+                  color: v.available ? COLORS.high : COLORS.low,
+                  background: v.available ? COLORS.highBg : COLORS.lowBg,
+                }}>{v.available ? "REACHABLE" : "BLOCKED"}</span>
+              </div>
+              {v.scope_estimate && (
+                <div style={{ fontSize: 10, color: COLORS.textDim, marginTop: 4 }}>Scope: {v.scope_estimate}</div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
@@ -456,7 +613,7 @@ function FileUpload({ onDataLoad }) {
       try {
         const json = JSON.parse(ev.target.result);
         onDataLoad(json);
-      } catch { alert("Invalid JSON file"); }
+      } catch { console.error("[SCOPE] Invalid JSON file uploaded"); }
     };
     reader.readAsText(file);
   }, [onDataLoad]);
@@ -933,17 +1090,30 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
 // ─── Audit/Exploit View (extracted from original App) ───
 function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, tab, setTab, selectedNode, setSelectedNode, searchQuery, setSearchQuery, activeSeverities, handleToggleSeverity, activeCategories, handleToggleCategory, sortMode, setSortMode, activeStatPanel, handleStatClick }) {
   const summary = data?.summary || {};
+  const isExploit = data?.source === "exploit";
 
   return (
     <>
       {/* Stats Row */}
       <div style={{ display: "flex", gap: 12, padding: "16px 24px", flexWrap: "wrap" }}>
-        <StatCard label="Users" value={summary.total_users} subtext={`${summary.users_without_mfa || 0} no MFA`} color={summary.users_without_mfa > 0 ? COLORS.high : COLORS.text} active={activeStatPanel === "users"} onClick={() => handleStatClick("users")} />
-        <StatCard label="Roles" value={summary.total_roles} active={activeStatPanel === "roles"} onClick={() => handleStatClick("roles")} />
-        <StatCard label="Trust Relationships" value={summary.total_trust_relationships} subtext={`${summary.cross_account_trusts || 0} cross-account`} active={activeStatPanel === "trusts"} onClick={() => handleStatClick("trusts")} />
-        <StatCard label="Wildcard Trusts" value={summary.wildcard_trust_policies} color={summary.wildcard_trust_policies > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "wildcards"} onClick={() => handleStatClick("wildcards")} />
-        <StatCard label="Critical PrivEsc" value={summary.critical_priv_esc_risks} color={summary.critical_priv_esc_risks > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "privesc"} onClick={() => handleStatClick("privesc")} />
-        <StatCard label="Attack Paths" value={data.attack_paths?.length || 0} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
+        {isExploit ? (
+          <>
+            <StatCard label="Attack Paths" value={data.attack_paths?.length || 0} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
+            <StatCard label="Persistence" value={summary.persistence_techniques ?? 0} color={COLORS.critical} />
+            <StatCard label="Exfiltration" value={summary.exfiltration_vectors ?? 0} color={COLORS.high} />
+            <StatCard label="Highest Priv" value={summary.highest_priv || "N/A"} color={COLORS.text} />
+            <StatCard label="Critical PrivEsc" value={data.attack_paths?.filter((p) => p.severity === "critical" && (p.category === "privilege_escalation" || !p.category)).length || 0} color={COLORS.critical} active={activeStatPanel === "privesc"} onClick={() => handleStatClick("privesc")} />
+          </>
+        ) : (
+          <>
+            <StatCard label="Users" value={summary.total_users ?? 0} subtext={`${summary.users_without_mfa || 0} no MFA`} color={summary.users_without_mfa > 0 ? COLORS.high : COLORS.text} active={activeStatPanel === "users"} onClick={() => handleStatClick("users")} />
+            <StatCard label="Roles" value={summary.total_roles ?? 0} active={activeStatPanel === "roles"} onClick={() => handleStatClick("roles")} />
+            <StatCard label="Trust Relationships" value={summary.total_trust_relationships ?? 0} subtext={`${summary.cross_account_trusts || 0} cross-account`} active={activeStatPanel === "trusts"} onClick={() => handleStatClick("trusts")} />
+            <StatCard label="Wildcard Trusts" value={summary.wildcard_trust_policies ?? 0} color={(summary.wildcard_trust_policies ?? 0) > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "wildcards"} onClick={() => handleStatClick("wildcards")} />
+            <StatCard label="Critical PrivEsc" value={summary.critical_priv_esc_risks ?? 0} color={(summary.critical_priv_esc_risks ?? 0) > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "privesc"} onClick={() => handleStatClick("privesc")} />
+            <StatCard label="Attack Paths" value={data.attack_paths?.length || 0} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
+          </>
+        )}
       </div>
 
       {/* Main Content */}
@@ -1050,7 +1220,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
                 )}
               </>
             ) : (
-              <PathDetail path={selectedPath} />
+              selectedPath ? <PathDetail path={selectedPath} /> : <div className="empty-state">Select an attack path to view details</div>
             )}
           </div>
         </div>
@@ -1136,16 +1306,16 @@ function PolicyViewer({ scps, rcps }) {
 
             {isExpanded && (
               <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${COLORS.border}` }}>
-                {/* Impact Analysis */}
-                {policy.impact_analysis && (
+                {/* Impact Analysis — only show when it has real data */}
+                {policy.impact_analysis && (policy.impact_analysis.prevents?.length > 0 || (policy.impact_analysis.break_glass && policy.impact_analysis.break_glass !== "none")) && (
                   <div style={{ marginTop: 12, marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 6 }}>Impact Analysis</div>
                     {policy.impact_analysis.prevents?.length > 0 && (
                       <div style={{ fontSize: 12, color: COLORS.text, marginBottom: 4 }}>
-                        Prevents: {policy.impact_analysis.prevents.join(", ")}
+                        <span style={{ color: COLORS.textDim }}>Prevents: </span>{policy.impact_analysis.prevents.join(", ")}
                       </div>
                     )}
-                    {policy.impact_analysis.break_glass && (
+                    {policy.impact_analysis.break_glass && policy.impact_analysis.break_glass !== "none" && (
                       <div style={{ fontSize: 12, color: COLORS.textDim }}>
                         Break-glass: {policy.impact_analysis.break_glass}
                       </div>
@@ -1169,7 +1339,7 @@ function PolicyViewer({ scps, rcps }) {
                 )}
 
                 {/* Policy JSON */}
-                {policy.policy_json && (
+                {policy.policy_json ? (
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
                       <span style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase" }}>Policy JSON</span>
@@ -1180,6 +1350,14 @@ function PolicyViewer({ scps, rcps }) {
                       padding: 12, fontSize: 11, color: "#7ee787", fontFamily: "monospace",
                       overflow: "auto", maxHeight: 300, margin: 0, whiteSpace: "pre-wrap",
                     }}>{formatJSON(policy.policy_json)}</pre>
+                  </div>
+                ) : (
+                  <div style={{
+                    marginTop: 8, padding: 12, background: "#0d1117",
+                    border: `1px solid ${COLORS.border}`, borderRadius: 6,
+                    fontSize: 12, color: COLORS.textDim,
+                  }}>
+                    Policy JSON not embedded in results. See <span style={{ color: COLORS.accent, fontFamily: "monospace" }}>{policy.name}.json</span> in the run directory's <span style={{ fontFamily: "monospace" }}>policies/</span> folder.
                   </div>
                 )}
               </div>
@@ -1244,15 +1422,28 @@ function DetectionRulesList({ detections }) {
                       )}
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
-                    <pre style={{
-                      flex: 1, background: "rgba(6,182,212,0.08)", border: `1px solid rgba(6,182,212,0.2)`,
-                      borderRadius: 6, padding: "8px 12px", fontSize: 11,
-                      color: "#67e8f9", fontFamily: "monospace", margin: 0,
-                      whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 200,
-                    }}>{rule.spl}</pre>
-                    <CopyButton text={rule.spl} />
-                  </div>
+                  {rule.spl ? (
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
+                      <pre style={{
+                        flex: 1, background: "rgba(6,182,212,0.08)", border: `1px solid rgba(6,182,212,0.2)`,
+                        borderRadius: 6, padding: "8px 12px", fontSize: 11,
+                        color: "#67e8f9", fontFamily: "monospace", margin: 0,
+                        whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 200,
+                      }}>{rule.spl}</pre>
+                      <CopyButton text={rule.spl} />
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      {rule.paths_covered != null && (
+                        <span style={{ fontSize: 11, color: COLORS.textDim }}>
+                          Paths covered: <span style={{ color: COLORS.text, fontWeight: 600 }}>{rule.paths_covered}</span>
+                        </span>
+                      )}
+                      <span style={{ fontSize: 11, color: COLORS.textMuted, fontStyle: "italic" }}>
+                        SPL query in technical-remediation.md
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1322,7 +1513,7 @@ function ControlsMatrix({ controls }) {
 function PrioritizationSidebar({ items, onScrollTo }) {
   if (!items?.length) return null;
 
-  const catColors = { scp: COLORS.high, rcp: COLORS.medium, detection: "#06b6d4", control: COLORS.low };
+  const catColors = { scp: COLORS.high, rcp: COLORS.medium, detection: COLORS.detection, control: COLORS.low };
   const riskColors = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low };
   const effortColors = { low: COLORS.low, medium: COLORS.high, high: COLORS.critical };
 
@@ -1531,7 +1722,7 @@ function TechnicalRecommendationsView({ data }) {
               {[
                 { items: bundle.scp_names, label: "SCPs", color: COLORS.high },
                 { items: bundle.rcp_names, label: "RCPs", color: COLORS.medium },
-                { items: bundle.detection_names, label: "Detections", color: "#06b6d4" },
+                { items: bundle.detection_names, label: "Detections", color: COLORS.detection },
                 { items: bundle.control_names, label: "Controls", color: COLORS.low },
               ].filter(({ items }) => items?.length > 0).map(({ items, label, color }) => (
                 <div key={label}>
@@ -1559,13 +1750,13 @@ function DefendView({ data }) {
 
   return (
     <>
-      {/* Stats Row */}
+      {/* Stats Row — cards switch to the corresponding tab */}
       <div style={{ display: "flex", gap: 12, padding: "16px 24px", flexWrap: "wrap" }}>
-        <StatCard label="SCPs" value={summary.scps_generated ?? data.scps?.length ?? 0} color={COLORS.high} />
-        <StatCard label="RCPs" value={summary.rcps_generated ?? data.rcps?.length ?? 0} color={COLORS.medium} />
-        <StatCard label="Detections" value={summary.detections_generated ?? data.detections?.length ?? 0} color="#06b6d4" />
-        <StatCard label="Controls" value={summary.controls_recommended ?? data.security_controls?.length ?? 0} color={COLORS.low} />
-        <StatCard label="Quick Wins" value={summary.quick_wins ?? 0} color={COLORS.accent} />
+        <StatCard label="SCPs" value={summary.scps_generated ?? data.scps?.length ?? 0} color={COLORS.high} onClick={() => setDefendTab("policies")} active={defendTab === "policies"} />
+        <StatCard label="RCPs" value={summary.rcps_generated ?? data.rcps?.length ?? 0} color={COLORS.medium} onClick={() => setDefendTab("policies")} active={defendTab === "policies"} />
+        <StatCard label="Detections" value={summary.detections_generated ?? data.detections?.length ?? 0} color={COLORS.detection} onClick={() => setDefendTab("detections")} active={defendTab === "detections"} />
+        <StatCard label="Controls" value={summary.controls_recommended ?? data.security_controls?.length ?? 0} color={COLORS.low} onClick={() => setDefendTab("controls")} active={defendTab === "controls"} />
+        <StatCard label="Quick Wins" value={summary.quick_wins ?? 0} color={COLORS.accent} onClick={() => setDefendTab("executive")} active={defendTab === "executive"} />
       </div>
 
       {/* Main Content: Sidebar + Tabbed Center */}
@@ -1655,7 +1846,7 @@ export default function App() {
   // Auto-load ALL latest runs by source type
   useEffect(() => {
     fetch("/index.json")
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((r) => { if (!r.ok) throw new Error(`index.json returned ${r.status}`); return r.json(); })
       .then((index) => {
         setRunIndex(index);
         const runs = index?.runs || [];
@@ -1669,35 +1860,41 @@ export default function App() {
         const fetches = Object.entries(latestBySource).map(([src, run]) => {
           const file = run.file || `${run.run_id}.json`;
           return fetch(`/${file}`)
-            .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+            .then((r) => { if (!r.ok) throw new Error(`${file} returned ${r.status}`); return r.json(); })
             .then((json) => {
               if (json?.account_id) {
-                const source = json.source || src;
-                setAllData((prev) => ({ ...prev, [source]: json }));
+                const { data: normalized, source } = normalizeForDashboard(json, src);
+                setAllData((prev) => ({ ...prev, [source]: normalized }));
+              } else {
+                console.warn(`[SCOPE] Skipped ${file}: missing account_id field`);
               }
             })
-            .catch(() => {}); // Individual failures are OK
+            .catch((err) => { console.warn(`[SCOPE] Failed to load run ${file}:`, err.message); });
         });
         return Promise.all(fetches);
       })
       .then(() => setLoading(false))
-      .catch(() => {
+      .catch((err) => {
+        console.warn("[SCOPE] index.json load failed, trying /results.json fallback:", err.message);
         // Fallback: load /results.json
         fetch("/results.json")
-          .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+          .then((r) => { if (!r.ok) throw new Error(`results.json returned ${r.status}`); return r.json(); })
           .then((json) => {
             if (json?.account_id) {
-              const source = json.source || "audit";
-              setAllData((prev) => ({ ...prev, [source]: json }));
+              const { data: normalized, source } = normalizeForDashboard(json);
+              setAllData((prev) => ({ ...prev, [source]: normalized }));
+            } else {
+              console.warn("[SCOPE] results.json fallback: missing account_id field");
             }
           })
+          .catch((err) => { console.warn("[SCOPE] results.json fallback failed:", err.message); })
           .finally(() => setLoading(false));
       });
   }, []);
 
   const handleDataLoad = useCallback((json) => {
-    const source = json.source || "audit";
-    setAllData((prev) => ({ ...prev, [source]: json }));
+    const { data: normalized, source } = normalizeForDashboard(json);
+    setAllData((prev) => ({ ...prev, [source]: normalized }));
     setActivePhase(source);
     setSelectedPath(null);
     setSelectedNode(null);
@@ -1736,11 +1933,11 @@ export default function App() {
   const handleSelectRun = useCallback((run) => {
     const file = run.file || `${run.run_id}.json`;
     fetch(`/${file}`)
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((r) => { if (!r.ok) throw new Error(`${file} returned ${r.status}`); return r.json(); })
       .then((json) => {
         if (json && json.account_id) {
-          const source = json.source || run.source || "audit";
-          setAllData((prev) => ({ ...prev, [source]: json }));
+          const { data: normalized, source } = normalizeForDashboard(json, json.source || run.source);
+          setAllData((prev) => ({ ...prev, [source]: normalized }));
           setActivePhase(source);
           setSelectedPath(null);
           setSelectedNode(null);
@@ -1749,7 +1946,7 @@ export default function App() {
           setActiveStatPanel(null);
         }
       })
-      .catch(() => { alert(`Failed to load run: ${run.run_id}`); });
+      .catch((err) => { console.error(`[SCOPE] Failed to load run ${run.run_id}:`, err.message); });
   }, []);
 
   // Filter and sort attack paths

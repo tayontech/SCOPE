@@ -254,6 +254,14 @@ For each `$RUN_DIR/policies/*.json`:
 
 ```json
 {
+  "summary": {
+    "scps_generated": "int",
+    "rcps_generated": "int",
+    "detections_generated": "int",
+    "controls_recommended": "int",
+    "quick_wins": "int — count of items with effort=low",
+    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW"
+  },
   "audit_runs_analyzed": ["string — run IDs that were consumed"],
   "attack_paths_aggregated": {
     "total": "int",
@@ -265,6 +273,34 @@ For each `$RUN_DIR/policies/*.json`:
       "medium": "int",
       "low": "int"
     }
+  },
+  "executive_summary": {
+    "risk_posture": "string",
+    "category_breakdown": [
+      { "category": "string", "count": "int", "severity": "critical | high | medium | low" }
+    ],
+    "quick_wins": [
+      { "rank": "int", "action": "string", "impact": "string" }
+    ],
+    "remediation_timeline": {
+      "this_week": ["string"],
+      "this_month": ["string"],
+      "this_quarter": ["string"]
+    }
+  },
+  "technical_recommendations": {
+    "attack_path_bundles": [
+      {
+        "attack_path": "string",
+        "severity": "critical | high | medium | low",
+        "source_run_ids": ["string"],
+        "classification": "systemic | one-off",
+        "scp_names": ["string"],
+        "rcp_names": ["string"],
+        "detection_names": ["string"],
+        "control_names": ["string"]
+      }
+    ]
   },
   "scps": [
     {
@@ -300,6 +336,7 @@ For each `$RUN_DIR/policies/*.json`:
     {
       "name": "string",
       "spl": "string — full SPL query",
+      "category": "string — attack path category for grouping",
       "mitre_technique": "string — e.g., T1078.004",
       "severity": "critical | high | medium | low",
       "source_attack_paths": ["string"],
@@ -310,6 +347,8 @@ For each `$RUN_DIR/policies/*.json`:
     {
       "service": "string — GuardDuty | Config | Access Analyzer | CloudWatch",
       "recommendation": "string",
+      "priority": "string — critical | high | medium | low",
+      "effort": "string — low | medium | high",
       "source_attack_paths": ["string"]
     }
   ],
@@ -395,6 +434,7 @@ If present, extract the exfiltration analysis section:
   "source_audit_run": "string | null — run ID of the audit run used for intake, null if fresh enumeration",
   "target_arn": "string — principal ARN analyzed",
   "intake_mode": "audit-data | fresh-enumeration",
+  "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
   "paths_found": "int",
   "highest_priv": "string — e.g., ADMIN, POWER_USER, READ_ONLY",
   "escalation_paths": [
@@ -441,7 +481,7 @@ If present, extract the exfiltration analysis section:
     "techniques_available": "int — count of available techniques (0-7)",
     "techniques": [
       {
-        "name": "string — technique name",
+        "technique": "string — technique name",
         "available": "bool",
         "required_permission": "string — IAM permission needed",
         "permission_status": "CONFIRMED | LIKELY | NOT_AVAILABLE",
@@ -454,7 +494,7 @@ If present, extract the exfiltration analysis section:
     "vectors_available": "int — count of available vectors (0-6)",
     "vectors": [
       {
-        "name": "string — vector name",
+        "vector": "string — vector name",
         "available": "bool",
         "required_permission": "string — IAM permission needed",
         "permission_status": "CONFIRMED | LIKELY | NOT_AVAILABLE",
