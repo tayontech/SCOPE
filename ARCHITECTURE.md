@@ -181,7 +181,7 @@ Downstream agents consume upstream output in this priority order:
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
 | **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
-| **defend** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run, auto) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/*.json`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
+| **defend** | Auto-called by audit | `$AUDIT_RUN_DIR` (current run, auto) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `evidence.jsonl` | verify-core → data → evidence |
 | **investigate** | `/scope:investigate` | Splunk MCP, `./investigate/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/evidence.jsonl` (if saved), `./investigate/context.json` | verify-core (standalone — no post-processing pipeline) |
 | **verify-core** | Called by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | verify-aws, verify-splunk |
