@@ -83,9 +83,9 @@ Once installed, use slash commands from inside your editor:
 | `/scope:investigate` | SOC alert investigation via Splunk — timeline building, IOC correlation |
 | `/scope:help` | List available commands, show usage examples, and link to documentation (built-in — reads `commands/help.md` directly, no agent installation needed) |
 
-> **Gemini CLI users:** Skills appear as `$scope-audit` (dollar-sign prefix, hyphen instead of colon)
+> **Gemini CLI users:** Commands use the same `/scope:audit` syntax — the installer creates TOML files in `.gemini/commands/scope/`
 >
-> **Codex users:** Skills appear as `$scope-audit` (dollar-sign prefix, hyphen instead of colon)
+> **Codex users:** Skills use dollar-sign prefix with hyphens: `$scope-audit`, `$scope-exploit`, `$scope-investigate`
 
 ### Audit Examples
 

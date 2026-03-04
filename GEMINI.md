@@ -6,14 +6,7 @@ Each agent file is self-contained for project context, credentials, pipeline rul
 
 ## Skill Naming
 
-In Gemini CLI, skills use dollar-sign prefix with hyphens (not colons):
-
-| Gemini Skill | Equivalent |
-|-------------|-----------|
-| `$scope-audit` | `/scope:audit` |
-| `$scope-exploit` | `/scope:exploit` |
-| `$scope-investigate` | `/scope:investigate` |
-| `$scope-help` | `/scope:help` |
+Gemini CLI commands use the same `/scope:audit` convention as Claude Code. The installer creates TOML files in `.gemini/commands/scope/` — subdirectory paths are converted to colon-separated names (e.g., `scope/audit.toml` → `/scope:audit`).
 
 ## Agents
 
@@ -46,12 +39,12 @@ bin/                  Tooling (install.js deploys agents to editor config direct
 
 | Command | Description |
 |---------|-------------|
-| `$scope-audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Auto-chains to defensive controls generation. |
-| `$scope-exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `$scope-investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
-| `$scope-help` | List available commands, show usage examples |
+| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Auto-chains to defensive controls generation. |
+| `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
+| `/scope:investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
+| `/scope:help` | List available commands, show usage examples |
 
-Note: `$scope-help` reads `commands/help.md` directly — it is not an installed agent.
+Note: `/scope:help` reads `commands/help.md` directly — it is not an installed agent.
 
 ## Data Layer
 

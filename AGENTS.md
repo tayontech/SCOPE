@@ -31,14 +31,18 @@ config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js deploys agents to editor config directories)
 ```
 
+## Skill Naming
+
+Codex skills use the `$` prefix with hyphens. The installer creates `SKILL.md` files in `.codex/skills/` directories (e.g., `.codex/skills/scope-audit/SKILL.md` → `$scope-audit`).
+
 ## Slash Commands
 
 | Command | Description |
 |---------|-------------|
-| `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Auto-chains to defensive controls generation. |
-| `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `/scope:investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
-| `/scope:help` | List available commands, show usage examples |
+| `$scope-audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Auto-chains to defensive controls generation. |
+| `$scope-exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
+| `$scope-investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
+| `$scope-help` | List available commands, show usage examples |
 
 ## Data Layer
 
