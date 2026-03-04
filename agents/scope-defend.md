@@ -1494,7 +1494,8 @@ Construct `results.json` from the generated artifacts:
       "spl": "<full SPL query>",
       "severity": "critical | high | medium | low",
       "category": "<attack path category>",
-      "mitre_technique": "<e.g., T1078.004>"
+      "mitre_technique": "<e.g., T1078.004>",
+      "source_attack_paths": ["<attack path names this detection addresses>"]
     }
   ],
   "security_controls": [
@@ -1539,10 +1540,10 @@ cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
 # Update dashboard index
 if [ -f dashboard/public/index.json ]; then
-  # Read existing index and append new run
+  # Read existing index and append new run — do NOT override latest (keep audit as default view)
   node -e "
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
-    idx.latest = '$RUN_ID';
+    idx.latest_defend = '$RUN_ID';
     idx.runs = idx.runs || [];
     idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
     idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', file: '$RUN_ID.json' });
@@ -1550,7 +1551,7 @@ if [ -f dashboard/public/index.json ]; then
   "
 else
   node -e "
-    const idx = { latest: '$RUN_ID', runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', file: '$RUN_ID.json' }] };
+    const idx = { latest: '$RUN_ID', latest_defend: '$RUN_ID', runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', file: '$RUN_ID.json' }] };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 fi

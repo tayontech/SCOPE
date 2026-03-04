@@ -220,13 +220,15 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
       .attr("opacity", (d) => !hasHighlight || highlightedNodes.has(d.id) ? 1 : 0.08)
       .text((d) => ({ user: "\uD83D\uDC64", role: "\uD83D\uDD11", escalation: "\u26A1", data: "\uD83D\uDCBE", external: "\uD83C\uDF10" }[d.type] || "?"));
 
+    node.append("title").text((d) => d.label);
+
     node.append("text")
       .attr("dy", 28).attr("text-anchor", "middle")
       .attr("font-size", "10px")
       .attr("fill", (d) => !hasHighlight || highlightedNodes.has(d.id) ? COLORS.text : COLORS.textMuted)
       .attr("pointer-events", "none")
       .attr("opacity", (d) => !hasHighlight || highlightedNodes.has(d.id) ? 1 : 0.08)
-      .text((d) => d.label.length > 18 ? d.label.slice(0, 16) + "\u2026" : d.label);
+      .text((d) => d.label.length > 24 ? d.label.slice(0, 22) + "\u2026" : d.label);
 
     sim.on("tick", () => {
       link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y)
@@ -279,7 +281,7 @@ function AttackPathCard({ path, isSelected, onClick }) {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <span style={{ fontWeight: 600, color: COLORS.text, fontSize: 14 }}>{path.name}</span>
+        <span style={{ fontWeight: 600, color: COLORS.text, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={path.name}>{path.name}</span>
         <span style={{
           background: sev.bg, color: sev.color, padding: "2px 10px", borderRadius: 12,
           fontSize: 11, fontWeight: 600, textTransform: "uppercase",
@@ -620,7 +622,7 @@ function RunHistoryPanel({ runs, onSelectRun, onClose }) {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, fontFamily: "monospace" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} title={run.run_id}>
                     {run.run_id}
                   </span>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -885,7 +887,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text }}>{item.name}</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={item.name}>{item.name}</span>
         <span style={{
           background: sev.bg, color: sev.color, padding: "2px 8px", borderRadius: 12,
           fontSize: 10, fontWeight: 600, textTransform: "uppercase",
@@ -926,7 +928,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0, overflow: "hidden" }}>
         {/* Left: Attack Paths List */}
         <div style={{ width: 320, minWidth: 280, display: "flex", flexDirection: "column" }}>
           <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 600, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -1324,7 +1326,7 @@ function PrioritizationSidebar({ items, onScrollTo }) {
               fontSize: 16, fontWeight: 700, color: COLORS.textDim, fontFamily: "monospace",
               minWidth: 24,
             }}>#{item.rank}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, flex: 1 }}>{item.action}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.action}>{item.action}</span>
           </div>
           <div style={{ display: "flex", gap: 4, paddingLeft: 32 }}>
             <span style={{
@@ -1368,7 +1370,7 @@ function DefendView({ data }) {
       </div>
 
       {/* Main Content: Sidebar + Tabbed Center */}
-      <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0, overflow: "hidden" }}>
         {/* Prioritization Sidebar */}
         <PrioritizationSidebar items={data.prioritization} />
 
@@ -1406,43 +1408,11 @@ function DefendView({ data }) {
   );
 }
 
-// ─── Phase Mismatch Banner ───
-function PhaseMismatchBanner({ activePhase, dataSource, onSwitchPhase }) {
-  const sourceLabel = PHASE_CONFIG[dataSource]?.label || dataSource;
-  const activeLabel = PHASE_CONFIG[activePhase]?.label || activePhase;
-  return (
-    <div style={{
-      padding: "16px 24px", background: "rgba(245,158,11,0.08)",
-      border: `1px solid rgba(245,158,11,0.2)`, margin: "16px 24px",
-      borderRadius: 8, textAlign: "center",
-    }}>
-      <div style={{ fontSize: 14, color: COLORS.text, marginBottom: 8 }}>
-        This run does not contain <strong>{activeLabel}</strong> data.
-      </div>
-      <div style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 12 }}>
-        The loaded data is from a <strong style={{ color: PHASE_CONFIG[dataSource]?.color }}>{sourceLabel}</strong> run.
-      </div>
-      <button
-        onClick={() => onSwitchPhase(dataSource)}
-        style={{
-          padding: "6px 18px", borderRadius: 6, cursor: "pointer",
-          background: PHASE_CONFIG[dataSource]?.color + "18",
-          border: `1px solid ${PHASE_CONFIG[dataSource]?.color}`,
-          color: PHASE_CONFIG[dataSource]?.color,
-          fontSize: 12, fontWeight: 600,
-        }}
-      >
-        Switch to {sourceLabel} tab
-      </button>
-    </div>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // ─── Main Dashboard ───
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
-  const [data, setData] = useState(null);
+  const [allData, setAllData] = useState({});  // { audit: {...}, defend: {...}, exploit: {...} }
   const [selectedPath, setSelectedPath] = useState(null);
   const [tab, setTab] = useState("graph");
   const [selectedNode, setSelectedNode] = useState(null);
@@ -1458,60 +1428,74 @@ export default function App() {
   const [runIndex, setRunIndex] = useState(null);
   const [activeStatPanel, setActiveStatPanel] = useState(null);
 
-  // Detect phase from data source
-  const dataSource = useMemo(() => {
-    if (!data) return "audit";
-    return data.source || "audit";
-  }, [data]);
+  // Derive active data from allData + activePhase
+  const data = useMemo(() => {
+    if (allData[activePhase]) return allData[activePhase];
+    // audit/exploit share a view — show whichever is available
+    if (activePhase === "audit" && allData["exploit"]) return allData["exploit"];
+    if (activePhase === "exploit" && allData["audit"]) return allData["audit"];
+    return null;
+  }, [allData, activePhase]);
 
-  // Auto-switch phase when data source changes
+  // Auto-switch to first available phase when data loads
   useEffect(() => {
-    if (dataSource === "audit" || dataSource === "exploit") {
-      setActivePhase((prev) => (prev === "audit" || prev === "exploit") ? prev : dataSource);
-    } else {
-      setActivePhase(dataSource);
+    const sources = Object.keys(allData);
+    if (sources.length > 0 && !allData[activePhase]) {
+      // Don't auto-switch if audit/exploit share a view and either exists
+      if ((activePhase === "audit" || activePhase === "exploit") && (allData["audit"] || allData["exploit"])) return;
+      if (allData["audit"]) setActivePhase("audit");
+      else if (allData["exploit"]) setActivePhase("exploit");
+      else if (allData["defend"]) setActivePhase("defend");
     }
-  }, [dataSource]);
+  }, [allData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Check if current phase matches loaded data
-  const isPhaseMatch = useMemo(() => {
-    if (activePhase === "audit" || activePhase === "exploit") {
-      return dataSource === "audit" || dataSource === "exploit";
-    }
-    return activePhase === dataSource;
-  }, [activePhase, dataSource]);
-
-  // Auto-load latest results
+  // Auto-load ALL latest runs by source type
   useEffect(() => {
     fetch("/index.json")
       .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((index) => {
         setRunIndex(index);
-        if (index && index.latest) {
-          return fetch(`/${index.latest}.json`).then((r) => {
-            if (!r.ok) throw new Error();
-            return r.json();
-          });
+        const runs = index?.runs || [];
+        // Find latest run per source type
+        const latestBySource = {};
+        for (const run of runs) {
+          const src = run.source || "audit";
+          if (!latestBySource[src]) latestBySource[src] = run;
         }
-        throw new Error("no latest");
+        // Load all source types in parallel
+        const fetches = Object.entries(latestBySource).map(([src, run]) => {
+          const file = run.file || `${run.run_id}.json`;
+          return fetch(`/${file}`)
+            .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+            .then((json) => {
+              if (json?.account_id) {
+                const source = json.source || src;
+                setAllData((prev) => ({ ...prev, [source]: json }));
+              }
+            })
+            .catch(() => {}); // Individual failures are OK
+        });
+        return Promise.all(fetches);
       })
-      .then((json) => {
-        if (json && json.account_id) setData(json);
-        setLoading(false);
-      })
+      .then(() => setLoading(false))
       .catch(() => {
+        // Fallback: load /results.json
         fetch("/results.json")
           .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
           .then((json) => {
-            if (json && json.account_id) setData(json);
-            setLoading(false);
+            if (json?.account_id) {
+              const source = json.source || "audit";
+              setAllData((prev) => ({ ...prev, [source]: json }));
+            }
           })
-          .catch(() => { setLoading(false); });
+          .finally(() => setLoading(false));
       });
   }, []);
 
   const handleDataLoad = useCallback((json) => {
-    setData(json);
+    const source = json.source || "audit";
+    setAllData((prev) => ({ ...prev, [source]: json }));
+    setActivePhase(source);
     setSelectedPath(null);
     setSelectedNode(null);
     setSearchQuery("");
@@ -1552,19 +1536,14 @@ export default function App() {
       .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((json) => {
         if (json && json.account_id) {
-          setData(json);
+          const source = json.source || run.source || "audit";
+          setAllData((prev) => ({ ...prev, [source]: json }));
+          setActivePhase(source);
           setSelectedPath(null);
           setSelectedNode(null);
           setSearchQuery("");
           setShowHistory(false);
           setActiveStatPanel(null);
-          // Auto-switch phase based on loaded run
-          const source = json.source || run.source || "audit";
-          if (source === "audit" || source === "exploit") {
-            setActivePhase(source);
-          } else {
-            setActivePhase(source);
-          }
         }
       })
       .catch(() => { alert(`Failed to load run: ${run.run_id}`); });
@@ -1609,7 +1588,7 @@ export default function App() {
     </div>
   );
 
-  if (!data) return (
+  if (Object.keys(allData).length === 0) return (
     <div style={{ fontFamily: "'IBM Plex Sans', -apple-system, sans-serif", background: COLORS.bg, color: COLORS.text, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center", maxWidth: 480 }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>{"\uD83D\uDEE1"}</div>
@@ -1622,6 +1601,8 @@ export default function App() {
     </div>
   );
 
+  // Get account info from any available data source (for header)
+  const anyData = data || Object.values(allData)[0] || {};
   const summary = data?.summary || {};
   const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[summary.risk_score] || COLORS.text;
   const historyRuns = runIndex?.runs || [];
@@ -1630,8 +1611,8 @@ export default function App() {
   return (
     <div style={{
       fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
-      background: COLORS.bg, color: COLORS.text, minHeight: "100vh",
-      display: "flex", flexDirection: "column",
+      background: COLORS.bg, color: COLORS.text, height: "100vh",
+      display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
       {/* Header */}
       <div style={{
@@ -1645,8 +1626,10 @@ export default function App() {
               SCOPE
             </h1>
             <span style={{ fontSize: 11, color: COLORS.textDim }}>
-              Account {data.account_id} {"\u2022"} {data.region || "N/A"}
-              {data.source && <> {"\u2022"} <span style={{ color: PHASE_CONFIG[data.source]?.color || COLORS.accent }}>{data.source}</span></>}
+              Account {anyData.account_id} {"\u2022"} {anyData.region || "N/A"}
+              {Object.keys(allData).length > 0 && <> {"\u2022"} {Object.keys(allData).map((src) => (
+                <span key={src} style={{ color: PHASE_CONFIG[src]?.color || COLORS.accent, marginLeft: 4 }}>{src}</span>
+              ))}</>}
             </span>
           </div>
         </div>
@@ -1684,6 +1667,7 @@ export default function App() {
       }}>
         {Object.entries(PHASE_CONFIG).map(([key, cfg]) => {
           const isActive = activePhase === key;
+          const hasData = !!allData[key] || ((key === "audit" || key === "exploit") && (allData["audit"] || allData["exploit"]));
           return (
             <button
               key={key}
@@ -1696,21 +1680,26 @@ export default function App() {
                 borderBottom: `2px solid ${isActive ? cfg.color : "transparent"}`,
                 color: isActive ? cfg.color : COLORS.textMuted,
                 transition: "all 0.15s",
+                display: "flex", alignItems: "center", gap: 6,
               }}
             >
               {cfg.label}
+              {hasData && <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, opacity: isActive ? 1 : 0.5 }} />}
             </button>
           );
         })}
       </div>
 
       {/* Phase Content */}
-      {!isPhaseMatch ? (
-        <PhaseMismatchBanner
-          activePhase={activePhase}
-          dataSource={dataSource}
-          onSwitchPhase={setActivePhase}
-        />
+      {!data ? (
+        <div style={{
+          flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "16px 24px",
+        }}>
+          <div style={{ textAlign: "center", color: COLORS.textDim, fontSize: 14 }}>
+            No {activePhase} data loaded. Run <span style={{ color: COLORS.accent, fontFamily: "monospace" }}>/scope:{activePhase}</span> or load a {activePhase} results.json file.
+          </div>
+        </div>
       ) : (activePhase === "audit" || activePhase === "exploit") ? (
         <AuditExploitView
           data={data}
