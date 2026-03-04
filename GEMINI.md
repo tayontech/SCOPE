@@ -31,10 +31,11 @@ commands/             Quick-reference docs for each slash command (synopsis, arg
 data/                 Normalized JSON output (runtime-generated, gitignored)
 evidence/             Evidence provenance data (runtime-generated, gitignored)
 investigate/          Investigation artifacts (runtime-generated, gitignored)
-dashboard/            React + D3 dashboard at http://localhost:3000
+dashboard/            React + D3 dashboard (`dashboard.html`)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
-bin/                  Tooling (install.js deploys agents to editor config directories)
-.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, artifact check, evidence logger
+bin/                  Tooling (install.js — editor setup, generate-report.js — dashboard builder)
+.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, evidence logger
+.scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
 ```
 
 ## Hooks
@@ -45,6 +46,7 @@ SCOPE uses lifecycle hooks configured in `.gemini/settings.json`. Shared scripts
 |------|-------|---------|
 | `scope-safety-guard.sh` | BeforeTool (shell) | Block destructive AWS operations — agents are read-only |
 | `scope-spl-lint.sh` | AfterTool (write_file\|replace) | Hard-fail on SPL anti-patterns |
+| `scope-schema-validate.sh` | AfterTool (write_file\|replace) | Validate results.json and dashboard JSON against phase schemas |
 | `scope-artifact-check.sh` | AfterAgent | Verify mandatory artifacts exist before completion |
 | `scope-evidence-logger.sh` | AfterTool (shell) | Auto-log AWS CLI calls to evidence.jsonl |
 
@@ -69,7 +71,9 @@ Both are invoked by the source agent after writing artifacts — sequential and 
 
 ## Dashboard
 
-All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard loads `index.json`, iterates the `runs[]` array, and fetches the latest entry per source phase. No standalone HTML files are generated (dashboard/index.html is the Vite/React entry point, not a generated report).
+All visualization is handled by the SCOPE dashboard. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard loads `index.json`, iterates the `runs[]` array, and fetches the latest entry per source phase.
+
+**Dashboard HTML**: `cd dashboard && npm run dashboard` — generates a self-contained `dashboard.html` with all data inlined. Opens in any browser, no server required. Agents generate this automatically after the data pipeline completes.
 
 ## AWS Credential Model
 

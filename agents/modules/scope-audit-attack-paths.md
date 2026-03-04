@@ -600,6 +600,162 @@ MITRE: T1190 (Exploit Public-Facing Application), T1552.005 (Cloud Instance Meta
 
 ---
 
+### Part 6F: Permission-Level Access Analysis + Exhaustive Path Generation
+
+**Attack paths are not just privilege escalation.** For every role and policy in the account, you must analyze what access it provides, how that access can be reached, and whether that access pattern represents a risk. This means classifying each permission grant as read, write, or admin — and generating findings for ALL noteworthy access patterns, not just escalation chains.
+
+#### Step 1: Per-Role/Policy Access Classification
+
+For EVERY role (excluding service-linked roles) and every policy with meaningful permissions, produce an access classification:
+
+**Access levels:**
+- **admin** — `Action: "*"`, `Resource: "*"` or equivalent (AdministratorAccess, IAMFullAccess with sts:AssumeRole)
+- **write** — can modify resources: `Put*`, `Create*`, `Delete*`, `Update*`, `Attach*`, `Detach*` on sensitive services (IAM, STS, Lambda, S3, KMS, SecretsManager, EC2, Organizations)
+- **read** — can enumerate or read resources: `Get*`, `List*`, `Describe*`, `Read*` on sensitive services
+- **limited** — permissions scoped to non-sensitive services or tightly resource-constrained
+
+For each role/policy, record:
+```
+Role: <name>
+  Access level: admin | write | read | limited
+  Key permissions: [list top 5 most impactful actions granted]
+  Reachable via: [who can assume this role — trust policy principals]
+  Services affected: [which AWS services this role can touch]
+  Data access: [what data stores — S3 buckets, secrets, KMS keys — this role can read/write]
+```
+
+**Generate attack paths from access classification:**
+
+- **Write access to IAM** (any `iam:Put*`, `iam:Attach*`, `iam:Create*`, `iam:Update*`, `iam:Delete*`) → `excessive_permission` or `privilege_escalation` depending on specifics. Even `iam:CreateUser` alone on a read-only role is noteworthy.
+- **Write access to compute** (`lambda:UpdateFunctionCode`, `lambda:CreateFunction`, `ec2:RunInstances`, `ecs:RunTask`) → `excessive_permission` if the role isn't explicitly a deployment role. Show how write access to compute translates to code execution.
+- **Read access to secrets** (`secretsmanager:GetSecretValue`, `ssm:GetParameter`, `kms:Decrypt`) → `data_exposure`. Show what secrets/parameters are readable and what they protect.
+- **Read access to data stores** (`s3:GetObject` on sensitive buckets, `dynamodb:GetItem`, `rds-data:ExecuteStatement`) → `data_exposure`. Quantify the data reachable.
+- **Write access to data stores** (`s3:PutObject`, `s3:DeleteObject`, `dynamodb:PutItem`) → `post_exploitation`. Show the destructive or data-poisoning potential.
+- **Cross-service access chains** — a role that has `s3:GetObject` on a deployment bucket AND `lambda:UpdateFunctionCode` may not look like escalation on either permission alone, but combined they allow code injection. Flag these combinations.
+
+#### Step 2: Mandatory Category Coverage
+
+**You MUST generate attack paths for ALL of the following when the enumeration data supports them.** Shallow analysis that produces only 2-3 paths from dozens of roles and policies is a failure. Work through every category systematically.
+
+**trust_misconfiguration** — Generate a SEPARATE attack path for EVERY cross-account trust without `sts:ExternalId` condition. If 9 roles have cross-account trust without ExternalId, you must produce 9 separate trust_misconfiguration paths (one per role), not 1 aggregate finding. Each path should name the specific role, the trusted principal, and the confused deputy risk.
+
+**credential_risk** — Generate a SEPARATE attack path for EACH of:
+- Every user with stale access keys (>90 days old) — one path per user
+- Every user with console access but no MFA — one path per user
+- Every user with BOTH console access AND programmatic access keys but no MFA — one path per user (this is distinct from the no-MFA finding because the dual access surface is larger)
+
+**excessive_permission** — Generate attack paths for:
+- Every role with admin-equivalent names (e.g., containing "Admin", "Master", "FullAccess", "PowerUser") — enumerate their attached policies and flag if they grant broad permissions
+- Every role or user with `Action: "*", Resource: "*"` that is not an intended admin role
+- Every role with write access to IAM, STS, or Organizations — even partial write access is noteworthy
+- Every Lambda function with an admin or overly-broad execution role
+
+**lateral_movement** — Generate a SEPARATE attack path for EACH cross-account trust destination:
+- For each principal that can assume roles in OTHER accounts, generate one path per destination account, not one aggregate "cross-account" finding
+- Name the specific source principal, destination account, destination role, and what permissions the destination role grants
+- For internal accounts (in owned-accounts set), note the account name and flag for potential multi-hop analysis
+
+**persistence** — Generate attack paths for roles that ENABLE persistence, even if no principal currently exercises these permissions:
+- Roles with `iam:CreateUser`, `iam:CreateAccessKey`, `iam:AttachUserPolicy` — flag as persistence enablers
+- Roles with `iam:UpdateAssumeRolePolicy` — flag as trust policy backdoor enablers
+- Roles with `lambda:AddPermission` — flag as cross-account invoke enablers
+
+**data_exposure** — Generate attack paths for every read/write path to sensitive data:
+- Roles with read access to Secrets Manager, SSM Parameter Store, or KMS
+- Roles with read/write access to S3 buckets (especially those with sensitive naming patterns: *prod*, *backup*, *config*, *terraform*, *state*)
+- Roles with access to database services (RDS, DynamoDB, Redshift)
+
+**post_exploitation** — Generate attack paths for destructive capabilities:
+- Roles with `kms:ScheduleKeyDeletion` or `kms:PutKeyPolicy` — ransomware potential
+- Roles with `s3:DeleteObject` or `s3:PutBucketPolicy` on production buckets
+- Roles with `ec2:TerminateInstances`, `rds:DeleteDBInstance`, or `lambda:DeleteFunction`
+
+#### Step 3: Self-Check (MANDATORY before proceeding to Part 7)
+
+After generating all attack paths from Parts 1-6, count them and validate coverage:
+
+```
+Self-check:
+- Total roles analyzed: [R]
+- Total policies analyzed: [P]
+- Total trust relationships found: [T]
+- Cross-account trusts without ExternalId: [E]
+- Users without MFA: [M]
+- Stale access keys: [K]
+- Roles with write access to IAM/STS: [W]
+- Roles with read access to secrets/data: [D]
+- Attack paths generated: [N]
+
+If N < (E + M + K + W + D), reason about what you missed:
+- Did you generate a trust_misconfiguration path for EVERY role without ExternalId?
+- Did you generate a credential_risk path for EVERY user without MFA?
+- Did you generate a lateral_movement path for EVERY cross-account assumption target?
+- Did you check EVERY admin-named role for excessive_permission?
+- Did you check for persistence enablers?
+- Did you analyze what data each role with read access can reach?
+- Did you flag write access to sensitive services even on roles that aren't admin?
+```
+
+If you generated fewer than 10 attack paths from more than 50 roles and 50 policies, you have almost certainly missed findings. Go back and re-examine each category.
+
+---
+
+### Part 6G: Multi-Hop Cross-Account Analysis
+
+When BFS reachability analysis (Part 9) discovers cross-account edges to **internal** accounts (in the owned-accounts set), attempt to enumerate the destination to build deeper attack paths.
+
+**Important:** The caller may not have cross-account assume access. This analysis is best-effort — never block or error if assumption fails.
+
+#### Multi-Hop Enumeration Steps:
+
+For each internal cross-account trust edge discovered:
+
+1. **Attempt assumption:**
+   ```bash
+   aws sts assume-role --role-arn <target-role-arn> --role-session-name scope-audit-hop 2>&1
+   ```
+
+2. **If succeeds:** Enumerate the destination role's permissions using the temporary credentials:
+   ```bash
+   # Set temporary credentials
+   export AWS_ACCESS_KEY_ID=<from response>
+   export AWS_SECRET_ACCESS_KEY=<from response>
+   export AWS_SESSION_TOKEN=<from response>
+
+   # Enumerate destination role permissions
+   aws iam list-attached-role-policies --role-name <name> 2>&1
+   aws iam list-role-policies --role-name <name> 2>&1
+   # For each attached policy:
+   aws iam get-policy-version --policy-arn <arn> --version-id <default-version> 2>&1
+
+   # Check if this role can assume further roles
+   # (look for sts:AssumeRole in the policy documents)
+
+   # Unset temporary credentials immediately after
+   unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+   ```
+
+3. **If succeeds, continue BFS:** If the assumed role has `sts:AssumeRole` permissions to additional roles, add those as new edges and continue enumeration.
+
+4. **If fails (AccessDenied):** Record as `hop_status: "access_denied"` on the edge. Do NOT block — continue with other edges. Build the attack path from the trust relationship data alone (the trust exists even if the caller cannot exercise it).
+
+5. **If external account:** Never attempt assumption. Record as `hop_status: "external_account"` (terminal node).
+
+#### Safety Controls:
+
+- **Cycle detection:** Maintain a visited set of role ARNs across all hops. Never assume a role already visited.
+- **Depth limit:** Maximum 5 hops from the original caller. Stop BFS at this depth.
+- **Credential cleanup:** Unset temporary credentials after each hop enumeration completes. Never carry assumed credentials beyond their intended scope.
+- **Read-only:** Only enumerate permissions. Never modify anything in destination accounts.
+
+#### Building Paths Without Cross-Account Access:
+
+Even when assumption fails, build attack paths from the trust relationship data:
+- "Role X in account A trusts account B (internal: AccountName). If a principal in account B is compromised, they can assume role X which grants [list permissions from role X's policies in account A]."
+- These paths have lower confidence (flag as `hop_status: "not_verified"`) but are still valuable for understanding the organization's trust topology.
+
+---
+
 ### Part 7: Persistence Path Analysis
 
 After identifying escalation and misconfiguration paths, analyze each principal's permissions for **persistence establishment capabilities**. These are attack paths where a compromised principal can establish durable, hard-to-detect access that survives credential rotation, incident response, or partial remediation.

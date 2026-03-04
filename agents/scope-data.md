@@ -127,7 +127,7 @@ Construct `graph.nodes[]` and `graph.edges[]` from the extracted attack path dat
 - Create edges for trust relationships, privilege escalation paths, and data access chains
 - Use the node ID conventions: user:, role:, esc:, data:, ext:
 
-This graph is built by scope-data from findings.md data. scope-data does NOT need to worry about HTML — visualization is handled by the SCOPE dashboard at `http://localhost:3000`, which reads `results.json` and the normalized JSON files in `./data/`.
+This graph is built by scope-data from findings.md data. scope-data does NOT need to worry about HTML — visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`), which reads `results.json` and the normalized JSON files in `./data/`.
 
 ### Audit Payload Schema
 
@@ -207,7 +207,9 @@ This graph is built by scope-data from findings.md data. scope-data does NOT nee
       "is_wildcard": "bool",
       "has_external_id": "bool",
       "has_mfa_condition": "bool",
-      "risk": "CRITICAL | HIGH | MEDIUM | LOW"
+      "risk": "CRITICAL | HIGH | MEDIUM | LOW",
+      "is_internal": "bool | null — true if trusted account is in owned-accounts set, false if external, null for service/wildcard trusts",
+      "account_name": "string | null — name from accounts.json for internal accounts, null for external/service/wildcard"
     }
   ]
 }
@@ -224,6 +226,15 @@ This graph is built by scope-data from findings.md data. scope-data does NOT nee
 - `$RUN_DIR/policies/*.json` — SCP and RCP JSON files
 
 If `$RUN_DIR/results.json` exists and contains `"source": "defend"`, read it directly — the results.json is already in the correct schema. Skip markdown parsing and extract payload fields directly.
+
+### account_id Resolution for Defend
+
+The defend agent does not make AWS API calls, so `account_id` must be inherited from the audit run(s) it consumed. Resolve in priority order:
+
+1. **From defend results.json** — if the defend agent set `account_id`, use it
+2. **From linked audit data** — check `audit_runs_analyzed` in the defend payload. For each run ID, look for `./data/audit/<run-id>.json` and extract `account_id` from the envelope. Use the first non-`"unknown"` value found.
+3. **From audit results.json in AUDIT_RUN_DIR** — if the defend run directory name or evidence.jsonl contains a reference to an audit run directory, read that directory's `results.json` for `account_id`
+4. **Fallback** — set to `"unknown"` and log a warning
 
 ### Extraction Steps
 

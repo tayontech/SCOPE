@@ -42,8 +42,8 @@ Examples:
   /scope:investigate                                    Start SOC investigation
 
 Dashboard:
-  The SCOPE dashboard runs at http://localhost:3000
-  Start it: cd dashboard && npm run dev
+  Generate: cd dashboard && npm run dashboard
+  Open dashboard/dashboard.html in any browser.
   Audit, exploit, and defend export results to the dashboard.
   Investigate is standalone — it produces markdown only (no dashboard export).
 

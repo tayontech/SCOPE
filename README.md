@@ -11,7 +11,7 @@ SCOPE (Security Cloud Ops Purple Engagement) is an AI-powered purple team toolki
 - **Defend** — Reads audit findings and generates enterprise-scale SCPs/RCPs, security control recommendations, and Splunk SPL detection rules built against CloudTrail telemetry.
 - **Investigate** — Guides SOC analysts through CloudTrail-based alert investigation in Splunk with step-by-step queries, timeline building, and IOC correlation.
 
-The AI reasons about attack paths — it doesn't just run scripts. It decides what to enumerate, interprets results, pivots to interesting findings, and builds correlated detections. Every factual claim is traced to evidence (API output, policy evaluation) through a three-part verification system that classifies output as Guaranteed, Conditional, or Speculative. Audit, exploit, and defend runs produce structured artifacts viewable in the SCOPE dashboard at `http://localhost:3000`. Investigate produces self-contained markdown.
+The AI reasons about attack paths — it doesn't just run scripts. It decides what to enumerate, interprets results, pivots to interesting findings, and builds correlated detections. Every factual claim is traced to evidence (API output, policy evaluation) through a three-part verification system that classifies output as Guaranteed, Conditional, or Speculative. Audit, exploit, and defend runs produce structured artifacts viewable in the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`). Investigate produces self-contained markdown.
 
 ## Architecture
 
@@ -119,17 +119,17 @@ The post-processing pipeline runs automatically after audit, exploit, and defend
 1. **scope-data** — normalizes output into structured JSON in `./data/`
 2. **scope-evidence** — validates and indexes evidence provenance in `./evidence/`
 
-If any middleware step fails, the raw artifacts are still available. Visualization is handled by the SCOPE dashboard at `http://localhost:3000`, which reads `results.json` from audit, exploit, and defend runs. Investigate does not export to the dashboard — it produces a markdown determination only.
+If any middleware step fails, the raw artifacts are still available. Visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`), which reads `results.json` from audit, exploit, and defend runs. Investigate does not export to the dashboard — it produces a markdown determination only.
 
 ### Dashboard
 
-All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. Start it with:
+All visualization is handled by the SCOPE dashboard. Generate it with:
 
 ```
-cd dashboard && npm run dev
+cd dashboard && npm run dashboard
 ```
 
-The dashboard reads `dashboard/public/index.json` to find available runs, then loads `dashboard/public/$RUN_ID.json` per source phase. If `index.json` itself fails to load, the dashboard falls back to `/results.json`. Individual run file failures are silently skipped (no per-file fallback). Results are displayed as audit findings, attack graphs, and defend status in a unified React + D3 interface. Investigate does not export to the dashboard — it produces a markdown determination only. Interactive features include severity filtering, category filtering (9 attack path categories), search, sort (severity/steps/name), clickable stat cards with slide-out detail panels (users, roles, trust relationships, wildcard trusts, critical paths, all paths), attack path edge highlighting on the graph, copy-to-clipboard for detections and defensive control text, a node detail panel with connected edges and associated paths, and run history navigation.
+This produces a self-contained `dashboard.html` — open it in any browser. The dashboard reads `dashboard/public/index.json` to find available runs, then loads `dashboard/public/$RUN_ID.json` per source phase. If `index.json` itself fails to load, the dashboard falls back to `/results.json`. Individual run file failures are silently skipped (no per-file fallback). Results are displayed as audit findings, attack graphs, and defend status in a unified React + D3 interface. Investigate does not export to the dashboard — it produces a markdown determination only. Interactive features include severity filtering, category filtering (9 attack path categories), search, sort (severity/steps/name), clickable stat cards with slide-out detail panels (users, roles, trust relationships, wildcard trusts, critical paths, all paths), attack path edge highlighting on the graph, copy-to-clipboard for detections and defensive control text, a node detail panel with connected edges and associated paths, and run history navigation.
 
 ### Verification
 
@@ -142,7 +142,7 @@ Output is classified as Guaranteed, Conditional (with listed gating conditions),
 
 ## Safety Model
 
-Before any destructive AWS operation, SCOPE displays an `APPROVAL REQUIRED` block listing the action, target resources, and risk level, then waits for your Y/N. Approvals are per-step, never batched. On N: the step is skipped and execution continues.
+Before any destructive AWS operation, SCOPE displays an `APPROVAL REQUIRED` block listing the action, target resources, and risk level, then waits for your Y/N. Approvals are per-step, never batched. On N: the step is skipped and execution continues. Read-only enforcement, SPL quality checks, schema validation, and artifact completeness are enforced at the tool level by lifecycle hooks in `.scope/hooks/` (Claude Code and Gemini CLI). Codex enforces the same constraints through AGENTS.md guidance.
 
 Investigation mode (`/scope:investigate`) operates in two modes:
 - **CONNECTED** — Splunk MCP available, queries execute directly after analyst approval

@@ -28,6 +28,7 @@ investigate/
 dashboard/node_modules/
 dashboard/dist/
 dashboard/public/*.json
+dashboard/dashboard.html
 
 # Config (user-specific — contains real account IDs and policies)
 config/accounts.json

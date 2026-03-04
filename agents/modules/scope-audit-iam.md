@@ -193,6 +193,22 @@ For each role in the environment, parse the trust policy (`AssumeRolePolicyDocum
 - `Principal.Federated` — SAML or OIDC providers
 - `Principal: "*"` — ANYONE (wildcard trust)
 
+**Account classification for each trust relationship:**
+For every trusted principal that contains an AWS account ID (from the ARN or `:root` principal):
+1. Extract the 12-digit account ID from the principal ARN
+2. Look up the account ID in the owned-accounts set (loaded from `config/accounts.json` at Gate 1)
+3. Set `is_internal: true` if the account ID is in the owned-accounts set, `false` otherwise
+4. Set `account_name` to the `name` field from the matching `accounts.json` entry, or `null` if external/unknown
+5. Internal cross-account trusts get **lower base severity** than external (see trust_misconfiguration scoring in Part 6A)
+
+For service principals and wildcard trusts, `is_internal` and `account_name` are not applicable — omit these fields.
+
+**Flag internal assumable roles for attack-paths module:**
+When a cross-account trust relationship points to an **internal** account (is_internal: true), flag the role for the attack-paths module to analyze. Even without cross-account assume access, these trust relationships reveal:
+- Which internal accounts can assume into the current account
+- Which roles in the current account trust other internal accounts
+- Potential lateral movement paths across the organization
+
 **Flag dangerous trust configurations:**
 - **Wildcard trust:** `"Principal": "*"` or `"Principal": {"AWS": "*"}` — any AWS principal can assume this role. CRITICAL finding.
 - **Broad account trust:** `"Principal": {"AWS": "arn:aws:iam::ACCOUNT-ID:root"}` — any principal in that account can assume the role. Check if external account.
@@ -274,7 +290,8 @@ Construct nodes and edges for the SCOPE dashboard. Use colon-separated IDs match
 
 **Edges:**
 - Trust relationships (same-account): `{source: "user:alice", target: "role:AdminRole", trust_type: "same-account"}`
-- Trust relationships (cross-account): `{source: "ext:arn:aws:iam::EXTERNAL:root", target: "role:AuditRole", trust_type: "cross-account"}`
+- Trust relationships (cross-account, internal): `{source: "ext:arn:aws:iam::INTERNAL:root", target: "role:AuditRole", trust_type: "cross-account", is_internal: true, account_name: "Audit"}`
+- Trust relationships (cross-account, external): `{source: "ext:arn:aws:iam::EXTERNAL:root", target: "role:AuditRole", trust_type: "cross-account", is_internal: false, account_name: null}`
 - Trust relationships (service): `{source: "role:LambdaExec", target: "svc:lambda.amazonaws.com", trust_type: "service"}`
 - Escalation paths: `{source: "user:alice", target: "esc:iam:CreatePolicyVersion", edge_type: "priv_esc", severity: "critical"}`
 - Group memberships: `{source: "user:alice", target: "role:AdminRole", trust_type: "same-account"}` (flatten group → role through group policies)

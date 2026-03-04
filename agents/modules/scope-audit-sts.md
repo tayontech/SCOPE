@@ -158,9 +158,9 @@ This reveals the full authorization context including which policy denied the ac
 Add STS-specific nodes and edges to the SCOPE dashboard graph:
 
 **Nodes:**
-- Owned external accounts (in owned-accounts set): `{id: "ext:arn:aws:iam::<account-id>:root", label: "<name> (<id>)", type: "external", owned: true}`
-- Unknown external accounts (NOT in owned-accounts set): `{id: "ext:arn:aws:iam::<account-id>:root", label: "External <id>", type: "external", owned: false}`
-- Organization master account: `{id: "ext:arn:aws:iam::<master-id>:root", label: "Org Master", type: "external"}`
+- Owned external accounts (in owned-accounts set): `{id: "ext:arn:aws:iam::<account-id>:root", label: "<name> (<id>)", type: "external", owned: true, account_name: "<name from accounts.json>"}`
+- Unknown external accounts (NOT in owned-accounts set): `{id: "ext:arn:aws:iam::<account-id>:root", label: "External <id>", type: "external", owned: false, account_name: null}`
+- Organization master account: `{id: "ext:arn:aws:iam::<master-id>:root", label: "Org Master", type: "external", owned: true, account_name: "Org Master"}`
 
 **Edges:**
 - Cross-account trust: `{source: "ext:arn:aws:iam::<external-id>:root", target: "role:<role-name>", trust_type: "cross-account"}`

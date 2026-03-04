@@ -55,7 +55,7 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 
 **Credential model:** This agent does NOT make AWS API calls. It reads audit output files and writes remediation artifacts. No credential checks are needed. SCOPE inherits credentials from the shell environment for agents that do make API calls (audit, exploit).
 
-**Dashboard:** All visualization is handled by the SCOPE dashboard (React + D3) at `http://localhost:3000`. Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` — upserts this run into the `runs[]` array.
+**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`). Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` — upserts this run into the `runs[]` array.
 
 **Evidence fallback hierarchy:** Defend consumes upstream audit output in priority order:
 1. `./evidence/` — highest fidelity (claim-level provenance, coverage manifests)
@@ -99,6 +99,11 @@ After writing all artifacts, run this pipeline. Both steps are required — not 
 
 1. **Data normalization:** Read `agents/scope-data.md` — apply with PHASE=defend, RUN_DIR=$RUN_DIR
 2. **Evidence indexing:** Read `agents/scope-evidence.md` — validate and index with PHASE=defend, RUN_DIR=$RUN_DIR
+3. **Report generation:** Generate the self-contained dashboard report:
+   ```bash
+   cd dashboard && npm run dashboard 2>&1
+   ```
+   This produces `dashboard/dashboard.html` — a portable file that opens in any browser without a server. The report includes both audit and defend data (whatever is in `dashboard/public/`). Essential for Codex and Gemini CLI environments.
 
 Sequential. Automatic. No operator approval needed.
 If a step fails: log a warning and continue to the next step — the raw artifacts are already written. Pipeline failure is non-blocking but MUST be attempted.
@@ -183,7 +188,7 @@ ALL output files go into `$RUN_DIR`:
 | RCP policies | `$RUN_DIR/policies/rcp-<short-name>.json` | Compact deployable RCP JSON (no whitespace) |
 | Evidence log | `$RUN_DIR/evidence.jsonl` | Structured evidence log (API calls, claims, coverage) |
 
-All visualization is handled by the SCOPE dashboard at `http://localhost:3000`.
+All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`).
 
 At the end of the run, output the run directory path:
 ```
@@ -1589,7 +1594,7 @@ Construct `results.json` from the generated artifacts:
 
 ```json
 {
-  "account_id": "<from audit run intake>",
+  "account_id": "<12-digit AWS account ID from the audit run(s) consumed — extract from audit results.json account_id field, or from the RISK SUMMARY header in findings.md, or from ./data/audit/*.json envelope. If multiple audit runs span different accounts, use the account_id from the most recent run. MUST be a 12-digit number, not 'unknown'.>",
   "source": "defend",
   "summary": {
     "scps_generated": "<count of SCP policies>",
@@ -1599,6 +1604,7 @@ Construct `results.json` from the generated artifacts:
     "quick_wins": "<count of items with effort=low>",
     "risk_score": "CRITICAL | HIGH | MEDIUM | LOW"
   },
+  "audit_runs_analyzed": ["<array of audit run IDs consumed, e.g., audit-20260301-143022-all>"],
   "executive_summary": {
     "risk_posture": "<overall risk posture assessment>",
     "category_breakdown": [
@@ -1630,11 +1636,14 @@ Construct `results.json` from the generated artifacts:
   "scps": [
     {
       "name": "<SCP name>",
+      "file": "<relative path to policy JSON, e.g., policies/scp-deny-admin-attach.json>",
       "policy_json": {},
       "source_attack_paths": ["<attack path names this SCP addresses>"],
+      "source_run_ids": ["<audit run IDs that surfaced the source attack paths>"],
       "impact_analysis": {
-        "prevents": ["<IAM actions blocked>"],
+        "prevents": ["<IAM actions blocked, e.g., iam:AttachUserPolicy>"],
         "blast_radius": "low | medium | high",
+        "affected_services": ["<AWS service names affected, e.g., IAM, STS>"],
         "break_glass": "<break-glass mechanism or 'none'>"
       }
     }
@@ -1642,11 +1651,14 @@ Construct `results.json` from the generated artifacts:
   "rcps": [
     {
       "name": "<RCP name>",
+      "file": "<relative path to policy JSON>",
       "policy_json": {},
       "source_attack_paths": ["<attack path names>"],
+      "source_run_ids": ["<audit run IDs that surfaced the source attack paths>"],
       "impact_analysis": {
         "prevents": ["<actions blocked>"],
         "blast_radius": "low | medium | high",
+        "affected_services": ["<AWS service names affected>"],
         "break_glass": "<break-glass mechanism or 'none'>"
       }
     }
@@ -1658,7 +1670,8 @@ Construct `results.json` from the generated artifacts:
       "severity": "critical | high | medium | low",
       "category": "<attack path category>",
       "mitre_technique": "<e.g., T1078.004>",
-      "source_attack_paths": ["<attack path names this detection addresses>"]
+      "source_attack_paths": ["<attack path names this detection addresses>"],
+      "source_run_ids": ["<audit run IDs that surfaced the source attack paths>"]
     }
   ],
   "security_controls": [
@@ -1717,7 +1730,7 @@ else
 fi
 ```
 
-**No HTML generation.** The SCOPE dashboard at `http://localhost:3000` handles all visualization. Do NOT generate standalone HTML files.
+Dashboard HTML is generated by the post-processing pipeline. Do NOT generate standalone HTML files — the dashboard build (`cd dashboard && npm run dashboard`) handles visualization.
 </results_export>
 
 
@@ -1782,7 +1795,7 @@ A defend run is complete when ALL of the following are true:
 
 ### Dashboard
 
-- [ ] All visualization is handled by the SCOPE dashboard at `http://localhost:3000` — no HTML files are generated
+- [ ] All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`)
 
 ### Index and Operator Gates
 

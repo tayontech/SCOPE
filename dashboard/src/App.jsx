@@ -122,6 +122,11 @@ function normalizeForDashboard(json, indexSource) {
       }
     }
 
+    // Normalize audit_run (string) → audit_runs_analyzed (array)
+    if (!data.audit_runs_analyzed && data.audit_run) {
+      data.audit_runs_analyzed = [data.audit_run];
+    }
+
     // Split flat policies[] array by type into separate scps[]/rcps[] arrays
     // Some agents produce policies: [{ file, type: "SCP", ... }] instead of scps[]/rcps[]
     if (!data.scps && !data.rcps && Array.isArray(data.policies)) {
@@ -746,71 +751,6 @@ function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
 }
 
 // ─── Run History Panel (phase-aware) ───
-function RunHistoryPanel({ runs, onSelectRun, onClose }) {
-  return (
-    <div style={{
-      position: "fixed", top: 0, right: 0, width: 320, height: "100vh",
-      background: COLORS.bg, borderLeft: `1px solid ${COLORS.border}`,
-      zIndex: 100, overflowY: "auto", boxShadow: "-4px 0 24px rgba(0,0,0,0.4)",
-    }}>
-      <div style={{ padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: COLORS.text }}>Run History</h2>
-          <button onClick={onClose}
-            style={{ background: "none", border: "none", color: COLORS.textDim, cursor: "pointer", fontSize: 16 }}>
-            {"\u2715"}
-          </button>
-        </div>
-        {runs.length === 0 ? (
-          <div style={{ color: COLORS.textDim, fontSize: 13 }}>No previous runs found.</div>
-        ) : (
-          runs.map((run) => {
-            const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[run.risk] || COLORS.textDim;
-            const phaseSource = run.source || "audit";
-            const phaseColor = PHASE_CONFIG[phaseSource]?.color || COLORS.textDim;
-            return (
-              <div key={run.run_id}
-                onClick={() => onSelectRun(run)}
-                style={{
-                  background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
-                  borderRadius: 8, padding: 14, marginBottom: 10, cursor: "pointer",
-                  transition: "border-color 0.2s",
-                  borderLeft: `3px solid ${phaseColor}`,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={run.run_id}>
-                    {run.run_id}
-                  </span>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, color: phaseColor,
-                      background: phaseColor + "18", padding: "1px 6px", borderRadius: 6,
-                      textTransform: "uppercase", letterSpacing: "0.05em",
-                    }}>{phaseSource}</span>
-                    {run.risk && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, color: riskColor,
-                        background: riskColor + "18", padding: "1px 8px", borderRadius: 8,
-                      }}>{run.risk}</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ fontSize: 11, color: COLORS.textDim }}>
-                  {run.date ? new Date(run.date).toLocaleString() : "Unknown date"}
-                </div>
-                <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
-                  {run.target || "Unknown target"}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Severity Filter Buttons ───
 function SeverityFilter({ activeSeverities, onToggle }) {
   return (
@@ -878,8 +818,14 @@ function StatDetailPanel({ statKey, data, onClose, onSelectPath, onHighlightNode
         return { title: "Users", items: principals.filter((p) => p.type === "user") };
       case "roles":
         return { title: "Roles", items: principals.filter((p) => p.type === "role") };
-      case "trusts":
-        return { title: "Trust Relationships", items: trusts.length > 0 ? trusts : paths.filter((p) => p.category === "trust_misconfiguration") };
+      case "trusts": {
+        const trustItems = trusts.length > 0 ? [...trusts].sort((a, b) => {
+          // External trusts first (higher risk), then internal
+          if (a.is_internal !== b.is_internal) return a.is_internal ? 1 : -1;
+          return 0;
+        }) : paths.filter((p) => p.category === "trust_misconfiguration");
+        return { title: "Trust Relationships", items: trustItems };
+      }
       case "wildcards": {
         const wildcardTrusts = trusts.filter((t) => t.is_wildcard);
         if (wildcardTrusts.length > 0) return { title: "Wildcard Trusts", items: wildcardTrusts };
@@ -1036,6 +982,18 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
           <span style={{ fontSize: 10, fontWeight: 700, color: riskColor, background: riskColor + "18", padding: "1px 8px", borderRadius: 8 }}>{item.risk}</span>
         </div>
         <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 6 }}>{item.principal}</div>
+        {item.is_internal != null && (
+          <div style={{ marginBottom: 6 }}>
+            <span style={{
+              display: "inline-block", fontSize: 10, fontWeight: 700,
+              padding: "2px 8px", borderRadius: 4,
+              background: item.is_internal ? "#10b98118" : "#f9731618",
+              color: item.is_internal ? "#10b981" : "#f97316",
+            }}>
+              {item.is_internal ? `INTERNAL${item.account_name ? ` — ${item.account_name}` : ""}` : "EXTERNAL"}
+            </span>
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10 }}>
           <span style={{ color: COLORS.textDim }}>{item.trust_type}</span>
           {item.is_wildcard && <span style={{ color: COLORS.critical }}>Wildcard</span>}
@@ -1818,8 +1776,6 @@ export default function App() {
   const [activeSeverities, setActiveSeverities] = useState(new Set(["critical", "high", "medium", "low"]));
   const [activeCategories, setActiveCategories] = useState(new Set(Object.keys(CATEGORY_CONFIG)));
   const [sortMode, setSortMode] = useState("severity");
-  const [showHistory, setShowHistory] = useState(false);
-  const [runIndex, setRunIndex] = useState(null);
   const [activeStatPanel, setActiveStatPanel] = useState(null);
 
   // Derive active data from allData + activePhase
@@ -1843,53 +1799,18 @@ export default function App() {
     }
   }, [allData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-load ALL latest runs by source type
+  // Load inline data — dashboard.html has all data embedded via window.__SCOPE_INLINE_DATA__
   useEffect(() => {
-    fetch("/index.json")
-      .then((r) => { if (!r.ok) throw new Error(`index.json returned ${r.status}`); return r.json(); })
-      .then((index) => {
-        setRunIndex(index);
-        const runs = index?.runs || [];
-        // Find latest run per source type
-        const latestBySource = {};
-        for (const run of runs) {
-          const src = run.source || "audit";
-          if (!latestBySource[src]) latestBySource[src] = run;
-        }
-        // Load all source types in parallel
-        const fetches = Object.entries(latestBySource).map(([src, run]) => {
-          const file = run.file || `${run.run_id}.json`;
-          return fetch(`/${file}`)
-            .then((r) => { if (!r.ok) throw new Error(`${file} returned ${r.status}`); return r.json(); })
-            .then((json) => {
-              if (json?.account_id) {
-                const { data: normalized, source } = normalizeForDashboard(json, src);
-                setAllData((prev) => ({ ...prev, [source]: normalized }));
-              } else {
-                console.warn(`[SCOPE] Skipped ${file}: missing account_id field`);
-              }
-            })
-            .catch((err) => { console.warn(`[SCOPE] Failed to load run ${file}:`, err.message); });
-        });
-        return Promise.all(fetches);
-      })
-      .then(() => setLoading(false))
-      .catch((err) => {
-        console.warn("[SCOPE] index.json load failed, trying /results.json fallback:", err.message);
-        // Fallback: load /results.json
-        fetch("/results.json")
-          .then((r) => { if (!r.ok) throw new Error(`results.json returned ${r.status}`); return r.json(); })
-          .then((json) => {
-            if (json?.account_id) {
-              const { data: normalized, source } = normalizeForDashboard(json);
-              setAllData((prev) => ({ ...prev, [source]: normalized }));
-            } else {
-              console.warn("[SCOPE] results.json fallback: missing account_id field");
-            }
-          })
-          .catch((err) => { console.warn("[SCOPE] results.json fallback failed:", err.message); })
-          .finally(() => setLoading(false));
-      });
+    if (window.__SCOPE_INLINE_DATA__) {
+      const inline = window.__SCOPE_INLINE_DATA__;
+      const loaded = {};
+      for (const [src, json] of Object.entries(inline)) {
+        const { data: normalized, source } = normalizeForDashboard(json, src);
+        loaded[source] = normalized;
+      }
+      setAllData((prev) => ({ ...prev, ...loaded }));
+    }
+    setLoading(false);
   }, []);
 
   const handleDataLoad = useCallback((json) => {
@@ -1928,25 +1849,6 @@ export default function App() {
       }
       return next;
     });
-  }, []);
-
-  const handleSelectRun = useCallback((run) => {
-    const file = run.file || `${run.run_id}.json`;
-    fetch(`/${file}`)
-      .then((r) => { if (!r.ok) throw new Error(`${file} returned ${r.status}`); return r.json(); })
-      .then((json) => {
-        if (json && json.account_id) {
-          const { data: normalized, source } = normalizeForDashboard(json, json.source || run.source);
-          setAllData((prev) => ({ ...prev, [source]: normalized }));
-          setActivePhase(source);
-          setSelectedPath(null);
-          setSelectedNode(null);
-          setSearchQuery("");
-          setShowHistory(false);
-          setActiveStatPanel(null);
-        }
-      })
-      .catch((err) => { console.error(`[SCOPE] Failed to load run ${run.run_id}:`, err.message); });
   }, []);
 
   // Filter and sort attack paths
@@ -2005,7 +1907,6 @@ export default function App() {
   const anyData = data || Object.values(allData)[0] || {};
   const summary = data?.summary || {};
   const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[summary.risk_score] || COLORS.text;
-  const historyRuns = runIndex?.runs || [];
   const phaseColor = PHASE_CONFIG[activePhase]?.color || COLORS.accent;
 
   return (
@@ -2035,20 +1936,6 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          {historyRuns.length > 0 && (
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              style={{
-                padding: "6px 14px", borderRadius: 6, cursor: "pointer",
-                background: showHistory ? COLORS.accent + "18" : COLORS.bgCard,
-                border: `1px solid ${showHistory ? COLORS.accent : COLORS.border}`,
-                color: showHistory ? COLORS.accent : COLORS.textDim,
-                fontSize: 12, fontWeight: 600,
-              }}
-            >
-              History
-            </button>
-          )}
           <FileUpload onDataLoad={handleDataLoad} />
           {(activePhase === "audit" || activePhase === "exploit") && summary.risk_score && (
             <div style={{
@@ -2126,14 +2013,6 @@ export default function App() {
         <DefendView data={data} />
       ) : null}
 
-      {/* Run History Sidebar */}
-      {showHistory && (
-        <RunHistoryPanel
-          runs={historyRuns}
-          onSelectRun={handleSelectRun}
-          onClose={() => setShowHistory(false)}
-        />
-      )}
     </div>
   );
 }

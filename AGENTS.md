@@ -27,15 +27,27 @@ commands/             Quick-reference docs for each slash command (synopsis, arg
 data/                 Normalized JSON output (runtime-generated, gitignored)
 evidence/             Evidence provenance data (runtime-generated, gitignored)
 investigate/          Investigation artifacts (runtime-generated, gitignored)
-dashboard/            React + D3 dashboard at http://localhost:3000
+dashboard/            React + D3 dashboard (`dashboard.html`)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
-bin/                  Tooling (install.js deploys agents to editor config directories)
-.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, artifact check, evidence logger
+bin/                  Tooling (install.js — editor setup, generate-report.js — dashboard builder)
+.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, evidence logger
+.scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
 ```
 
 ## Hooks
 
 Codex does not support lifecycle hooks. Safety constraints (read-only operations, no auto-deploy, artifact completeness) are enforced through AGENTS.md guidance only. Claude Code and Gemini CLI use `.scope/hooks/` scripts for tool-level enforcement — see their respective docs for details.
+
+### Schema Enforcement (all editors)
+
+Canonical JSON Schema files in `.scope/schemas/` define required fields for each phase's `results.json`:
+- `.scope/schemas/audit.schema.json` — audit results
+- `.scope/schemas/defend.schema.json` — defend results
+- `.scope/schemas/exploit.schema.json` — exploit results
+
+**Claude Code / Gemini CLI:** The `scope-schema-validate.sh` hook validates every Write|Edit to `results.json` or `dashboard/public/*.json` automatically.
+
+**Codex:** Before writing `results.json`, read the corresponding schema file and self-check that all required fields are present. If a field is missing, add it before writing.
 
 ## Skills
 
@@ -65,7 +77,9 @@ Both are invoked by the source agent after writing artifacts — sequential and 
 
 ## Dashboard
 
-All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard loads `index.json`, iterates the `runs[]` array, and fetches the latest entry per source phase. No standalone HTML files are generated (dashboard/index.html is the Vite/React entry point, not a generated report).
+All visualization is handled by the SCOPE dashboard. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard loads `index.json`, iterates the `runs[]` array, and fetches the latest entry per source phase.
+
+**Dashboard HTML** (all environments): After exporting data to `dashboard/public/`, run `cd dashboard && npm run dashboard` to generate a self-contained `dashboard.html` with all data inlined. This file opens in any browser without a server. Agents MUST generate the dashboard after the data pipeline completes.
 
 ## AWS Credential Model
 

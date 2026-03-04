@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scope-defend-results",
+  "title": "SCOPE Defend Results",
+  "description": "Schema for defend phase results.json — validated by scope-schema-validate hook",
+  "type": "object",
+  "required": ["account_id", "source", "region", "timestamp", "summary", "audit_runs_analyzed", "scps", "rcps", "detections", "security_controls", "prioritization"],
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "pattern": "^\\d{12}$",
+      "description": "12-digit AWS account ID — inherited from consumed audit run(s)"
+    },
+    "source": {
+      "const": "defend"
+    },
+    "region": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "audit_runs_analyzed": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Run IDs of audit runs consumed by this defend run"
+    },
+    "summary": {
+      "type": "object",
+      "required": ["scps_generated", "rcps_generated", "detections_generated", "controls_recommended", "risk_score"],
+      "properties": {
+        "scps_generated": { "type": "integer" },
+        "rcps_generated": { "type": "integer" },
+        "detections_generated": { "type": "integer" },
+        "controls_recommended": { "type": "integer" },
+        "quick_wins": { "type": "integer" },
+        "risk_score": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] }
+      }
+    },
+    "executive_summary": {
+      "type": "object",
+      "properties": {
+        "risk_posture": { "type": "string" },
+        "category_breakdown": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["category", "count", "severity"],
+            "properties": {
+              "category": { "type": "string" },
+              "count": { "type": "integer" },
+              "severity": { "type": "string" }
+            }
+          }
+        },
+        "quick_wins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["rank", "action", "impact"],
+            "properties": {
+              "rank": { "type": "integer" },
+              "action": { "type": "string" },
+              "impact": { "type": "string" }
+            }
+          }
+        },
+        "remediation_timeline": {
+          "type": "object",
+          "properties": {
+            "this_week": { "type": "array", "items": { "type": "string" } },
+            "this_month": { "type": "array", "items": { "type": "string" } },
+            "this_quarter": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "technical_recommendations": {
+      "type": "object",
+      "properties": {
+        "attack_path_bundles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["attack_path", "severity", "source_run_ids", "classification"],
+            "properties": {
+              "attack_path": { "type": "string" },
+              "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+              "source_run_ids": { "type": "array", "items": { "type": "string" } },
+              "classification": { "type": "string", "enum": ["systemic", "one-off"] },
+              "scp_names": { "type": "array", "items": { "type": "string" } },
+              "rcp_names": { "type": "array", "items": { "type": "string" } },
+              "detection_names": { "type": "array", "items": { "type": "string" } },
+              "control_names": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "scps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "file", "policy_json", "source_attack_paths", "source_run_ids", "impact_analysis"],
+        "properties": {
+          "name": { "type": "string" },
+          "file": { "type": "string", "description": "Relative path to the policy JSON file, e.g. policies/scp-deny-admin.json" },
+          "policy_json": { "type": "object" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "source_run_ids": { "type": "array", "items": { "type": "string" } },
+          "impact_analysis": {
+            "type": "object",
+            "required": ["prevents", "blast_radius", "affected_services", "break_glass"],
+            "properties": {
+              "prevents": { "type": "array", "items": { "type": "string" } },
+              "blast_radius": { "type": "string", "enum": ["low", "medium", "high"] },
+              "affected_services": { "type": "array", "items": { "type": "string" } },
+              "break_glass": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "rcps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "file", "policy_json", "source_attack_paths", "source_run_ids", "impact_analysis"],
+        "properties": {
+          "name": { "type": "string" },
+          "file": { "type": "string" },
+          "policy_json": { "type": "object" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "source_run_ids": { "type": "array", "items": { "type": "string" } },
+          "impact_analysis": {
+            "type": "object",
+            "required": ["prevents", "blast_radius", "affected_services", "break_glass"],
+            "properties": {
+              "prevents": { "type": "array", "items": { "type": "string" } },
+              "blast_radius": { "type": "string", "enum": ["low", "medium", "high"] },
+              "affected_services": { "type": "array", "items": { "type": "string" } },
+              "break_glass": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "detections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "spl", "severity", "category", "mitre_technique", "source_attack_paths", "source_run_ids"],
+        "properties": {
+          "name": { "type": "string" },
+          "spl": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "category": { "type": "string" },
+          "mitre_technique": { "type": "string", "pattern": "^T\\d{4}" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "source_run_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "security_controls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["service", "recommendation", "priority", "effort", "source_attack_paths"],
+        "properties": {
+          "service": { "type": "string" },
+          "recommendation": { "type": "string" },
+          "priority": { "type": "string" },
+          "effort": { "type": "string" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "prioritization": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rank", "action", "risk", "effort", "category"],
+        "properties": {
+          "rank": { "type": "integer" },
+          "action": { "type": "string" },
+          "risk": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "effort": { "type": "string", "enum": ["low", "medium", "high"] },
+          "category": { "type": "string", "enum": ["scp", "rcp", "detection", "control", "config"] }
+        }
+      }
+    }
+  }
+}

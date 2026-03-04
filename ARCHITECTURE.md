@@ -81,7 +81,7 @@ Source agents (audit, exploit, defend) trigger this chain after writing artifact
            reads: $RUN_DIR/evidence.jsonl
                   ./data/$PHASE/$RUN_ID.json
 
-    Visualization: SCOPE dashboard at http://localhost:3000
+    Visualization: SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`)
                    reads dashboard/public/index.json + $RUN_ID.json
 ```
 
@@ -189,3 +189,26 @@ Downstream agents consume upstream output in this priority order:
 | **verify-splunk** | Called by verify-core | SPL queries (in-memory) | Validation results (in-memory) | — |
 | **data** | Auto after artifacts | `$RUN_DIR/` raw artifacts | `./data/$PHASE/$RUN_ID.json`, `./data/index.json` | — |
 | **evidence** | Auto after data | `$RUN_DIR/evidence.jsonl`, `./data/` | `./evidence/$PHASE/$RUN_ID.json`, `./evidence/index.json` | — |
+
+## Enforcement Layer
+
+Lifecycle hooks enforce safety and quality constraints at the tool level. Shared scripts live in `.scope/hooks/` with editor-specific configuration.
+
+```
+.scope/hooks/
+  scope-safety-guard.sh      Block destructive AWS operations (read-only enforcement)
+  scope-spl-lint.sh          Hard-fail on SPL anti-patterns (missing index, wrong fields)
+  scope-schema-validate.sh   Validate results.json against phase schemas
+  scope-artifact-check.sh    Verify mandatory artifacts exist before agent completes
+  scope-evidence-logger.sh   Auto-log AWS CLI calls to evidence.jsonl (async)
+
+.scope/schemas/
+  audit.schema.json          Required fields for audit results.json
+  defend.schema.json         Required fields for defend results.json
+  exploit.schema.json        Required fields for exploit results.json
+```
+
+Editor-specific hook configuration:
+- **Claude Code:** `.claude/settings.json` — PreToolUse / PostToolUse / Stop events
+- **Gemini CLI:** `.gemini/settings.json` — BeforeTool / AfterTool / AfterAgent events
+- **Codex:** No hook support — safety enforced through AGENTS.md guidance; schema compliance is self-checked

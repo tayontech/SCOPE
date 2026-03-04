@@ -66,7 +66,7 @@ The operator reviews the final combined output (audit findings + defensive plan)
 | Results JSON | `$DEFEND_RUN_DIR/results.json` | scope-defend | Structured data for SCOPE dashboard — defensive controls, policy summaries |
 | Evidence log | `$DEFEND_RUN_DIR/evidence.jsonl` | scope-defend | Structured evidence log (claims, coverage) |
 
-All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. No standalone HTML files are generated.
+All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`).
 
 ## Attack Path Categories
 
