@@ -326,7 +326,7 @@ function PathDetail({ path }) {
           background: sev.bg, color: sev.color, padding: "3px 12px", borderRadius: 12,
           fontSize: 12, fontWeight: 700, textTransform: "uppercase",
         }}>{path.severity}</span>
-        <h2 style={{ margin: 0, color: COLORS.text, fontSize: 18 }}>{path.name}</h2>
+        <h2 style={{ margin: 0, color: COLORS.text, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={path.name}>{path.name}</h2>
       </div>
       <p style={{ color: COLORS.textDim, lineHeight: 1.6, fontSize: 13 }}>{path.description}</p>
 
@@ -501,7 +501,7 @@ function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
       <div style={{ padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text, marginBottom: 4 }}>{node.label}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={node.label}>{node.label}</div>
             <div style={{
               fontSize: 10, color: COLORS.textDim, background: COLORS.bgCard,
               padding: "2px 8px", borderRadius: 4, display: "inline-block",
@@ -622,7 +622,7 @@ function RunHistoryPanel({ runs, onSelectRun, onClose }) {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} title={run.run_id}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={run.run_id}>
                     {run.run_id}
                   </span>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -722,11 +722,30 @@ function StatDetailPanel({ statKey, data, onClose, onSelectPath, onHighlightNode
       case "roles":
         return { title: "Roles", items: principals.filter((p) => p.type === "role") };
       case "trusts":
-        return { title: "Trust Relationships", items: trusts };
-      case "wildcards":
-        return { title: "Wildcard Trusts", items: trusts.filter((t) => t.is_wildcard) };
-      case "privesc":
-        return { title: "Critical PrivEsc", items: paths.filter((p) => p.severity === "critical" && (p.category === "privilege_escalation" || !p.category)) };
+        return { title: "Trust Relationships", items: trusts.length > 0 ? trusts : paths.filter((p) => p.category === "trust_misconfiguration") };
+      case "wildcards": {
+        const wildcardTrusts = trusts.filter((t) => t.is_wildcard);
+        if (wildcardTrusts.length > 0) return { title: "Wildcard Trusts", items: wildcardTrusts };
+        // Fallback: find wildcard-related attack paths or trust paths mentioning wildcard
+        const wildcardPaths = paths.filter((p) =>
+          (p.name || "").toLowerCase().includes("wildcard") ||
+          (p.description || "").toLowerCase().includes("wildcard") ||
+          p.category === "trust_misconfiguration"
+        );
+        return { title: "Wildcard Trusts", items: wildcardPaths };
+      }
+      case "privesc": {
+        // Include all critical paths that are privilege escalation or have no category
+        const privescPaths = paths.filter((p) =>
+          p.severity === "critical" && (
+            p.category === "privilege_escalation" ||
+            !p.category ||
+            (p.name || "").toLowerCase().includes("priv") ||
+            (p.name || "").toLowerCase().includes("escalat")
+          )
+        );
+        return { title: "Critical PrivEsc", items: privescPaths };
+      }
       case "paths":
         return { title: "All Attack Paths", items: paths };
       default:
@@ -1101,7 +1120,7 @@ function PolicyViewer({ scps, rcps }) {
                   background: policy.policyType === "SCP" ? COLORS.highBg : COLORS.mediumBg,
                   color: policy.policyType === "SCP" ? COLORS.high : COLORS.medium,
                 }}>{policy.policyType}</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text }}>{policy.name}</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} title={policy.name}>{policy.name}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{
@@ -1208,7 +1227,7 @@ function DetectionRulesList({ detections }) {
                   borderRadius: 8, padding: 14, marginBottom: 8,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text }}>{rule.name}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={rule.name}>{rule.name}</span>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8,
@@ -1354,6 +1373,186 @@ function PrioritizationSidebar({ items, onScrollTo }) {
   );
 }
 
+// ─── Executive Summary View ───
+function ExecutiveSummaryView({ data }) {
+  const exec = data?.executive_summary;
+  const summary = data?.summary || {};
+  const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[summary.risk_score] || COLORS.text;
+
+  if (!exec) {
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No executive summary data available. Re-run defend to generate.</div>;
+  }
+
+  return (
+    <div style={{ padding: 20, maxWidth: 900 }}>
+      {/* Risk Posture */}
+      <div style={{
+        background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+        padding: 20, marginBottom: 16,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <span style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>Risk Posture</span>
+          {summary.risk_score && (
+            <span style={{
+              fontSize: 12, fontWeight: 700, padding: "3px 12px", borderRadius: 6,
+              color: riskColor, background: riskColor + "18",
+            }}>{summary.risk_score}</span>
+          )}
+        </div>
+        <p style={{ color: COLORS.text, fontSize: 14, lineHeight: 1.6, margin: 0 }}>{exec.risk_posture}</p>
+      </div>
+
+      {/* Category Breakdown */}
+      {exec.category_breakdown?.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Category Breakdown</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+            {exec.category_breakdown.map((cat, i) => {
+              const sevCfg = SEVERITY_CONFIG[cat.severity] || SEVERITY_CONFIG.medium;
+              return (
+                <div key={i} style={{
+                  background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                  padding: 12, borderLeft: `3px solid ${sevCfg.color}`,
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={cat.category}>{cat.category}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 22, fontWeight: 700, color: sevCfg.color, fontFamily: "monospace" }}>{cat.count}</span>
+                    <span style={{ fontSize: 10, color: sevCfg.color, textTransform: "uppercase", fontWeight: 600 }}>{cat.severity}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Quick Wins */}
+      {exec.quick_wins?.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Top Quick Wins</div>
+          {exec.quick_wins.map((qw, i) => (
+            <div key={i} style={{
+              background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+              padding: 14, marginBottom: 8, display: "flex", gap: 12, alignItems: "flex-start",
+            }}>
+              <span style={{
+                minWidth: 28, height: 28, borderRadius: "50%", background: COLORS.accent + "18",
+                color: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 700,
+              }}>{qw.rank}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 4 }}>{qw.action}</div>
+                <div style={{ fontSize: 12, color: COLORS.textDim, lineHeight: 1.4 }}>{qw.impact}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Remediation Timeline */}
+      {exec.remediation_timeline && (
+        <div>
+          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Remediation Timeline</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            {[
+              { key: "this_week", label: "This Week", color: COLORS.critical },
+              { key: "this_month", label: "This Month", color: COLORS.high },
+              { key: "this_quarter", label: "This Quarter", color: COLORS.medium },
+            ].map(({ key, label, color }) => (
+              <div key={key} style={{
+                background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                padding: 14, borderTop: `3px solid ${color}`,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color, marginBottom: 8, textTransform: "uppercase" }}>{label}</div>
+                {(exec.remediation_timeline[key] || []).map((item, i) => (
+                  <div key={i} style={{ fontSize: 12, color: COLORS.text, marginBottom: 6, lineHeight: 1.4, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <span style={{ color: COLORS.textDim, flexShrink: 0 }}>{"\u2022"}</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
+                {(!exec.remediation_timeline[key] || exec.remediation_timeline[key].length === 0) && (
+                  <div style={{ fontSize: 11, color: COLORS.textMuted }}>None</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Technical Recommendations View ───
+function TechnicalRecommendationsView({ data }) {
+  const tech = data?.technical_recommendations;
+  if (!tech?.attack_path_bundles?.length) {
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No technical recommendations data available. Re-run defend to generate.</div>;
+  }
+
+  return (
+    <div style={{ padding: 20, maxWidth: 900 }}>
+      <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
+        Attack Path Remediation Bundles
+      </div>
+      {tech.attack_path_bundles.map((bundle, i) => {
+        const sevCfg = SEVERITY_CONFIG[bundle.severity] || SEVERITY_CONFIG.medium;
+        return (
+          <div key={i} style={{
+            background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+            padding: 16, marginBottom: 12, borderLeft: `3px solid ${sevCfg.color}`,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={bundle.attack_path}>{bundle.attack_path}</span>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8,
+                  color: sevCfg.color, background: sevCfg.bg, textTransform: "uppercase",
+                }}>{bundle.severity}</span>
+                {bundle.classification && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+                    color: bundle.classification === "systemic" ? COLORS.critical : COLORS.textDim,
+                    background: bundle.classification === "systemic" ? COLORS.criticalBg : COLORS.bgCardHover,
+                    textTransform: "uppercase",
+                  }}>{bundle.classification}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Source runs */}
+            {bundle.source_run_ids?.length > 0 && (
+              <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 10, fontFamily: "monospace" }}>
+                Source: {bundle.source_run_ids.join(", ")}
+              </div>
+            )}
+
+            {/* Remediation links */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+              {[
+                { items: bundle.scp_names, label: "SCPs", color: COLORS.high },
+                { items: bundle.rcp_names, label: "RCPs", color: COLORS.medium },
+                { items: bundle.detection_names, label: "Detections", color: "#06b6d4" },
+                { items: bundle.control_names, label: "Controls", color: COLORS.low },
+              ].filter(({ items }) => items?.length > 0).map(({ items, label, color }) => (
+                <div key={label}>
+                  <div style={{ fontSize: 10, color, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>{label}</div>
+                  {items.map((name, j) => (
+                    <div key={j} style={{
+                      fontSize: 11, color: COLORS.text, background: color + "0d", border: `1px solid ${color}22`,
+                      borderRadius: 4, padding: "4px 8px", marginBottom: 4,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }} title={name}>{name}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DefendView({ data }) {
   const [defendTab, setDefendTab] = useState("policies");
   const summary = data?.summary || {};
@@ -1376,8 +1575,10 @@ function DefendView({ data }) {
 
         {/* Center: Tabbed content */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
             {[
+              { key: "executive", label: "Executive Summary" },
+              { key: "technical", label: "Tech Recommendations" },
               { key: "policies", label: "Policies" },
               { key: "detections", label: "Detections" },
               { key: "controls", label: "Controls" },
@@ -1386,7 +1587,7 @@ function DefendView({ data }) {
                 key={t.key}
                 onClick={() => setDefendTab(t.key)}
                 style={{
-                  padding: "6px 18px", borderRadius: 6,
+                  padding: "6px 14px", borderRadius: 6,
                   border: `1px solid ${defendTab === t.key ? PHASE_CONFIG.defend.color : COLORS.border}`,
                   background: defendTab === t.key ? PHASE_CONFIG.defend.color + "18" : "transparent",
                   color: defendTab === t.key ? PHASE_CONFIG.defend.color : COLORS.textDim,
@@ -1398,6 +1599,8 @@ function DefendView({ data }) {
             ))}
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
+            {defendTab === "executive" && <ExecutiveSummaryView data={data} />}
+            {defendTab === "technical" && <TechnicalRecommendationsView data={data} />}
             {defendTab === "policies" && <PolicyViewer scps={data.scps} rcps={data.rcps} />}
             {defendTab === "detections" && <DetectionRulesList detections={data.detections} />}
             {defendTab === "controls" && <ControlsMatrix controls={data.security_controls} />}
@@ -1613,6 +1816,7 @@ export default function App() {
       fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
       background: COLORS.bg, color: COLORS.text, height: "100vh",
       display: "flex", flexDirection: "column", overflow: "hidden",
+      minWidth: 0,
     }}>
       {/* Header */}
       <div style={{
@@ -1625,7 +1829,7 @@ export default function App() {
             <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>
               SCOPE
             </h1>
-            <span style={{ fontSize: 11, color: COLORS.textDim }}>
+            <span style={{ fontSize: 11, color: COLORS.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400, display: "inline-block" }} title={`Account ${anyData.account_id} \u2022 ${anyData.region || "N/A"}`}>
               Account {anyData.account_id} {"\u2022"} {anyData.region || "N/A"}
               {Object.keys(allData).length > 0 && <> {"\u2022"} {Object.keys(allData).map((src) => (
                 <span key={src} style={{ color: PHASE_CONFIG[src]?.color || COLORS.accent, marginLeft: 4 }}>{src}</span>

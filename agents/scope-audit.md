@@ -26,6 +26,66 @@ If AWS credentials are not configured: output the credential error message with 
 **Session isolation:** Every audit invocation is a fresh session. Create a unique run directory for all artifacts. Never reference, carry over, or mix data from previous audit runs.
 </role>
 
+<project_context>
+## SCOPE Project Context
+
+SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → investigate.
+
+**Credential model:** SCOPE inherits credentials from the shell environment (AWS_PROFILE, AWS_ACCESS_KEY_ID, or boto3/AWS CLI defaults). No custom credential loading. The first AWS API call (`sts:GetCallerIdentity` at Gate 1) serves as the credential check.
+
+**Dashboard:** All visualization is handled by the SCOPE dashboard (React + D3) at `http://localhost:3000`. Agents export `results.json` to `dashboard/public/$RUN_ID.json` and update `dashboard/public/index.json`. No standalone HTML files are generated.
+
+**Evidence fallback hierarchy:** Downstream agents consume upstream output in priority order:
+1. `./evidence/` — highest fidelity (claim-level provenance)
+2. `./data/` — structured report data (summaries, graphs)
+3. `$RUN_DIR/` — raw artifacts (markdown, JSON). Fallback when normalized data is unavailable.
+
+**Audit → Defend auto-chain:** After audit completes its middleware pipeline, it automatically invokes scope-defend with the current run's findings. Defend runs autonomously (no operator gates). The middleware pipeline runs again for defend output.
+
+**CloudTrail + Splunk:** CloudTrail is the only log source for Splunk. All SPL detections target `index=cloudtrail`. Do not assume Splunk is available — agents must work standalone without Splunk MCP.
+
+**Approval gates:** Standard workflows are read-only. Before ANY destructive AWS operation, show an approval block and wait for explicit Y/N. Per-step approval — never batch multiple destructive operations. Exploit generates playbooks with write commands but does not execute them.
+
+**Key pitfalls:** Do not batch approvals. Do not add credential validation steps outside Gate 1. Do not silently skip failures (exception: middleware pipeline steps are non-blocking).
+</project_context>
+
+<mandatory_outputs>
+## Required Output Files (MANDATORY)
+
+Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
+
+| # | File | Location | Purpose |
+|---|------|----------|---------|
+| 1 | `results.json` | `$RUN_DIR/results.json` | Structured graph data for dashboard and downstream agents |
+| 2 | `findings.md` | `$RUN_DIR/findings.md` | Three-layer human-readable report |
+| 3 | `evidence.jsonl` | `$RUN_DIR/evidence.jsonl` | Provenance log — one JSON line per evidence event |
+| 4 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
+| 5 | Dashboard index | `dashboard/public/index.json` | Updated with `latest` pointing to this run's ID |
+
+**Optional:** `enumeration.json` (raw enumeration data, written per module).
+
+**Self-check — run before reporting completion:**
+```bash
+test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/findings.md" && test -f "$RUN_DIR/evidence.jsonl" && test -f "dashboard/public/$RUN_ID.json" && echo "ALL MANDATORY FILES PRESENT" || echo "MISSING FILES — go back and create them"
+```
+
+If ANY mandatory file is MISSING, go back and create it before proceeding. Do not report completion with missing files.
+</mandatory_outputs>
+
+<post_processing_pipeline>
+## Post-Processing Pipeline (MANDATORY)
+
+After writing all artifacts, run this pipeline. Both steps are required — not optional.
+
+1. **Data normalization:** Read `agents/scope-data.md` — apply with PHASE=audit, RUN_DIR=$RUN_DIR
+2. **Evidence indexing:** Read `agents/scope-evidence.md` — validate and index with PHASE=audit, RUN_DIR=$RUN_DIR
+
+Sequential. Automatic. No operator approval needed.
+If a step fails: log a warning and continue to the next step — the raw artifacts are already written. Pipeline failure is non-blocking but MUST be attempted.
+
+See `<session_isolation>` for additional pipeline context.
+</post_processing_pipeline>
+
 <verification>
 Before producing any output containing technical claims (AWS API names, CloudTrail event names, SPL queries, MITRE ATT&CK references, IAM policy syntax, SCP/RCP structures, or attack path logic):
 
@@ -150,6 +210,8 @@ Also update `./audit/index.json` (machine-readable). Create if it doesn't exist 
 Read `./audit/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent. Downstream agents use this for machine-readable lookups — INDEX.md is for human readability only.
 
 ### Post-Processing Pipeline
+
+**See top-level `<post_processing_pipeline>` section for the authoritative pipeline specification.**
 
 After writing all artifacts and appending INDEX.md, run the following pipeline:
 
@@ -3378,4 +3440,5 @@ The `/scope:audit` skill succeeds (full run) when ALL of the following are true:
 11. **Next action recommended** — Contextual recommendation based on findings severity provided to operator
 12. **Defensive controls auto-generated** — Defend workflow automatically invoked after audit completes, producing SCPs/RCPs, security controls, SPL detections, and prioritized defensive control plans
 13. **Defend artifacts written** — Executive summary, technical remediation plan, and policy JSON files written to `./defend/defend-{timestamp}/`
+14. **Pipeline completed** — scope-data and scope-evidence middleware both invoked (failures logged as warnings, non-blocking)
 </success_criteria>
