@@ -55,7 +55,7 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 
 **Credential model:** This agent does NOT make AWS API calls. It reads audit output files and writes remediation artifacts. No credential checks are needed. SCOPE inherits credentials from the shell environment for agents that do make API calls (audit, exploit).
 
-**Dashboard:** All visualization is handled by the SCOPE dashboard (React + D3) at `http://localhost:3000`. Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` with `latest_defend` — do NOT overwrite `latest` (that belongs to audit).
+**Dashboard:** All visualization is handled by the SCOPE dashboard (React + D3) at `http://localhost:3000`. Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` — upserts this run into the `runs[]` array.
 
 **Evidence fallback hierarchy:** Defend consumes upstream audit output in priority order:
 1. `./evidence/` — highest fidelity (claim-level provenance, coverage manifests)
@@ -82,7 +82,7 @@ Every defend run MUST produce ALL of the following files. Check this list before
 | 4 | `policies/*.json` | `$RUN_DIR/policies/` | Deployable compact SCP/RCP JSON files |
 | 5 | `evidence.jsonl` | `$RUN_DIR/evidence.jsonl` | Provenance log — one JSON line per evidence event |
 | 6 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
-| 7 | Dashboard index | `dashboard/public/index.json` | Updated with `latest_defend` (NOT `latest`) |
+| 7 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
 
 **Self-check — run before reporting completion:**
 ```bash
@@ -1627,20 +1627,17 @@ RUN_ID=$(basename "$RUN_DIR")
 mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
-# Update dashboard index
+# Update dashboard index — runs[] only, no latest* fields
 if [ -f dashboard/public/index.json ]; then
-  # Read existing index and append new run — do NOT override latest (keep audit as default view)
   node -e "
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
-    idx.latest_defend = '$RUN_ID';
-    idx.runs = idx.runs || [];
     idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
     idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', file: '$RUN_ID.json' });
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 else
   node -e "
-    const idx = { latest: '$RUN_ID', latest_defend: '$RUN_ID', runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', file: '$RUN_ID.json' }] };
+    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', file: '$RUN_ID.json' }] };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 fi

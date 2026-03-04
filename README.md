@@ -79,9 +79,9 @@ Once installed, use slash commands from inside your editor:
 | Command | Description |
 |---------|-------------|
 | `/scope:audit <target> [<target> ...]` | Enumerate AWS resources — accepts ARN, service name (`iam`, `s3`, `kms`, `secrets`, `sts`, `lambda`, `ec2`), `--all`, `@targets.csv`, or multiple services inline (e.g., `iam s3 kms`). The `ec2` service includes VPC, EBS, ELB/ELBv2, SSM, and VPN enumeration. Auto-chains to defensive controls generation. |
-| `/scope:exploit <arn>` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
+| `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
 | `/scope:investigate` | SOC alert investigation via Splunk — timeline building, IOC correlation |
-| `/scope:help` | List available commands, show usage examples, and link to documentation |
+| `/scope:help` | List available commands, show usage examples, and link to documentation (built-in — reads `commands/help.md` directly, no agent installation needed) |
 
 > **Gemini CLI users:** Skills appear as `$scope-audit` (dollar-sign prefix, hyphen instead of colon)
 >
@@ -129,7 +129,7 @@ All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. 
 cd dashboard && npm run dev
 ```
 
-The dashboard reads `dashboard/public/index.json` to find available runs, then loads `dashboard/public/$RUN_ID.json` (falling back to `results.json`) to display audit findings, attack graphs, and defend status in a unified React + D3 interface. Investigate does not export to the dashboard — it produces a markdown determination only. Interactive features include severity filtering, category filtering (9 attack path categories), search, sort (severity/steps/name), clickable stat cards with slide-out detail panels (users, roles, trust relationships, wildcard trusts, critical paths, all paths), attack path edge highlighting on the graph, copy-to-clipboard for detections and defensive control text, a node detail panel with connected edges and associated paths, and run history navigation.
+The dashboard reads `dashboard/public/index.json` to find available runs, then loads `dashboard/public/$RUN_ID.json` per source phase. If `index.json` itself fails to load, the dashboard falls back to `/results.json`. Individual run file failures are silently skipped (no per-file fallback). Results are displayed as audit findings, attack graphs, and defend status in a unified React + D3 interface. Investigate does not export to the dashboard — it produces a markdown determination only. Interactive features include severity filtering, category filtering (9 attack path categories), search, sort (severity/steps/name), clickable stat cards with slide-out detail panels (users, roles, trust relationships, wildcard trusts, critical paths, all paths), attack path edge highlighting on the graph, copy-to-clipboard for detections and defensive control text, a node detail panel with connected edges and associated paths, and run history navigation.
 
 ### Verification
 

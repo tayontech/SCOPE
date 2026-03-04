@@ -54,22 +54,26 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 
 Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
 
+**Gate 4 skip exception:** If the operator says "skip" at Gate 4, only `findings.md` and `evidence.jsonl` are required — `results.json`, dashboard export, and dashboard index are skipped.
+
 | # | File | Location | Purpose |
 |---|------|----------|---------|
 | 1 | `results.json` | `$RUN_DIR/results.json` | Structured graph data for dashboard and downstream agents |
 | 2 | `findings.md` | `$RUN_DIR/findings.md` | Three-layer human-readable report |
 | 3 | `evidence.jsonl` | `$RUN_DIR/evidence.jsonl` | Provenance log — one JSON line per evidence event |
 | 4 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
-| 5 | Dashboard index | `dashboard/public/index.json` | Updated with `latest` pointing to this run's ID |
+| 5 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
 
 **Optional:** `enumeration.json` (raw enumeration data, written per module).
 
 **Self-check — run before reporting completion:**
 ```bash
-test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/findings.md" && test -f "$RUN_DIR/evidence.jsonl" && test -f "dashboard/public/$RUN_ID.json" && echo "ALL MANDATORY FILES PRESENT" || echo "MISSING FILES — go back and create them"
+# results.json and dashboard export checks apply only when Gate 4 was NOT skipped
+test -f "$RUN_DIR/findings.md" && test -f "$RUN_DIR/evidence.jsonl" && echo "REQUIRED FILES PRESENT" || echo "MISSING FILES — go back and create them"
+test -f "$RUN_DIR/results.json" && test -f "dashboard/public/$RUN_ID.json" && echo "DASHBOARD FILES PRESENT" || echo "DASHBOARD FILES SKIPPED (Gate 4 skip or not yet written)"
 ```
 
-If ANY mandatory file is MISSING, go back and create it before proceeding. Do not report completion with missing files.
+If ANY mandatory file is MISSING (and no applicable exception — zero-paths or Gate 4 skip — applies), go back and create it before proceeding.
 </mandatory_outputs>
 
 <post_processing_pipeline>
@@ -3359,14 +3363,14 @@ After writing the run-specific file, update the dashboard index:
 
 ```bash
 # Create or update dashboard/public/index.json
-# Read existing index (or start fresh), upsert this run, write back
+# Read existing index (or start fresh), filter out duplicate run_id, unshift new entry to front, write back
+# IMPORTANT: Dashboard takes the first run per source — always unshift (newest first)
 ```
 
 The index format:
 
 ```json
 {
-  "latest": "audit-20260301-143022-user-alice",
   "runs": [
     {
       "run_id": "audit-20260301-143022-user-alice",
@@ -3380,7 +3384,7 @@ The index format:
 }
 ```
 
-The SCOPE dashboard auto-loads `index.json` on mount, reads the `latest` field, and fetches `/{latest}.json`. The "Load Results JSON" button allows loading any run from `$RUN_DIR/results.json` or selecting from the index.
+The SCOPE dashboard auto-loads `index.json` on mount, iterates `runs[]`, groups by `source`, and fetches the first entry per phase. The "Load Results JSON" button allows loading any run from `$RUN_DIR/results.json` or selecting from the index.
 
 ### Verification
 

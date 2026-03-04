@@ -22,8 +22,10 @@ Available commands:
                             Accepts: ARN, service name, --all, @targets.csv, or multiple services inline
                             Auto-generates defensive controls (SCPs, detections, prioritized plan)
 
-  /scope:exploit <arn>      Generate privilege escalation playbooks
+  /scope:exploit <arn> [--fresh]
+                            Generate privilege escalation playbooks
                             Tests exploitability of audit findings for a specific principal
+                            --fresh forces fresh permission enumeration, ignoring existing audit data
 
   /scope:investigate        SOC alert investigation via Splunk
                             Timeline building, IOC correlation, detection verification
@@ -36,6 +38,7 @@ Examples:
   /scope:audit arn:aws:iam::123456789012:user/alice     Specific principal
   /scope:audit @targets.csv                             Bulk targets from CSV
   /scope:exploit arn:aws:iam::123456789012:user/alice   Escalation playbook
+  /scope:exploit arn:aws:iam::123456789012:user/alice --fresh  Fresh enumeration
   /scope:investigate                                    Start SOC investigation
 
 Dashboard:

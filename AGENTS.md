@@ -2,7 +2,7 @@
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) — AI agent set for purple team security operations against AWS accounts: resource audit → exploit playbook generation → defensive controls with SCPs and SPL detections → SOC alert investigation.
 
-Each agent file is self-contained — all project context, credentials, pipeline rules, and error handling are inlined directly in the agent .md file. No extra file reads required.
+Each agent file is self-contained for project context, credentials, pipeline rules, and error handling. Source agents (audit, exploit, investigate) read verification and middleware agents (`agents/scope-verify-*.md`, `agents/scope-data.md`, `agents/scope-evidence.md`) from the repo at runtime — these files must be accessible from the working directory.
 
 ## Agents
 
@@ -36,7 +36,7 @@ bin/                  Tooling (install.js deploys agents to editor config direct
 | Command | Description |
 |---------|-------------|
 | `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Auto-chains to defensive controls generation. |
-| `/scope:exploit <arn>` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
+| `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
 | `/scope:investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
 | `/scope:help` | List available commands, show usage examples |
 
@@ -46,11 +46,11 @@ Two middleware agents run automatically after audit, exploit, and defend:
 1. **scope-data** — normalizes raw artifacts to `./data/<phase>/<run-id>.json`
 2. **scope-evidence** — validates `evidence.jsonl` into envelopes at `./evidence/<phase>/<run-id>.json`
 
-Both are auto-called, sequential, and non-blocking. Investigate does not run this pipeline.
+Both are invoked by the source agent after writing artifacts — sequential and non-blocking. Investigate does not run this pipeline.
 
 ## Dashboard
 
-All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard index fields: `latest` (audit), `latest_exploit`, `latest_defend`. No standalone HTML files are generated.
+All visualization is handled by the SCOPE dashboard at `http://localhost:3000`. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard loads `index.json`, iterates the `runs[]` array, and fetches the latest entry per source phase. No standalone HTML files are generated (dashboard/index.html is the Vite/React entry point, not a generated report).
 
 ## AWS Credential Model
 
