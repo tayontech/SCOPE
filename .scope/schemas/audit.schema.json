@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scope-audit-results",
+  "title": "SCOPE Audit Results",
+  "description": "Schema for audit phase results.json — validated by scope-schema-validate hook",
+  "type": "object",
+  "required": ["account_id", "source", "region", "timestamp", "summary", "graph", "attack_paths", "principals", "trust_relationships"],
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "pattern": "^\\d{12}$",
+      "description": "12-digit AWS account ID"
+    },
+    "source": {
+      "const": "audit"
+    },
+    "region": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "owned_accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^\\d{12}$" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["risk_score"],
+      "properties": {
+        "total_users": { "type": "integer" },
+        "total_roles": { "type": "integer" },
+        "total_policies": { "type": "integer" },
+        "total_trust_relationships": { "type": "integer" },
+        "critical_priv_esc_risks": { "type": "integer" },
+        "wildcard_trust_policies": { "type": "integer" },
+        "cross_account_trusts": { "type": "integer" },
+        "users_without_mfa": { "type": "integer" },
+        "risk_score": {
+          "type": "string",
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+        },
+        "services_analyzed": { "type": "integer" },
+        "top_findings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "paths_by_category": {
+          "type": "object",
+          "properties": {
+            "privilege_escalation": { "type": "integer" },
+            "trust_misconfiguration": { "type": "integer" },
+            "data_exposure": { "type": "integer" },
+            "credential_risk": { "type": "integer" },
+            "excessive_permission": { "type": "integer" },
+            "network_exposure": { "type": "integer" },
+            "persistence": { "type": "integer" },
+            "post_exploitation": { "type": "integer" },
+            "lateral_movement": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "graph": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "type"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "type": { "type": "string", "enum": ["user", "role", "escalation", "data", "external"] }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source", "target"],
+            "properties": {
+              "source": { "type": "string" },
+              "target": { "type": "string" },
+              "trust_type": { "type": "string" },
+              "edge_type": { "type": "string" },
+              "severity": { "type": "string" },
+              "label": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "attack_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "severity", "category"],
+        "properties": {
+          "name": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "category": {
+            "type": "string",
+            "enum": ["privilege_escalation", "trust_misconfiguration", "data_exposure", "credential_risk", "excessive_permission", "network_exposure", "persistence", "post_exploitation", "lateral_movement"]
+          },
+          "description": { "type": "string" },
+          "exploitability": { "type": "string" },
+          "confidence_pct": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "steps": { "type": "array", "items": { "type": "string" } },
+          "mitre_techniques": { "type": "array", "items": { "type": "string" } },
+          "detection_opportunities": { "type": "array", "items": { "type": "string" } },
+          "remediation": { "type": "array", "items": { "type": "string" } },
+          "affected_resources": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "principals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "arn"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["user", "role"] },
+          "arn": { "type": "string" }
+        }
+      }
+    },
+    "trust_relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role_id", "role_arn", "principal", "trust_type"],
+        "properties": {
+          "role_id": { "type": "string" },
+          "role_arn": { "type": "string" },
+          "principal": { "type": "string" },
+          "trust_type": { "type": "string", "enum": ["same-account", "cross-account", "service"] },
+          "is_wildcard": { "type": "boolean" },
+          "has_external_id": { "type": "boolean" },
+          "has_mfa_condition": { "type": "boolean" },
+          "risk": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
+          "is_internal": { "type": ["boolean", "null"] },
+          "account_name": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "context": {
+    "fileName": ["AGENTS.md"]
+  },
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".scope/hooks/scope-safety-guard.sh"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "write_file|replace",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".scope/hooks/scope-spl-lint.sh"
+          },
+          {
+            "type": "command",
+            "command": ".scope/hooks/scope-schema-validate.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".scope/hooks/scope-agent-logger.sh"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".scope/hooks/scope-artifact-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

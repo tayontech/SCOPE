@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scope-module-envelope",
+  "title": "SCOPE Module Output Envelope",
+  "description": "Shared envelope for all per-module enumeration output files. Validated by scope-schema-validate.sh hook.",
+  "type": "object",
+  "required": ["module", "account_id", "region", "timestamp", "status", "findings"],
+  "properties": {
+    "module": {
+      "type": "string",
+      "enum": ["iam", "sts", "s3", "kms", "secrets", "lambda", "ec2",
+               "rds", "sns", "sqs", "apigateway", "bedrock", "sagemaker", "codebuild"]
+    },
+    "account_id": { "type": "string", "pattern": "^\\d{12}$" },
+    "region": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "status": {
+      "type": "string",
+      "enum": ["complete", "partial", "error"]
+    },
+    "error": { "type": "string" },
+    "findings": { "type": "array" }
+  }
+}
