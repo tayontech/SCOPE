@@ -32,6 +32,9 @@ dashboard/dist/
 dashboard/public/*.json
 dashboard/dashboard.html
 
+# MCP configuration (may contain credentials)
+.mcp.json
+
 # Config (user-specific — contains real account IDs and policies)
 config/accounts.json
 config/scps/*.json

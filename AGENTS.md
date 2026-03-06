@@ -53,12 +53,43 @@ Skills are `SKILL.md` files in `.agents/skills/`. Both Gemini CLI and Codex disc
 | Project  | `.agents/skills/<skill>/SKILL.md` |
 | User     | `~/.agents/skills/<skill>/SKILL.md` |
 
-Subagents are deployed as flat `.md` files in `.agents/agents/`. The installer handles both:
+## Subagents
 
+Subagents are deployed differently per platform:
+
+**Claude Code** — flat `.md` files in `.claude/agents/` (local) or `~/.claude/agents/` (global):
 ```
-node bin/install.js --gemini   # deploys skills to .agents/skills/ + subagents to .agents/agents/
-node bin/install.js --codex    # deploys skills to .agents/skills/ + subagents to .agents/agents/
+node bin/install.js --claude --local   # deploys to .claude/skills/ + .claude/agents/
 ```
+
+**Gemini CLI** — flat `.md` files in `.gemini/agents/` (local) or `~/.gemini/agents/` (global). Requires `experimental.enableAgents: true` in `settings.json` (the installer adds this automatically via the settings template):
+```
+node bin/install.js --gemini --local   # deploys to .agents/skills/ + .gemini/agents/ + .gemini/settings.json
+```
+
+**Codex** — Codex uses `config.toml` for agent registration. The installer deploys stripped `.md` files to `.codex/agents/` and auto-merges `[agents]` entries into `.codex/config.toml`:
+```
+node bin/install.js --codex --local   # deploys to .agents/skills/ + .codex/agents/ + updates .codex/config.toml
+```
+
+## Context Isolation (Claude Code Only)
+
+SCOPE entry-point skills (`scope-audit`, `scope-investigate`) use `context: fork` in their Claude Code skill frontmatter. When an operator invokes `/scope:audit` or `/scope:investigate`, Claude Code runs the skill in a forked subagent context: the skill content becomes the task, the forked agent gets its own isolated context window, and results summarize back to the main conversation cleanly.
+
+**Why it exists:**
+- Verbose AWS enumeration output and Splunk query result sets stay out of the main conversation window
+- Long-running multi-phase operations (audit pipeline, investigation chains) get clean isolation per invocation
+- The forked context cannot access pre-invocation conversation history, preventing accidental context contamination
+
+**Claude Code only:** `context: fork` and `agent:` are Claude Code-native frontmatter fields. The installer strips both fields from Gemini CLI and Codex skill outputs (`installGemini`, `installCodex`, `installSubagentsGemini`, `installSubagentsCodex` strip lists all include `'context'` and `'agent'`).
+
+**Functionally equivalent fallback (Gemini CLI / Codex):** SCOPE already implements sequential file-based handoff as its primary isolation mechanism. Each agent phase writes structured JSON to `$RUN_DIR/` and downstream agents read from disk -- providing the same context isolation guarantee without requiring platform-specific frontmatter:
+
+- Enum subagents write `$RUN_DIR/{service}.json` (one file per service)
+- `scope-attack-paths` reads all per-module JSON files from `$RUN_DIR/` on disk
+- `scope-pipeline` normalizes results to `./data/<phase>/<run-id>.json` and validates logs to `./agent-logs/<phase>/<run-id>.json`
+
+On Gemini CLI and Codex, this sequential file-based handoff IS the full context isolation mechanism -- no additional platform flags required.
 
 ## Invocation
 

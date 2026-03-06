@@ -1,9 +1,10 @@
 ---
 name: scope-defend
 description: Defensive controls generation — reads audit output and generates SCPs/RCPs, security controls, SPL detections, and prioritized remediation. Dispatched by the audit orchestrator after audit completes, or invoked directly by the operator via /scope:defend [run-dir].
-compatibility: Orchestrator-spawned (receives RUN_DIR in initial message) or operator-invoked (scans all audit runs if no run-dir provided). AWS Organizations context optional but enhances OU-aware recommendations.
+compatibility: Orchestrator-spawned (receives AUDIT_RUN_DIR in initial message) or operator-invoked (scans all audit runs if no run-dir provided). AWS Organizations context optional but enhances OU-aware recommendations.
 allowed-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: green
+model: sonnet
 ---
 
 <invocation_modes>

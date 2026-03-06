@@ -4,6 +4,8 @@ description: SCOPE audit orchestrator — single entry point for the full audit 
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
 allowed-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
+context: fork
+agent: general-purpose
 ---
 
 <role>
@@ -340,7 +342,7 @@ Dispatch the attack-paths subagent with this initial message:
 
 On Claude Code: Use the Agent tool with agents/subagents/scope-attack-paths.md
 (installed to .claude/agents/scope-attack-paths.md).
-The attack-paths subagent uses model: inherit — it needs full reasoning capability.
+The attack-paths subagent uses model: sonnet — it requires full reasoning capability.
 
 On Gemini CLI: Delegate to the scope-attack-paths subagent in .agents/agents/.
 
@@ -559,12 +561,11 @@ After findings.md and results.json are written, automatically dispatch the defen
 ```
 Dispatch scope-defend as a subagent with this initial message:
 
-  RUN_DIR: {run_directory_path}
+  AUDIT_RUN_DIR: {run_directory_path}
   ACCOUNT_ID: {account_id}
 
-On Claude Code: Use the Agent tool with agents/scope-defend.md
-(installed to .claude/agents/scope-defend.md).
-Defend reads results.json and per-module JSONs from $RUN_DIR/ for its full analysis.
+On Claude Code: Use the Agent tool with subagent file path agents/scope-defend.md (read directly from repo, not installed as a subagent).
+Defend reads results.json and per-module JSONs from AUDIT_RUN_DIR/ for its full analysis.
 Defend also runs verify internally (domain-aws + domain-splunk) on its own output.
 
 On Gemini CLI: Delegate to scope-defend in .agents/agents/.
@@ -574,13 +575,14 @@ On Codex: Use spawn_agent for scope-defend from .agents/agents/.
 Wait for defend to complete and return its summary.
 Expected summary:
   STATUS: complete|error
-  FILES: [list of defend artifacts written to $RUN_DIR/]
+  DEFEND_RUN_DIR: ./defend/defend-{timestamp}/
   METRICS: {scps: N, rcps: N, detections: N}
 ```
 
 If defend fails: log a warning, continue to pipeline. Defend failure is non-blocking.
 
-Note: Defend writes its artifacts to the same `$RUN_DIR/` (defend-results.json, defend-findings.md). All artifacts for one assessment stay together.
+Note: Defend creates its own independent run directory at `./defend/defend-{timestamp}/`. Capture
+the DEFEND_RUN_DIR from defend's summary — you need it for the post-processing pipeline Run 2.
 </defend_auto_chain>
 
 <post_processing_pipeline>
@@ -593,15 +595,16 @@ Read `agents/subagents/scope-pipeline.md` and execute:
 **Run 1 — Audit phase:**
 ```
 PHASE=audit
-RUN_DIR={run_directory_path}
+RUN_DIR={audit_run_directory_path}
 ```
 Run Phase 1 data normalization then Phase 2 agent-log indexing for the audit artifacts.
 
 **Run 2 — Defend phase:**
 ```
 PHASE=defend
-RUN_DIR={run_directory_path}
+RUN_DIR={defend_run_directory_path}
 ```
+Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./defend/defend-20260301-143022/`).
 Run Phase 1 data normalization then Phase 2 agent-log indexing for the defend artifacts (if defend succeeded).
 
 Sequential. Automatic. No operator approval needed.
@@ -851,7 +854,7 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory `./audit/$RUN_ID/` created, all artifacts written there, run appended to `./audit/INDEX.md` and `./audit/index.json`.
-9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4. Defend artifacts written to same $RUN_DIR/.
+9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its own `./defend/defend-{timestamp}/` run directory and returns DEFEND_RUN_DIR in its summary.
 10. **Pipeline ran inline** — agents/subagents/scope-pipeline.md invoked for both audit and defend phases. Failures logged as warnings (non-blocking).
 11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
 12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
