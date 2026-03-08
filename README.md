@@ -13,6 +13,50 @@ SCOPE (Security Cloud Ops Purple Engagement) is an AI-powered purple team toolki
 
 The AI reasons about attack paths — it doesn't just run scripts. It decides what to enumerate, interprets results, pivots to interesting findings, and builds correlated detections. Every factual claim is traced to evidence (API output, policy evaluation) through a unified verification agent that classifies output as Guaranteed, Conditional, or Speculative. Audit, exploit, and defend runs produce structured artifacts viewable in the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`). Investigate produces self-contained markdown.
 
+## Screenshots
+
+### Audit — Attack Graph
+Interactive D3 graph visualization of your AWS attack surface. Nodes represent principals, roles, and data resources. Edges show trust relationships, privilege escalation paths, and cross-account access.
+
+![Attack Graph](docs/images/dashboard-attack-graph.png)
+
+### Audit — Attack Paths
+Categorized attack paths with severity ratings, exploit steps, MITRE ATT&CK mappings, and Splunk detection queries.
+
+![Attack Paths](docs/images/dashboard-attack-paths.png)
+
+### Audit — Terminal Output
+Gate 3 module status showing per-service enumeration results and regional coverage.
+
+![Gate 3 Module Status](docs/images/gate3-module-status.png)
+
+Gate 4 attack path analysis summary with operator approval prompt.
+
+![Gate 4 Attack Paths](docs/images/gate4-attack-paths.png)
+
+### Defend — Policies & Detections
+Auto-generated SCPs with deployable policy JSON, prioritized by risk and blast radius.
+
+![Defend Policies](docs/images/dashboard-defend-policies.png)
+
+Splunk SPL detection rules built against CloudTrail telemetry for each identified attack path.
+
+![Defend Detections](docs/images/dashboard-defend-detections.png)
+
+### Defend — Summary & Recommendations
+Executive summary with risk posture breakdown and prioritized quick wins.
+
+![Defend Summary](docs/images/dashboard-defend-summary.png)
+
+Technical remediation bundles mapping SCPs, detections, and controls to each attack path.
+
+![Tech Recommendations](docs/images/dashboard-defend-tech-recs.png)
+
+### Exploit — Playbook Detail
+Privilege escalation playbook with per-principal exploit detail sidebar.
+
+![Exploit Sidebar](docs/images/dashboard-exploit-sidebar.png)
+
 ## Architecture
 
 ```
