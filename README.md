@@ -42,20 +42,56 @@ export AWS_PROFILE=my-security-readonly-profile
 - **`config/accounts.json`** — Owned AWS account IDs. Helps distinguish internal vs external cross-account trusts. Copy `config/accounts.example.json` and fill in your account IDs.
 - **`config/scps/*.json`** — Pre-loaded SCPs for when the caller lacks Organizations API access.
 
-## Commands
+## Usage
 
-| Command | What it does |
-|---------|-------------|
-| `/scope:audit <target>` | Enumerate AWS resources (IAM, STS, S3, KMS, EC2, Lambda, Secrets, and more). Maps attack paths across 9 categories and auto-chains defensive controls. |
-| `/scope:exploit <arn>` | Generate red team playbooks — escalation paths, persistence techniques, exfiltration vectors with ready-to-execute CLI commands. |
-| `/scope:defend` | Generate SCPs/RCPs, Splunk detections, and security controls based on audit findings. |
-| `/scope:investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation. |
+### 1. Run an audit
+
+From inside Claude Code, Gemini CLI, or Codex:
+
+```
+/scope:audit --all                    # Full account audit (all services)
+/scope:audit iam s3 kms               # Specific services
+/scope:audit arn:aws:iam::123456789012:user/alice   # Specific principal
+```
+
+The audit orchestrator will:
+- Enumerate resources across IAM, STS, S3, KMS, EC2, Lambda, Secrets Manager, and more
+- Pause at operator gates for your approval before proceeding
+- Map attack paths across 9 categories (privilege escalation, trust misconfigurations, data exposure, etc.)
+- Auto-generate defensive controls (SCPs, Splunk detections) after the audit completes
+- Produce an interactive dashboard — open `dashboard/dashboard.html` in any browser
+
+### 2. Generate exploit playbooks
+
+```
+/scope:exploit arn:aws:iam::123456789012:user/alice
+```
+
+Takes a principal ARN and produces a red team playbook: escalation paths with CLI commands, persistence techniques, and exfiltration vectors. Read-only — generates the playbook but does not execute anything.
+
+### 3. Investigate alerts
+
+```
+/scope:investigate
+```
+
+Guides you through CloudTrail-based alert investigation in Splunk. Works in two modes:
+- **Connected** — Splunk MCP available, queries execute directly after your approval
+- **Manual** — No MCP, displays SPL for you to run in Splunk and paste results back
+
+### 4. View the dashboard
+
+```bash
+cd dashboard && npm install && npm run dashboard
+```
+
+Opens `dashboard/dashboard.html` in any browser — no server required. Shows attack graphs, path details, defensive controls, and Splunk detections from your latest runs.
 
 > **Codex users:** Use dollar-sign prefix with hyphens: `$scope-audit`, `$scope-exploit`, etc.
 
 ## Safety
 
-SCOPE is **read-only by default**. Lifecycle hooks block destructive AWS operations at the tool level. Before any write operation, SCOPE shows an approval block with the action, target resources, and risk level — then waits for your explicit Y/N. Approvals are per-step, never batched. Exploit generates playbooks but does not execute them.
+SCOPE is **read-only by default**. Lifecycle hooks block destructive AWS operations at the tool level. Before any write operation, SCOPE shows an approval block with the action, target resources, and risk level — then waits for your explicit Y/N. Approvals are per-step, never batched.
 
 ## License
 
