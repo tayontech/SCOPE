@@ -326,13 +326,20 @@ If a module JSON file is missing after dispatch (subagent crashed without writin
 
 At Gate 3, for each regional service subagent (ec2, kms, secrets, lambda, s3, rds, sns, sqs, apigateway, codebuild):
 
-Check the returned `$RUN_DIR/{service}.json` — if the file contains findings, verify that the `region` field reflects multi-region coverage. If a subagent scanned fewer than REGION_COUNT regions (compare findings region tags against ENABLED_REGIONS), log a warning:
+Check the returned `$RUN_DIR/{service}.json` — compare the distinct `region` tags in findings against ENABLED_REGIONS. Two scenarios:
+
+1. **Findings in fewer regions than scanned** (common): Resources only exist in some regions. This is normal — report as informational, not a warning.
+2. **Subagent errors/skips on specific regions** (check ERRORS field): Regions were skipped due to AccessDenied or timeout. This is a coverage gap — log a warning.
 
 ```
-[WARN] {service} subagent scanned N/M enabled regions — some regions may have been skipped.
+# Normal: resources found in 2 of 17 scanned regions (no errors)
+{service}: 17/17 regions scanned, resources found in 2 regions
+
+# Coverage gap: regions were skipped due to errors
+[WARN] {service}: scanned 15/17 enabled regions — skipped: eu-west-1 (AccessDenied), ap-southeast-1 (timeout)
 ```
 
-This is a soft warning (does not block), but surfaces the coverage gap for operator awareness.
+Only warn when the ERRORS field indicates regions were actually skipped. "Resources found in N regions" is informational, not a warning.
 
 ### Output Path Constraint
 
@@ -371,20 +378,20 @@ Account: [ACCOUNT_ID]
 | [service] | [status] | [key findings] | [errors] |
 
 Region Coverage (per service):
-  EC2:          [N]/[M] regions [failure details if any]
-  Lambda:       [N]/[M] regions [failure details if any]
-  KMS:          [N]/[M] regions [failure details if any]
-  Secrets:      [N]/[M] regions [failure details if any]
-  RDS:          [N]/[M] regions [failure details if any]
-  SQS:          [N]/[M] regions [failure details if any]
-  SNS:          [N]/[M] regions [failure details if any]
-  API Gateway:  [N]/[M] regions [failure details if any]
-  Bedrock:      [N]/[M] regions [failure details if any]
-  SageMaker:    [N]/[M] regions [failure details if any]
-  CodeBuild:    [N]/[M] regions [failure details if any]
+  EC2:          [M]/[M] regions scanned, resources in [N] (us-east-1, us-west-2) [WARN if errors]
+  Lambda:       [M]/[M] regions scanned, resources in [N] (us-east-1) [WARN if errors]
+  KMS:          [M]/[M] regions scanned, resources in [N] (us-east-1, eu-west-1) [WARN if errors]
+  Secrets:      [M]/[M] regions scanned, resources in [N] [WARN if errors]
+  RDS:          [M]/[M] regions scanned, resources in [N] [WARN if errors]
+  SQS:          [M]/[M] regions scanned, resources in [N] [WARN if errors]
+  SNS:          [M]/[M] regions scanned, resources in [N] [WARN if errors]
+  API Gateway:  [M]/[M] regions scanned, resources in [N] [WARN if errors]
+  CodeBuild:    [M]/[M] regions scanned, resources in [N] [WARN if errors]
   S3:           global (bucket-region filtering applied)
   IAM:          global
   STS:          global
+
+(List the actual region names where resources were found, extracted from the findings region tags.)
 
 [If module validation warnings exist, display here:]
 Module validation warnings:
@@ -818,6 +825,8 @@ cd dashboard && npm run dashboard 2>&1
 ```
 
 This produces `dashboard/dashboard.html` — a portable file that opens in any browser without a server. Essential for Codex and Gemini CLI environments where localhost is unavailable.
+
+`npm run dashboard` calls `bin/generate-report.js`, which automatically installs dependencies (`npm install`) if `dashboard/node_modules/` is missing before running the build. You do not need to run `npm install` manually.
 
 **Do NOT generate dashboard.html yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above.
 

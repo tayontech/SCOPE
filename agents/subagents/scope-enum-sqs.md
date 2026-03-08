@@ -55,6 +55,8 @@ jq -n \
 STATUS: complete|partial|error
 FILE: $RUN_DIR/sqs.json
 METRICS: {queues: N, public_queues: N, unencrypted_queues: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where queues were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 

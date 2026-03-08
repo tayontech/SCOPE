@@ -51,6 +51,8 @@ Return to orchestrator (minimal summary only):
 STATUS: complete|partial|error
 FILE: $RUN_DIR/ec2.json
 METRICS: {instances: N, vpcs: N, security_groups: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1, us-west-2] (list only regions where resources were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 

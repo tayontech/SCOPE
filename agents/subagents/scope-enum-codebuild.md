@@ -55,6 +55,8 @@ jq -n \
 STATUS: complete|partial|error
 FILE: $RUN_DIR/codebuild.json
 METRICS: {projects: N, projects_with_admin_role: N, source_credentials: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where projects were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 

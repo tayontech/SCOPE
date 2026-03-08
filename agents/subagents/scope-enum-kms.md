@@ -51,6 +51,8 @@ Return to orchestrator (minimal summary only):
 STATUS: complete|partial|error
 FILE: $RUN_DIR/kms.json
 METRICS: {keys: N, grants: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] (list only regions where customer-managed keys were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 

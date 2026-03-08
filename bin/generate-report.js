@@ -26,7 +26,19 @@ const dashboardDir = join(__dirname, "..", "dashboard");
 const publicDir = join(dashboardDir, "public");
 const distDir = join(dashboardDir, "dist");
 
-// --- Step 1: Build the dashboard ---
+// --- Step 1: Install dependencies if needed, then build the dashboard ---
+const nodeModulesDir = join(dashboardDir, "node_modules");
+if (!existsSync(nodeModulesDir)) {
+  console.log("[SCOPE] node_modules not found — running npm install...");
+  try {
+    execSync("npm install --prefer-offline --no-audit --no-fund", { cwd: dashboardDir, stdio: "pipe" });
+    console.log("[SCOPE] npm install complete.");
+  } catch (err) {
+    console.error("[SCOPE] npm install failed:", err.stderr?.toString() || err.message);
+    process.exit(1);
+  }
+}
+
 console.log("[SCOPE] Building dashboard...");
 try {
   execSync("npm run build", { cwd: dashboardDir, stdio: "pipe" });

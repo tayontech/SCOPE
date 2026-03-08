@@ -238,6 +238,65 @@ function normalizeForDashboard(json, indexSource) {
     data.technical_recommendations = data.technical_remediation;
   }
 
+  // DASH-06: Deduplicate graph nodes and edges.
+  // scope-attack-paths builds nodes in two phases (Phase A: identity from raw IAM lists;
+  // Phase B: analysis nodes from attack path reasoning) and may also merge nodes from a
+  // pre-built graph in iam.json. Without explicit dedup, the same node id can appear
+  // multiple times, causing D3 to render duplicate SVG circles for the same resource.
+  // Dedup nodes by id (first occurrence wins — preserves Phase A identity data).
+  // Dedup edges by composite key source+"|"+target+"|"+edge_type (first occurrence wins).
+  if (data.graph) {
+    if (Array.isArray(data.graph.nodes)) {
+      const seenNodeIds = new Set();
+      data.graph.nodes = data.graph.nodes.filter((n) => {
+        if (!n.id || seenNodeIds.has(n.id)) return false;
+        seenNodeIds.add(n.id);
+        return true;
+      });
+    }
+    if (Array.isArray(data.graph.edges)) {
+      const seenEdgeKeys = new Set();
+      data.graph.edges = data.graph.edges.filter((e) => {
+        const key = `${e.source}|${e.target}|${e.edge_type ?? ""}`;
+        if (seenEdgeKeys.has(key)) return false;
+        seenEdgeKeys.add(key);
+        return true;
+      });
+    }
+  }
+
+  // Remove escalation nodes (permission actions like iam:CreatePolicyVersion) from the graph.
+  // These are dead-end leaf nodes that clutter the visualization. The escalation capability is
+  // preserved as metadata on the source principal's priv_esc edges are converted to self-annotations.
+  if (data.graph && Array.isArray(data.graph.nodes)) {
+    const escNodeIds = new Set(
+      data.graph.nodes.filter((n) => n.type === "escalation").map((n) => n.id)
+    );
+    if (escNodeIds.size > 0) {
+      // Collect escalation capabilities per source principal before removing edges
+      const escCapabilities = {};
+      if (Array.isArray(data.graph.edges)) {
+        data.graph.edges.forEach((e) => {
+          if (escNodeIds.has(e.target)) {
+            if (!escCapabilities[e.source]) escCapabilities[e.source] = [];
+            escCapabilities[e.source].push(e.label || e.target.replace("esc:", ""));
+          }
+        });
+      }
+      // Annotate source principals with their escalation capabilities
+      data.graph.nodes.forEach((n) => {
+        if (escCapabilities[n.id]) {
+          n.escalation_capabilities = escCapabilities[n.id];
+        }
+      });
+      // Filter out escalation nodes and edges pointing to them
+      data.graph.nodes = data.graph.nodes.filter((n) => n.type !== "escalation");
+      if (Array.isArray(data.graph.edges)) {
+        data.graph.edges = data.graph.edges.filter((e) => !escNodeIds.has(e.target) && !escNodeIds.has(e.source));
+      }
+    }
+  }
+
   // Propagate run status from _run_status field (set by generate-report.js for inline HTML)
   // Absent/undefined = "complete" — backward compat with old runs that predate status support
   data.runStatus = data._run_status || "complete";
@@ -1148,14 +1207,29 @@ function StatDetailPanel({ statKey, data, onClose, onSelectPath, onHighlightNode
       case "trusts": {
         const RISK_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
         const TRUST_TYPE_ORDER = { "cross-account": 0, service: 1, "same-account": 2 };
-        const trustItems = trusts.length > 0 ? [...trusts].sort((a, b) => {
-          // Sort by risk level (critical first), then trust_type (cross-account first), then role_id
+        if (trusts.length === 0) return { title: "Trust Relationships", items: paths.filter((p) => p.category === "trust_misconfiguration") };
+        // Group by role_id — collapse multiple service trusts into one entry with a principals array
+        const grouped = {};
+        for (const t of trusts) {
+          const key = t.role_id || t.role_arn || JSON.stringify(t);
+          if (!grouped[key]) {
+            grouped[key] = { ...t, all_principals: [t.principal || t.trust_principal || ""] };
+          } else {
+            grouped[key].all_principals.push(t.principal || t.trust_principal || "");
+            // Keep highest risk
+            if ((RISK_ORDER[t.risk] ?? 4) < (RISK_ORDER[grouped[key].risk] ?? 4)) grouped[key].risk = t.risk;
+            // Keep most specific trust_type
+            if ((TRUST_TYPE_ORDER[t.trust_type] ?? 3) < (TRUST_TYPE_ORDER[grouped[key].trust_type] ?? 3)) grouped[key].trust_type = t.trust_type;
+            if (t.is_wildcard) grouped[key].is_wildcard = true;
+          }
+        }
+        const trustItems = Object.values(grouped).sort((a, b) => {
           const riskDiff = (RISK_ORDER[a.risk] ?? 4) - (RISK_ORDER[b.risk] ?? 4);
           if (riskDiff !== 0) return riskDiff;
           const typeDiff = (TRUST_TYPE_ORDER[a.trust_type] ?? 3) - (TRUST_TYPE_ORDER[b.trust_type] ?? 3);
           if (typeDiff !== 0) return typeDiff;
           return (a.role_id || "").localeCompare(b.role_id || "");
-        }) : paths.filter((p) => p.category === "trust_misconfiguration");
+        });
         return { title: "Trust Relationships", items: trustItems };
       }
       case "wildcards": {
@@ -1280,8 +1354,8 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
             Trust: {item.trust_principal}
           </div>
         )}
-        {item.attached_policies?.length > 0 && (
-          <div style={{ fontSize: 10, color: COLORS.textDim, marginTop: 4 }}>Policies: {item.attached_policies.join(", ")}</div>
+        {(item.attached_policies?.length > 0 || item.policies?.length > 0) && (
+          <div style={{ fontSize: 10, color: COLORS.textDim, marginTop: 4 }}>Policies: {(item.attached_policies || item.policies).join(", ")}</div>
         )}
         {item.risk_flags?.length > 0 && (
           <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
@@ -1327,13 +1401,28 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
           </div>
           <span style={{ fontSize: 10, fontWeight: 700, color: riskColor, background: riskColor + "18", padding: "1px 8px", borderRadius: 8, flexShrink: 0 }}>{item.risk}</span>
         </div>
-        {/* Trusted-by line: who/what is trusted to assume this role */}
-        <div style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 4 }}>
-          Trusted by: <span style={{ color: COLORS.text, fontWeight: 500 }}>{trustedByName}</span>
-        </div>
-        {/* Full principal in monospace below */}
-        {principal && (
-          <div style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 6 }}>{principal}</div>
+        {/* Trusted-by line: show all principals if grouped, otherwise single */}
+        {item.all_principals?.length > 1 ? (
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 4 }}>Trusted by {item.all_principals.length} principals:</div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {item.all_principals.map((p, idx) => (
+                <span key={idx} style={{
+                  fontSize: 10, fontFamily: "monospace", background: COLORS.bgCardHover,
+                  color: COLORS.text, padding: "2px 6px", borderRadius: 4,
+                }}>{p.replace(".amazonaws.com", "")}</span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 4 }}>
+              Trusted by: <span style={{ color: COLORS.text, fontWeight: 500 }}>{trustedByName}</span>
+            </div>
+            {principal && (
+              <div style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 6 }}>{principal}</div>
+            )}
+          </>
         )}
         {item.is_internal != null && (
           <div style={{ marginBottom: 6 }}>
