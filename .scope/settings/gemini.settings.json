@@ -2,6 +2,9 @@
   "context": {
     "fileName": ["AGENTS.md"]
   },
+  "experimental": {
+    "enableAgents": true
+  },
   "hooks": {
     "BeforeTool": [
       {
@@ -10,6 +13,10 @@
           {
             "type": "command",
             "command": ".scope/hooks/scope-safety-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": ".scope/hooks/scope-aws-output-inject.sh"
           }
         ]
       }

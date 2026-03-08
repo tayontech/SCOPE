@@ -8,9 +8,9 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 
 ```
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
-agents/scope-defend.md      Defensive controls generation — dispatched by orchestrator or invoked via /scope:defend
+agents/scope-defend.md      Defensive controls generation (model: sonnet) — dispatched by orchestrator or invoked via /scope:defend
 agents/scope-exploit.md     Privilege escalation playbooks (slash command)
-agents/scope-investigate.md SOC alert investigation (slash command)
+agents/scope-investigate.md SOC alert investigation (slash command, memory: local)
 ```
 
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
@@ -23,10 +23,29 @@ agents/subagents/scope-enum-kms.md      KMS enumeration (model: haiku)
 agents/subagents/scope-enum-secrets.md  Secrets Manager enumeration (model: haiku)
 agents/subagents/scope-enum-lambda.md   Lambda enumeration (model: haiku)
 agents/subagents/scope-enum-ec2.md      EC2/VPC/EBS/ELB enumeration (model: haiku)
-agents/subagents/scope-attack-paths.md  Attack path reasoning from per-module JSON (model: inherit)
+agents/subagents/scope-attack-paths.md  Attack path reasoning from per-module JSON (model: sonnet)
 agents/subagents/scope-verify.md        Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
 agents/subagents/scope-pipeline.md      Post-processing middleware — data normalization then evidence indexing (read inline)
 ```
+
+> **WARNING -- Session Model Override:**
+> SCOPE security-reasoning agents (`scope-attack-paths`, `scope-defend`) require Sonnet-class capability.
+> Running Claude Code with `--model haiku` or `ANTHROPIC_MODEL=haiku` overrides subagent model routing
+> and will cause these agents to use Haiku regardless of their frontmatter `model: sonnet` pin
+> (see [GitHub issue #29768](https://github.com/anthropics/claude-code/issues/29768)).
+> **Do not run SCOPE audit sessions with `--model haiku`.**
+> If subagents appear to use the wrong model, check the installed `.claude/agents/*.md` file model field as a first diagnostic step.
+
+> **WARNING -- Subagent Memory Restriction:**
+> `memory:` is permitted ONLY on `scope-investigate.md`. Do NOT add `memory:` to:
+> - Any `scope-enum-*.md` file (12 enum subagents)
+> - `scope-attack-paths.md`
+> - `scope-defend.md` (unless a future phase explicitly evaluates it)
+> **Cross-account contamination risk:** Enum subagents and attack-paths enumerate AWS
+> resource identifiers (ARNs, account IDs, role names, key IDs, bucket names) by design.
+> If these subagents wrote to MEMORY.md, resource identifiers from one engagement would
+> persist into future sessions on different AWS accounts, creating false context and
+> potential information disclosure across customer boundaries.
 
 ## Architecture
 
@@ -52,6 +71,7 @@ SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool
 | Hook | Event | Purpose |
 |------|-------|---------|
 | `scope-safety-guard.sh` | PreToolUse (Bash) | Block destructive AWS operations — agents are read-only |
+| `scope-aws-output-inject.sh` | BeforeTool (Bash, Gemini-only) | Auto-inject `--output json` into AWS CLI calls missing explicit output format |
 | `scope-spl-lint.sh` | PostToolUse (Write\|Edit) | Hard-fail on SPL anti-patterns (missing index, wrong fields, transaction in composites) |
 | `scope-schema-validate.sh` | PostToolUse (Write\|Edit) | Validate results.json and dashboard JSON against phase schemas — blocks writes with missing required fields |
 | `scope-artifact-check.sh` | Stop | Verify mandatory artifacts exist before agent completes |
@@ -119,3 +139,20 @@ scope-investigate is standalone — does not read audit/exploit/defend output. A
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
 
 All config files are optional and gitignored.
+
+## Memory Hygiene
+
+scope-investigate uses `memory: local` to accumulate Splunk query patterns across sessions. Memory is stored in `.claude/agent-memory-local/scope-investigate/` (project-local, covered by `.gitignore` via the `.claude/` entry).
+
+**Post-run ARN contamination check:**
+```bash
+# Run after any scope-investigate session to verify no ARNs leaked into memory
+grep -r "arn:aws:" \
+  "$HOME/.claude/agent-memory/" \
+  "$(pwd)/.claude/agent-memory-local/" \
+  2>/dev/null \
+  && echo "WARNING: ARN found in agent memory — review and remove" \
+  || echo "OK: No ARN patterns found in agent memory"
+```
+
+**gitignore coverage:** `.claude/` is already in `.gitignore`, which covers `.claude/agent-memory-local/scope-investigate/`. The user-global path `~/.claude/agent-memory/` is not used by SCOPE (memory scope is `local`, not `user`). If operators ever change to `memory: user`, they must verify `~/.gitignore` separately.

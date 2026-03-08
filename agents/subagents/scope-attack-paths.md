@@ -2,7 +2,7 @@
 name: scope-attack-paths
 description: Attack path analysis subagent — reads per-module JSON from $RUN_DIR/, reasons about privilege escalation, trust misconfigurations, and cross-service attack chains. Always runs with fresh context. Dispatched by scope-audit orchestrator.
 tools: Bash, Read, Glob, Grep
-model: inherit
+model: sonnet
 maxTurns: 80
 ---
 
@@ -19,7 +19,7 @@ You are SCOPE's attack path reasoning engine. You ALWAYS run as a fresh-context 
 
 Read per-module JSON files from $RUN_DIR/ by known naming convention:
 - iam.json, sts.json, s3.json, kms.json, secrets.json, lambda.json, ec2.json,
-  rds.json, sns.json, sqs.json, apigateway.json, bedrock.json, sagemaker.json, codebuild.json
+  rds.json, sns.json, sqs.json, apigateway.json, codebuild.json
 
 For each file in SERVICES_COMPLETED:
 1. Read the file using the Read tool
@@ -31,11 +31,109 @@ For each file in SERVICES_COMPLETED:
 
 **Write these files using Bash redirect (no Write tool):**
 
+## Pre-Write Completeness Check
+
+**CRITICAL — IDENTITY GRAPH FIRST:** Before evaluating rules 1-11, verify rule 7 (Identity Node Completeness).
+The graph MUST contain a node for EVERY IAM user and EVERY IAM role found in iam.json — not just principals
+that appear in attack paths. If the graph has fewer user nodes than total_users or fewer role nodes than
+total_roles, STOP immediately and add the missing identity nodes. This is the most common graph completeness
+failure across all platforms.
+
+Before writing results.json, verify ALL of the following. If any check fails, go back and fix the issue before proceeding to write.
+
+1. **PRIV_ESC COVERAGE:** If attack_paths contains any entry with category "privilege_escalation",
+   then graph.edges MUST contain at least one edge with edge_type "priv_esc".
+   If priv_esc edges = 0 and privilege_escalation paths > 0: STOP. Go back and add priv_esc edges
+   connecting each affected principal to its escalation node(s) using the priv_esc edge template above.
+
+2. **CROSS-ACCOUNT COVERAGE:** If trust_relationships contains any entry with trust_type "cross-account",
+   then graph.edges MUST contain at least one edge with edge_type "cross_account" or
+   edge_type "trust" with trust_type "cross-account".
+   If missing: STOP. Go back and add trust/cross_account edges for each cross-account relationship.
+
+3. **DATA ACCESS COVERAGE:** If S3 buckets, secrets, KMS keys, or other data stores were found in enumeration,
+   then graph.edges MUST contain at least one edge with edge_type "data_access".
+   If missing: STOP. Go back and add data_access edges for each principal with data store access.
+
+4. **NODE-EDGE CONSISTENCY:** For EVERY escalation node (type "escalation") in graph.nodes,
+   there MUST be at least one incoming priv_esc edge with that node as target.
+   Any escalation node without an incoming edge = disconnected node = the exact Codex v1.1 failure.
+   If found: STOP. Add the missing priv_esc edge(s) connecting principal(s) to the disconnected node.
+
+5. **NETWORK COVERAGE:** If EC2 enumeration found publicly exposed security groups or open ports,
+   then graph.edges MUST contain at least one edge with edge_type "network".
+   If missing and public exposure data exists: go back and add network edges from external:public.
+
+6. **SUMMARY COUNTS MATCH:** attack_paths_total in summary MUST equal the length of the attack_paths array.
+   If mismatch: update summary.attack_paths_total to match the actual array length.
+
+7. **[HIGH PRIORITY — EVALUATE FIRST] IDENTITY NODE COMPLETENESS:** Compare graph.nodes against the IAM enumeration data:
+   - Count of user nodes MUST equal summary.total_users (every IAM user = a graph node).
+   - Count of role nodes MUST equal summary.total_roles (every IAM role, excluding service-linked = a graph node).
+   - If IAM groups exist, count of group nodes MUST match the number of groups enumerated.
+   - If user count is less than total_users: STOP. Go back and create user nodes for every IAM user.
+     Do NOT only graph users that appear in attack paths — the graph is an identity topology map.
+   - If role count is less than total_roles: STOP. Add the missing role nodes.
+
+8. **MEMBERSHIP EDGE COVERAGE:** If IAM groups exist and have members,
+   then graph.edges MUST contain membership edges connecting each user to their group(s).
+   If missing: STOP. Go back and add membership edges from iam.json group membership data.
+
+9. **EXPLOIT STEP SPECIFICITY:** Every attack path MUST include exploit_steps with real values:
+   - Permission names must be the actual IAM action strings from enumeration (e.g., "iam:CreatePolicyVersion"
+     not "policy creation permission")
+   - CLI commands must use real ARNs, resource names, and IDs from the enumeration data — no
+     "YOUR_ARN_HERE" or placeholder values in the final output
+   - If a real ARN is not available in enumeration data, note "ARN unavailable — enumerate manually"
+     rather than using a placeholder
+   If any path uses placeholder ARNs or generic permission descriptions: STOP. Go back and replace
+   with real values from the per-module JSON files in $RUN_DIR/.
+
+10. **MITRE SUB-TECHNIQUE VARIANCE:** Multiple attack paths must not share identical MITRE technique
+    arrays unless the techniques genuinely match. At minimum: paths with different escalation mechanisms
+    (IAM vs service-passrole vs network) must map to different MITRE sub-techniques.
+    If two or more paths with different escalation types share identical MITRE arrays: STOP. Review
+    and assign correct sub-techniques per escalation mechanism.
+
+11. **DESCRIPTION UNIQUENESS:** Each attack path's narrative description must reference the specific
+    resource, role, or permission that makes it unique to THIS account. Descriptions that differ only
+    in path number (e.g., "ATTACK PATH #2" vs "ATTACK PATH #3" with otherwise identical text) indicate
+    template-stamping — STOP and rewrite with account-specific details from enumeration data.
+
+12. **SEVERITY CANONICALIZATION:** Immediately before writing results.json, lowercase
+    ALL severity and risk values in ATTACK_PATHS_JSON and TRUST_JSON:
+    ```bash
+    ATTACK_PATHS_JSON=$(echo "$ATTACK_PATHS_JSON" | \
+      jq '[.[] | .severity = (.severity | ascii_downcase)]')
+    TRUST_JSON=$(echo "$TRUST_JSON" | \
+      jq '[.[] | .risk = (.risk | ascii_downcase)]')
+    ```
+    This ensures severity values are "critical|high|medium|low" — not "CRITICAL|HIGH|MEDIUM|LOW".
+    Graph edge severity values are already lowercase (set by the edge construction templates above).
+    Note: XVAL-03 requires trust_relationships.risk to be lowercase. This supersedes the Phase 17-02
+    decision that left trust risk unchanged — App.jsx normalizeForDashboard() already calls
+    .risk?.toLowerCase(), making agent output match removes the normalization mismatch at source.
+
+13. **EDGE DENSITY CHECK:** graph.edges MUST contain at least 1 edge per 3 attack_paths.
+    If len(attack_paths) > 0 and len(graph.edges) < ceil(len(attack_paths) / 3):
+      STOP. For each privilege_escalation attack path that does not already have a
+      corresponding priv_esc edge: derive an edge from the path data:
+        source: first affected_resource principal (convert ARN to "role:Name" or "user:Name" format)
+        target: "esc:<first_permission_from_steps>"
+        edge_type: "priv_esc"
+        severity: "critical"
+        label: "escalation_method"
+      Add all derived edges to EDGES_ARRAY and rebuild GRAPH_JSON before proceeding.
+    Re-check ratio. Only proceed if len(graph.edges) >= ceil(len(attack_paths) / 3).
+
+Only proceed to write results.json AFTER ALL checks pass (rules 1-13).
+
 1. `$RUN_DIR/results.json` — Full structured results for dashboard:
 ```bash
 jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg source "audit" \
+  --arg region "global" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson summary "$SUMMARY_JSON" \
   --argjson graph "$GRAPH_JSON" \
@@ -45,6 +143,7 @@ jq -n \
   '{
     account_id: $account_id,
     source: $source,
+    region: $region,
     timestamp: $ts,
     summary: $summary,
     graph: $graph,
@@ -61,15 +160,138 @@ cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
 3. Update `dashboard/public/index.json` — Upsert this run into the runs array.
 
-**Build SUMMARY_JSON dynamically** — compute `services_analyzed` from SERVICES_COMPLETED count (never hardcode):
+**Build SUMMARY_JSON dynamically** — compute `services_analyzed` from SERVICES_COMPLETED count (never hardcode). All fields below are **required** — the dashboard and schema validation depend on these exact field names:
 ```bash
 SERVICES_COUNT=$(echo "$SERVICES_COMPLETED" | tr ',' '\n' | grep -c '.')
 SUMMARY_JSON=$(jq -n \
   --argjson services_analyzed "$SERVICES_COUNT" \
   --argjson attack_paths_total 0 \
   --arg risk_score "UNKNOWN" \
-  '{services_analyzed: $services_analyzed, attack_paths_total: $attack_paths_total, risk_score: $risk_score}')
-# Replace attack_paths_total and risk_score with real values after analysis
+  --argjson total_users 0 \
+  --argjson total_roles 0 \
+  --argjson total_policies 0 \
+  --argjson total_trust_relationships 0 \
+  --argjson critical_priv_esc_risks 0 \
+  --argjson wildcard_trust_policies 0 \
+  --argjson cross_account_trusts 0 \
+  --argjson users_without_mfa 0 \
+  '{services_analyzed: $services_analyzed, attack_paths_total: $attack_paths_total, risk_score: $risk_score, total_users: $total_users, total_roles: $total_roles, total_policies: $total_policies, total_trust_relationships: $total_trust_relationships, critical_priv_esc_risks: $critical_priv_esc_risks, wildcard_trust_policies: $wildcard_trust_policies, cross_account_trusts: $cross_account_trusts, users_without_mfa: $users_without_mfa}')
+# Replace all zeroes and UNKNOWN with real values after analysis
+
+**Populating summary fields from enumeration data:**
+- `total_users`: count of IAM user objects in iam.json findings
+- `total_roles`: count of IAM role objects in iam.json findings (exclude service-linked roles)
+- `total_policies`: count of IAM policy objects in iam.json findings — read from iam.json's findings array,
+  count entries where the finding category is "policy" or extract from any metrics field. Do NOT leave as 0
+  if iam.json contains policy data.
+- `total_trust_relationships`: count of trust relationship entries across all role trust policies
+- Other fields: derive from analysis results (attack_paths_total = len(attack_paths), risk_score from severity distribution, etc.)
+```
+
+**Build GRAPH_JSON** — the graph drives the D3 force-directed visualization. Node IDs use `type:name` format (NOT raw ARNs). All 6 node types are required when applicable. Edges connect nodes and MUST be populated — an empty edges array produces a broken visualization:
+```bash
+# Node ID format: "type:shortname" — e.g., "user:alice", "role:AdminRole",
+#   "esc:iam:CreatePolicyVersion", "data:s3:my-bucket", "external:anonymous", "group:Admins"
+# Node types: user, role, group, escalation, data, external
+#
+# Example nodes:
+#   {"id": "user:alice", "label": "alice", "type": "user"}
+#   {"id": "role:AdminRole", "label": "AdminRole", "type": "role"}
+#   {"id": "group:Admins", "label": "Admins", "type": "group"}
+#   {"id": "esc:iam:CreatePolicyVersion", "label": "iam:CreatePolicyVersion", "type": "escalation"}
+#   {"id": "data:s3:sensitive-bucket", "label": "sensitive-bucket", "type": "data"}
+#   {"id": "external:anonymous", "label": "Anonymous/Public", "type": "external"}
+#
+# Edge types and required fields:
+#   Trust (role assumption):
+#     {"source": "user:alice", "target": "role:AdminRole", "edge_type": "trust", "trust_type": "same-account", "label": "can_assume"}
+#     {"source": "user:bob", "target": "role:CrossRole", "edge_type": "trust", "trust_type": "cross-account", "label": "can_assume"}
+#   Privilege escalation:
+#     {"source": "role:DevRole", "target": "esc:iam:CreatePolicyVersion", "edge_type": "priv_esc", "severity": "critical", "label": "escalation_method"}
+#   Data access:
+#     {"source": "role:DevRole", "target": "data:s3:sensitive-bucket", "edge_type": "data_access", "label": "s3:GetObject", "severity": "high"}
+#   Membership (user -> group):
+#     {"source": "user:alice", "target": "group:Admins", "edge_type": "membership", "label": "member_of"}
+#   Service integration:
+#     {"source": "data:s3:trigger-bucket", "target": "role:LambdaExecRole", "edge_type": "service", "label": "s3_trigger"}
+#
+# ──────────────────────────────────────────────────────────────────────
+# IDENTITY GRAPH CONSTRUCTION (MANDATORY)
+# ──────────────────────────────────────────────────────────────────────
+# The graph is an identity topology map of the AWS account, NOT just a
+# visualization of discovered attack paths. Build it in two phases:
+#
+# Phase A — Identity nodes (from iam.json enumeration data):
+#   1. Create a "user" node for EVERY IAM user found in iam.json.
+#   2. Create a "role" node for EVERY IAM role found in iam.json
+#      (excluding service-linked roles already filtered by enum).
+#   3. Create a "group" node for EVERY IAM group found in iam.json.
+#   4. If iam.json has a "graph" field with pre-built nodes/edges,
+#      merge them — but still verify completeness against the raw data.
+#   5. If iam.json is empty or missing, fall back to direct enumeration:
+#      run `aws iam list-users`, `aws iam list-roles`, `aws iam list-groups`
+#      and create nodes from the results. Do NOT skip user/group nodes
+#      just because iam.json failed.
+#
+# Phase B — Analysis nodes (from attack path reasoning):
+#   6. Create "escalation" nodes for each privilege escalation method found.
+#   7. Create "data" nodes for S3 buckets, secrets, KMS keys, etc.
+#   8. Create "external" nodes for cross-account principals, public access.
+#
+# Phase A nodes are AWS API facts. Phase B nodes are analysis outputs.
+# Both phases are required for a complete graph.
+# ──────────────────────────────────────────────────────────────────────
+#
+# Build edges from:
+#   - Trust policy analysis (trust edges — user/role -> role)
+#   - Group membership (membership edges — user -> group)
+#   - Privilege escalation paths (priv_esc edges — principal -> escalation)
+#   - Data access findings (data_access edges — principal -> data store)
+#   - Service integrations (service edges — resource -> resource)
+GRAPH_JSON=$(jq -n --argjson nodes "$NODES_ARRAY" --argjson edges "$EDGES_ARRAY" '{nodes: $nodes, edges: $edges}')
+```
+
+**Build ATTACK_PATHS_JSON** — a JSON ARRAY of attack path objects. This MUST be an array `[...]`, NOT an object `{...}` or a summary. Each element is one attack path:
+```bash
+# ATTACK_PATHS_JSON must be an array: [{"name": "...", ...}, {"name": "...", ...}]
+# NOT a summary object like {"total": 5, "critical": 2} — that goes in SUMMARY_JSON.
+#
+# Each entry:
+#   {
+#     "name": "Descriptive attack path name unique to this account",
+#     "severity": "critical|high|medium|low",
+#     "category": "privilege_escalation|trust_misconfiguration|data_exposure|...",
+#     "description": "Account-specific narrative explaining the risk",
+#     "steps": ["Step 1: aws iam ...", "Step 2: aws sts ..."],
+#     "mitre_techniques": ["T1078.004"],
+#     "detection_opportunities": ["eventName=CreatePolicyVersion"],
+#     "remediation": ["Remove inline policy granting iam:*"],
+#     "affected_resources": ["arn:aws:iam::123456789012:role/AdminRole"]
+#   }
+#
+# CRITICAL: "steps" is REQUIRED on every path — it must be an array of strings
+# describing the exploit steps with real AWS CLI commands and real ARNs from
+# enumeration data. Paths without steps are incomplete.
+ATTACK_PATHS_JSON="[...]"  # populated from analysis — MUST be an array
+```
+
+**Build TRUST_JSON** — one entry per trust relationship discovered during trust policy analysis. Must be populated (not empty) when trust relationships exist:
+```bash
+# Each entry:
+#   {
+#     "id": "trust:RoleName:TrustedPrincipal",
+#     "role_arn": "arn:aws:iam::123456789012:role/RoleName",
+#     "role_name": "RoleName",
+#     "trust_principal": "arn:aws:iam::999999999999:root",
+#     "trust_type": "cross-account|same-account|service|federated",
+#     "is_wildcard": false,
+#     "is_internal": true,
+#     "has_external_id": false,
+#     "has_condition": false,
+#     "risk": "CRITICAL|HIGH|MEDIUM|LOW",
+#     "arn": "arn:aws:iam::123456789012:role/RoleName"
+#   }
+TRUST_JSON="[...]"  # populated from trust policy analysis
 ```
 
 **Return to orchestrator (minimal summary only):**
@@ -79,6 +301,109 @@ FILE: $RUN_DIR/results.json
 METRICS: {attack_paths: N, risk_score: CRITICAL|HIGH|MEDIUM|LOW, categories: N}
 ERRORS: [any issues encountered]
 ```
+
+## Edge Construction Templates
+
+Use these templates to construct graph edges. For each relationship discovered during analysis, copy the relevant template, replace $VARIABLE placeholders with actual values, and add the edge to EDGES_ARRAY.
+
+**Node ID format reminder:** All node IDs use `type:shortname` format:
+- Users: `user:alice`
+- Roles: `role:AdminRole`
+- Escalation: `esc:iam:CreatePolicyVersion`
+- Data stores: `data:s3:my-bucket`, `data:secrets:db-creds`
+- External: `external:anonymous`, `external:public`
+
+### priv_esc edge (default severity: critical)
+For each privilege escalation path found, create an edge connecting the principal to the escalation method:
+```json
+{
+  "source": "$PRINCIPAL_NODE_ID",
+  "target": "esc:iam:$ESCALATION_METHOD",
+  "edge_type": "priv_esc",
+  "severity": "critical",
+  "label": "$ESCALATION_METHOD"
+}
+```
+
+### cross_account edge (default severity: medium)
+For each cross-account trust relationship, create an edge from the external principal to the trusted role:
+```json
+{
+  "source": "$EXTERNAL_PRINCIPAL",
+  "target": "role:$ROLE_NAME",
+  "edge_type": "cross_account",
+  "trust_type": "cross-account",
+  "severity": "medium",
+  "label": "can_assume"
+}
+```
+
+### data_access edge (default severity: high)
+For EVERY principal with access to a data store (S3 bucket, secret, database), create an edge. Include ALL access relationships, not just high/critical:
+```json
+{
+  "source": "$PRINCIPAL_NODE_ID",
+  "target": "$DATA_NODE_ID",
+  "edge_type": "data_access",
+  "severity": "high",
+  "label": "$ACCESS_ACTION"
+}
+```
+
+### trust edge — same-account (default severity: low)
+For each same-account trust relationship (role assumable by another principal in the same account):
+```json
+{
+  "source": "$PRINCIPAL_NODE_ID",
+  "target": "role:$ROLE_NAME",
+  "edge_type": "trust",
+  "trust_type": "same-account",
+  "severity": "low",
+  "label": "can_assume"
+}
+```
+
+### membership edge (group membership)
+For each IAM user that belongs to an IAM group, create a membership edge. Groups inherit attached policies, so membership edges are critical for understanding effective permissions:
+```json
+{
+  "source": "user:$USER_NAME",
+  "target": "group:$GROUP_NAME",
+  "edge_type": "membership",
+  "label": "member_of"
+}
+```
+
+### network edge — public exposure (default severity: high)
+For each publicly exposed resource (public security groups, open ports), connect to the external:public node:
+```json
+{
+  "source": "external:public",
+  "target": "$RESOURCE_NODE_ID",
+  "edge_type": "network",
+  "severity": "high",
+  "label": "$EXPOSED_PORT_OR_PROTOCOL"
+}
+```
+
+### service edge (default severity: medium)
+For service integrations (e.g., S3 trigger -> Lambda execution role):
+```json
+{
+  "source": "$SOURCE_RESOURCE_ID",
+  "target": "$TARGET_RESOURCE_ID",
+  "edge_type": "service",
+  "severity": "medium",
+  "label": "$INTEGRATION_TYPE"
+}
+```
+
+**Severity overrides:** The defaults above are starting points. Override severity based on context:
+- priv_esc: critical (default), high if blocked by SCP/boundary
+- cross_account: medium (default), critical if wildcard trust or no external ID
+- data_access: high (default), critical if public bucket, medium if read-only access
+- trust: low (default), medium if cross-org, high if wildcard
+- network: high (default), critical if 0.0.0.0/0 on management ports (22, 3389, 3306)
 
 ## Mode: Posture (Defensive Framing)
 

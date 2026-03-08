@@ -2,8 +2,10 @@
 name: scope-audit
 description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Dispatches parallel enumeration subagents, chains attack-paths reasoning, verification, defensive controls, data pipeline, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
-allowed-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
+tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
+context: fork
+agent: general-purpose
 ---
 
 <role>
@@ -28,7 +30,7 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 
 **Session isolation:** Every audit invocation is a fresh session. Create a unique run directory for all artifacts. Never reference, carry over, or mix data from previous audit runs.
 
-**Platform-agnostic dispatch:** Orchestrator instructions describe intent in platform-agnostic language. Each platform uses its native subagent mechanism (Claude Code: Agent tool; Gemini CLI: subagent delegation; Codex: spawn_agent). The AI model reads these instructions and uses the appropriate mechanism for its platform.
+**Platform-agnostic dispatch:** Orchestrator instructions describe intent in platform-agnostic language. Each platform uses its native subagent mechanism (Claude Code: Agent tool; Gemini CLI: subagent delegation; Codex: automatic agent role dispatch via registered roles in .codex/config.toml, requires multi_agent = true in [features]). The AI model reads these instructions and uses the appropriate mechanism for its platform.
 </role>
 
 <project_context>
@@ -59,7 +61,7 @@ Parse the operator's input (`/scope:audit <target>`) to determine the service li
 
 ### Target Types and Service Resolution
 
-**`--all`** → All 14 services: iam, sts, s3, kms, secrets, lambda, ec2, rds, sns, sqs, apigateway, bedrock, sagemaker, codebuild
+**`--all`** → All 12 services: iam, sts, s3, kms, secrets, lambda, ec2, rds, sns, sqs, apigateway, codebuild
 
 **Single service name** (e.g., `iam`) → Single-service list: [iam]
 
@@ -77,8 +79,6 @@ Parse the operator's input (`/scope:audit <target>`) to determine the service li
 - `sns` → [sns]
 - `sqs` → [sqs]
 - `apigateway`, `execute-api` → [apigateway]
-- `bedrock` → [bedrock]
-- `sagemaker` → [sagemaker]
 - `codebuild` → [codebuild]
 
 Store the specific ARN as the TARGET for the dispatched module (enables targeted API calls rather than full enumeration).
@@ -115,7 +115,7 @@ After parsing input (before credential check), create a unique run directory:
 ```bash
 TARGET_SLUG=$(echo "$TARGET_INPUT" | sed 's/^--//' | sed 's|arn:[^:]*:[^:]*:[^:]*:[^:]*:||' | cut -c1-20 | tr '/:.' '-')
 RUN_ID="audit-$(date +%Y%m%d-%H%M%S)-${TARGET_SLUG}"
-RUN_DIR="./audit/$RUN_ID"
+RUN_DIR="$(pwd)/audit/$RUN_ID"
 mkdir -p "$RUN_DIR"
 ```
 
@@ -149,6 +149,25 @@ Stop. Do not continue.
 
 **Load SCP config:** Glob `config/scps/*.json`. Skip `_`-prefixed files. Load PolicyId → SCP object map. Tag each as `_source: "config"`.
 
+**Discover enabled regions:** After credential check and config loading, run:
+```bash
+# Discover enabled regions — used by all regional subagents
+ENABLED_REGIONS=$(aws ec2 describe-regions \
+  --filters "Name=opt-in-status,Values=opted-in,opt-in-not-required" \
+  --query "Regions[].RegionName" \
+  --output text | tr '\t' ',')
+REGION_COUNT=$(echo "$ENABLED_REGIONS" | tr ',' '\n' | grep -c '.')
+REGIONS_FALLBACK=false
+```
+
+If `aws ec2 describe-regions` fails (AccessDenied or any error), use the hardcoded 8-region fallback:
+```bash
+ENABLED_REGIONS="us-east-1,us-east-2,us-west-1,us-west-2,eu-west-1,eu-central-1,ap-southeast-1,ap-northeast-1"
+REGION_COUNT=8
+REGIONS_FALLBACK=true
+```
+Log: `[WARN] Could not discover enabled regions — using default 8-region set.`
+
 **Display Gate 1:**
 ```
 ---
@@ -159,7 +178,13 @@ Account: [account ID]
 Principal type: [IAM User | Assumed Role | Federated User | Root]
 Owned accounts loaded: [N] from config/accounts.json (or "current session only")
 SCPs loaded: [N] from config/scps/ (or "0 pre-loaded — will enumerate live")
-
+Enabled regions: [REGION_COUNT] discovered (e.g., us-east-1,us-east-2,us-west-2,...)
+```
+If fallback was used, show instead:
+```
+Enabled regions: 8 (default — describe-regions failed)
+```
+```
 Proceeding to module approval...
 ---
 ```
@@ -221,7 +246,7 @@ After Gate 2 approval, dispatch enumeration based on service count.
 For a single-service audit, execute inline rather than spawning a subagent:
 
 1. Read the module definition file: `agents/subagents/scope-enum-{service}.md`
-2. Execute the enumeration logic directly in this orchestrator context, following the instructions in that file
+2. Execute the enumeration logic directly in this orchestrator context, following the instructions in that file. ENABLED_REGIONS is available for regional service iteration.
 3. Write the structured module JSON to `$RUN_DIR/{service}.json` using Bash redirect:
    ```bash
    jq -n --arg module "{service}" --arg account_id "$ACCOUNT_ID" ... > "$RUN_DIR/{service}.json"
@@ -241,6 +266,12 @@ enumeration subagent with this initial message:
   RUN_DIR: {run_directory_path}
   TARGET: {target_input}
   ACCOUNT_ID: {account_id}
+  ENABLED_REGIONS: {comma-separated list of enabled regions}
+  PATH_CONSTRAINT: ALL files you write (scripts, intermediate data, regional JSON,
+    helper .py or .sh files) MUST go into $RUN_DIR/. Use $RUN_DIR/raw/ for helper
+    scripts and intermediate directories (e.g., iam_details/, iam_raw/). Do NOT
+    write files to the project root or any path outside $RUN_DIR/. Delete helper
+    scripts after use.
 
 On Claude Code: Use the Agent tool to dispatch each subagent defined in
 agents/subagents/scope-enum-{service}.md (installed to .claude/agents/).
@@ -249,8 +280,10 @@ Dispatch ALL subagents concurrently in the same response — they run in paralle
 On Gemini CLI: Delegate to enumeration subagents in .agents/agents/.
 Dispatch all concurrently using native subagent delegation.
 
-On Codex: Use spawn_agent for each module subagent in .agents/agents/.
-Spawn all subagents, then use wait to collect results.
+On Codex: Dispatch all enumeration subagents in parallel using the registered Codex agent
+roles from .codex/config.toml (e.g., scope-enum-iam, scope-enum-s3, etc.). With
+multi_agent enabled, Codex automatically spawns the registered roles — instruct each
+role with its RUN_DIR, TARGET, ACCOUNT_ID, and ENABLED_REGIONS context. Wait for all to complete.
 
 Wait for ALL subagents to complete before proceeding to Gate 3.
 Collect return summary from each. Each summary contains:
@@ -275,8 +308,6 @@ Collect return summary from each. Each summary contains:
 | sns | agents/subagents/scope-enum-sns.md |
 | sqs | agents/subagents/scope-enum-sqs.md |
 | apigateway | agents/subagents/scope-enum-apigateway.md |
-| bedrock | agents/subagents/scope-enum-bedrock.md |
-| sagemaker | agents/subagents/scope-enum-sagemaker.md |
 | codebuild | agents/subagents/scope-enum-codebuild.md |
 
 ### Failure Handling
@@ -290,6 +321,35 @@ If a subagent returns STATUS: error or STATUS: partial:
 If a module JSON file is missing after dispatch (subagent crashed without writing):
 - Log: `[MISSING] {service}.json not written — module failed silently`
 - Do not attempt to re-run — report at Gate 3
+
+### Region Coverage Validation
+
+At Gate 3, for each regional service subagent (ec2, kms, secrets, lambda, s3, rds, sns, sqs, apigateway, codebuild):
+
+Check the returned `$RUN_DIR/{service}.json` — if the file contains findings, verify that the `region` field reflects multi-region coverage. If a subagent scanned fewer than REGION_COUNT regions (compare findings region tags against ENABLED_REGIONS), log a warning:
+
+```
+[WARN] {service} subagent scanned N/M enabled regions — some regions may have been skipped.
+```
+
+This is a soft warning (does not block), but surfaces the coverage gap for operator awareness.
+
+### Output Path Constraint
+
+ALL files written during audit (scripts, intermediate data, JSON output) MUST go into `$RUN_DIR/`. Do NOT write files to the project root, home directory, or any path outside `$RUN_DIR/`. This applies to:
+- Enumeration JSON output
+- Helper scripts or analysis code
+- Intermediate data files (JSONL, CSV, etc.)
+- Findings summaries
+
+If you need to create helper scripts for processing, write them to `$RUN_DIR/` and execute from there.
+
+### Subagent Output Path Constraint
+
+When dispatching enum subagents, include this constraint in the dispatch context:
+"ALL files you write (scripts, intermediate data, JSON output, helper .py or .sh scripts) MUST go into $RUN_DIR/. Do NOT write files to the project root or any path outside $RUN_DIR/. If you need helper scripts for data processing, create them in $RUN_DIR/ and delete after use."
+
+This prevents scaffolding scripts (.py, .sh files) from being left in the project root — observed on Gemini platform runs.
 </parallel_enumeration_dispatch>
 
 <gate_3_enumeration_summary>
@@ -310,6 +370,26 @@ Account: [ACCOUNT_ID]
 | S3 | partial | 5 buckets, 2 public | AccessDenied on 1 bucket |
 | [service] | [status] | [key findings] | [errors] |
 
+Region Coverage (per service):
+  EC2:          [N]/[M] regions [failure details if any]
+  Lambda:       [N]/[M] regions [failure details if any]
+  KMS:          [N]/[M] regions [failure details if any]
+  Secrets:      [N]/[M] regions [failure details if any]
+  RDS:          [N]/[M] regions [failure details if any]
+  SQS:          [N]/[M] regions [failure details if any]
+  SNS:          [N]/[M] regions [failure details if any]
+  API Gateway:  [N]/[M] regions [failure details if any]
+  Bedrock:      [N]/[M] regions [failure details if any]
+  SageMaker:    [N]/[M] regions [failure details if any]
+  CodeBuild:    [N]/[M] regions [failure details if any]
+  S3:           global (bucket-region filtering applied)
+  IAM:          global
+  STS:          global
+
+[If module validation warnings exist, display here:]
+Module validation warnings:
+  [WARN] lambda.json: ...
+
 Total findings: [N]
 Module files written: [list of $RUN_DIR/*.json files]
 
@@ -322,8 +402,78 @@ Options:
 ---
 ```
 
+Regional failures are non-blocking — warn and continue. Parse per-region errors from each subagent's ERRORS return field to populate the per-service region counts. If a subagent returned no per-region error detail, show the aggregate count from its METRICS.
+
 Wait for operator approval. If operator says "skip", jump to findings.md generation using raw enumeration data. If operator says "stop", write findings.md with enumeration data only and end session.
 </gate_3_enumeration_summary>
+
+<module_validation>
+## Module JSON Validation (Inline Post-Check)
+
+After all enumeration subagents complete and before presenting Gate 3, validate each module JSON file in $RUN_DIR/. This catches schema violations in module output that bypasses the Write tool hook (subagents write via Bash redirect).
+
+This check is NON-BLOCKING — log warnings, do not abort the run. Invalid module data degrades attack-paths quality but partial data is better than no data.
+
+Run inline:
+```bash
+VALIDATION_WARNINGS=()
+for MODULE_FILE in "$RUN_DIR"/*.json; do
+  [ -f "$MODULE_FILE" ] || continue
+  BASENAME=$(basename "$MODULE_FILE")
+
+  # Check file is non-empty (catches 0-byte jq redirect failures)
+  if [ ! -s "$MODULE_FILE" ]; then
+    VALIDATION_WARNINGS+=("[WARN] $BASENAME: file is empty (0 bytes) -- jq redirect likely failed")
+    continue
+  fi
+
+  # Skip non-module files (e.g., context.json, results.json)
+  MODULE=$(jq -r '.module // empty' "$MODULE_FILE" 2>/dev/null)
+  [ -z "$MODULE" ] && continue
+
+  # Validate status enum
+  STATUS=$(jq -r '.status // empty' "$MODULE_FILE" 2>/dev/null)
+  case "$STATUS" in
+    complete|partial|error) ;;
+    "") VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing required field 'status'") ;;
+    *) VALIDATION_WARNINGS+=("[WARN] $BASENAME: invalid status '$STATUS' (expected: complete|partial|error)") ;;
+  esac
+
+  # Validate findings is an array
+  FINDINGS_TYPE=$(jq -r '.findings | type' "$MODULE_FILE" 2>/dev/null || echo "null")
+  if [ "$FINDINGS_TYPE" != "array" ]; then
+    VALIDATION_WARNINGS+=("[WARN] $BASENAME: findings is $FINDINGS_TYPE, expected array")
+  fi
+
+  # Validate required fields exist
+  for FIELD in account_id region timestamp; do
+    if [ "$(jq "has(\"$FIELD\")" "$MODULE_FILE" 2>/dev/null)" != "true" ]; then
+      VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing required field '$FIELD'")
+    fi
+  done
+done
+
+# Display warnings at Gate 3 if any
+if [ ${#VALIDATION_WARNINGS[@]} -gt 0 ]; then
+  echo ""
+  echo "Module validation warnings (${#VALIDATION_WARNINGS[@]} issue(s) found):"
+  printf '  %s\n' "${VALIDATION_WARNINGS[@]}"
+  echo ""
+  echo "These warnings indicate module data quality issues that may degrade attack-path quality."
+  echo "Review the warnings above before proceeding."
+  echo ""
+  echo "  continue — proceed to attack-paths with available data"
+  echo "  skip     — skip attack-paths and jump to findings.md generation"
+  echo ""
+  echo "Enter your choice (continue/skip):"
+else
+  echo ""
+  echo "All modules passed validation."
+fi
+```
+
+If VALIDATION_WARNINGS is non-empty, display the warnings before the existing Gate 3 approval prompt so the operator sees data quality issues alongside the module summary. The operator must type 'continue' to proceed to attack-paths or 'skip' to skip attack-paths. If VALIDATION_WARNINGS is empty, display a clean "All modules passed validation" message (no prompt needed).
+</module_validation>
 
 <attack_paths_dispatch>
 ## Attack Path Analysis Dispatch
@@ -340,11 +490,12 @@ Dispatch the attack-paths subagent with this initial message:
 
 On Claude Code: Use the Agent tool with agents/subagents/scope-attack-paths.md
 (installed to .claude/agents/scope-attack-paths.md).
-The attack-paths subagent uses model: inherit — it needs full reasoning capability.
+The attack-paths subagent uses model: sonnet — it requires full reasoning capability.
 
 On Gemini CLI: Delegate to the scope-attack-paths subagent in .agents/agents/.
 
-On Codex: Use spawn_agent for scope-attack-paths from .agents/agents/.
+On Codex: Dispatch the scope-attack-paths agent role registered in .codex/config.toml.
+With multi_agent enabled, Codex automatically spawns the registered role.
 
 Wait for the attack-paths subagent to complete and return its summary.
 Expected summary format:
@@ -415,6 +566,37 @@ Wait for operator approval before proceeding. If operator says "skip", set GATE4
 ## Findings Report
 
 After Gate 4 approval, write `$RUN_DIR/findings.md` with the full three-layer report.
+
+**0-finding handling:** If the attack_paths array is empty AND no findings were detected across all modules,
+generate a clean-run findings.md instead of the three-layer report:
+
+```markdown
+# SCOPE Audit Findings
+
+Authenticated as: [caller ARN from Gate 1]
+Account: [account ID]
+
+---
+
+## RISK SUMMARY: [account-id] -- LOW
+
+No security findings detected. All checks passed.
+
+**Services analyzed:** [comma-separated list of modules that completed successfully]
+**Modules with partial data:** [list any modules with AccessDenied or errors, or "None"]
+**Findings:** 0
+
+No attack paths identified. The account configuration meets baseline security expectations
+for the services enumerated.
+
+## RECOMMENDED NEXT ACTION
+
+Review service coverage -- modules with partial data may have obscured findings:
+[list any partial modules, or "All modules completed successfully"]
+```
+
+This ensures findings.md is always generated (even with 0 findings), maintaining a consistent artifact set.
+All platforms must generate this file — this is not Claude-specific.
 
 The findings report has three layers plus actionable next steps:
 
@@ -559,28 +741,29 @@ After findings.md and results.json are written, automatically dispatch the defen
 ```
 Dispatch scope-defend as a subagent with this initial message:
 
-  RUN_DIR: {run_directory_path}
+  AUDIT_RUN_DIR: {run_directory_path}
   ACCOUNT_ID: {account_id}
 
-On Claude Code: Use the Agent tool with agents/scope-defend.md
-(installed to .claude/agents/scope-defend.md).
-Defend reads results.json and per-module JSONs from $RUN_DIR/ for its full analysis.
+On Claude Code: Use the Agent tool with subagent file path agents/scope-defend.md (read directly from repo, not installed as a subagent).
+Defend reads results.json and per-module JSONs from AUDIT_RUN_DIR/ for its full analysis.
 Defend also runs verify internally (domain-aws + domain-splunk) on its own output.
 
 On Gemini CLI: Delegate to scope-defend in .agents/agents/.
 
-On Codex: Use spawn_agent for scope-defend from .agents/agents/.
+On Codex: Dispatch the scope-defend agent role registered in .codex/config.toml.
+With multi_agent enabled, Codex automatically spawns the registered role.
 
 Wait for defend to complete and return its summary.
 Expected summary:
   STATUS: complete|error
-  FILES: [list of defend artifacts written to $RUN_DIR/]
+  DEFEND_RUN_DIR: ./defend/defend-{timestamp}/
   METRICS: {scps: N, rcps: N, detections: N}
 ```
 
 If defend fails: log a warning, continue to pipeline. Defend failure is non-blocking.
 
-Note: Defend writes its artifacts to the same `$RUN_DIR/` (defend-results.json, defend-findings.md). All artifacts for one assessment stay together.
+Note: Defend creates its own independent run directory at `./defend/defend-{timestamp}/`. Capture
+the DEFEND_RUN_DIR from defend's summary — you need it for the post-processing pipeline Run 2.
 </defend_auto_chain>
 
 <post_processing_pipeline>
@@ -593,20 +776,36 @@ Read `agents/subagents/scope-pipeline.md` and execute:
 **Run 1 — Audit phase:**
 ```
 PHASE=audit
-RUN_DIR={run_directory_path}
+RUN_DIR={audit_run_directory_path}
 ```
 Run Phase 1 data normalization then Phase 2 agent-log indexing for the audit artifacts.
 
 **Run 2 — Defend phase:**
 ```
 PHASE=defend
-RUN_DIR={run_directory_path}
+RUN_DIR={defend_run_directory_path}
 ```
+Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./defend/defend-20260301-143022/`).
 Run Phase 1 data normalization then Phase 2 agent-log indexing for the defend artifacts (if defend succeeded).
 
 Sequential. Automatic. No operator approval needed.
 
 If a pipeline step fails: log a warning and continue — raw artifacts are already written. Pipeline failure is non-blocking but MUST be attempted.
+
+**Pipeline health summary:** After both pipeline runs complete (audit + defend), display the following to the operator before proceeding to dashboard generation:
+
+```
+Pipeline: N runs processed (X complete, Y partial). Z orphans culled.
+```
+
+- **N** = total pipeline runs attempted (1 for audit-only, 2 when defend succeeded)
+- **X** = runs where Phase 1 and Phase 2 both completed without errors
+- **Y** = runs where one or more pipeline steps logged a warning or partial failure
+- **Z** = orphan run directories culled by the pipeline maintenance step (from the `pipeline_maintenance` record in agent-log.jsonl; use 0 if the maintenance step did not run or produced no orphans)
+
+Always show all counts including zeros — consistent format makes anomalies easy to spot. This is a conversation display only (not a machine-readable artifact — the orphan cull count is already in agent-log.jsonl via the pipeline_maintenance record).
+
+After displaying the pipeline health summary, proceed IMMEDIATELY to dashboard generation below. Do not skip this step.
 </post_processing_pipeline>
 
 <dashboard_generation>
@@ -619,6 +818,8 @@ cd dashboard && npm run dashboard 2>&1
 ```
 
 This produces `dashboard/dashboard.html` — a portable file that opens in any browser without a server. Essential for Codex and Gemini CLI environments where localhost is unavailable.
+
+**Do NOT generate dashboard.html yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above.
 
 If dashboard generation fails: log a warning and continue. The raw artifacts and data/ exports are still valid.
 </dashboard_generation>
@@ -681,6 +882,22 @@ Claims: `claim-{type}-{seq}` (e.g., `claim-ap-001` for attack paths)
 - `policy_eval` — principal_arn, action_tested, 7-step evaluation_chain, source_evidence_ids
 - `claim` — statement, classification, confidence_pct, confidence_reasoning, gating_conditions
 - `coverage_check` — scope_area, checked[], not_checked[], coverage_pct
+
+### Writing Log Entries
+
+Always append one JSON object per line. Use `jq -c` or `printf` — do NOT use heredocs (`<<EOF`) to write agent-log.jsonl, as heredoc quoting errors cause syntax failures.
+
+**Seed the log after Gate 1 and the run directory is created:**
+```bash
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" --arg svc "sts" --arg act "get-caller-identity" '{event_id:"ev-001",type:"api_call",service:$svc,action:$act,response_status:"success",timestamp:$ts}')" > "$RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" '{event_id:"ev-002",type:"gate_transition",gate:1,decision:"continue",timestamp:$ts}')" >> "$RUN_DIR/agent-log.jsonl"
+```
+
+**Append subsequent events:**
+```bash
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "$SUBAGENT_NAME" '{event_id:"ev-NNN",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$RUN_DIR/agent-log.jsonl"
+```
 
 ### Failure Handling
 
@@ -851,7 +1068,7 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory `./audit/$RUN_ID/` created, all artifacts written there, run appended to `./audit/INDEX.md` and `./audit/index.json`.
-9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4. Defend artifacts written to same $RUN_DIR/.
+9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its own `./defend/defend-{timestamp}/` run directory and returns DEFEND_RUN_DIR in its summary.
 10. **Pipeline ran inline** — agents/subagents/scope-pipeline.md invoked for both audit and defend phases. Failures logged as warnings (non-blocking).
 11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
 12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).

@@ -9,7 +9,7 @@
     "module": {
       "type": "string",
       "enum": ["iam", "sts", "s3", "kms", "secrets", "lambda", "ec2",
-               "rds", "sns", "sqs", "apigateway", "bedrock", "sagemaker", "codebuild"]
+               "rds", "sns", "sqs", "apigateway", "codebuild"]
     },
     "account_id": { "type": "string", "pattern": "^\\d{12}$" },
     "region": { "type": "string" },
