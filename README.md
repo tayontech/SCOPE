@@ -42,6 +42,31 @@ export AWS_PROFILE=my-security-readonly-profile
 - **`config/accounts.json`** — Owned AWS account IDs. Helps distinguish internal vs external cross-account trusts. Copy `config/accounts.example.json` and fill in your account IDs.
 - **`config/scps/*.json`** — Pre-loaded SCPs for when the caller lacks Organizations API access.
 
+## How It Works
+
+When you run `/scope:audit --all`, the pipeline flows through four gates:
+
+```
+Gate 1 — Credential Check
+  sts:GetCallerIdentity → verify AWS access, resolve account ID and caller identity
+
+Gate 2 — Parallel Enumeration
+  Dispatches subagents in parallel across services:
+  IAM · STS · S3 · KMS · EC2 · Lambda · Secrets Manager · SNS · SQS · RDS · API Gateway · CodeBuild
+  Each subagent scans all enabled regions, writes structured JSON to the run directory
+
+Gate 3 — Attack Path Analysis
+  Reads all module outputs, reasons about cross-service attack chains:
+  privilege escalation · trust misconfigurations · data exposure · credential risk
+  excessive permissions · network exposure · persistence · lateral movement · post-exploitation
+
+Gate 4 — Operator Review
+  Presents findings summary → you approve, skip, or stop
+  If approved: generates findings report, exports to dashboard, auto-chains defend
+```
+
+Defend then reads the audit output and generates SCPs, RCPs, Splunk detections, and remediation bundles. The full pipeline runs in a single session — audit through defensive controls — with operator approval at each gate.
+
 ## Usage
 
 ### 1. Run an audit
