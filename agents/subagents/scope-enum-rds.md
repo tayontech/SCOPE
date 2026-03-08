@@ -55,6 +55,8 @@ jq -n \
 STATUS: complete|partial|error
 FILE: $RUN_DIR/rds.json
 METRICS: {instances: N, snapshots: N, public_snapshots: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where RDS instances were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 

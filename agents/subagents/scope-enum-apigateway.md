@@ -55,6 +55,8 @@ jq -n \
 STATUS: complete|partial|error
 FILE: $RUN_DIR/apigateway.json
 METRICS: {rest_apis: N, http_apis: N, no_authorizer_apis: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where APIs were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 

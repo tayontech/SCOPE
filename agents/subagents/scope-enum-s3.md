@@ -51,6 +51,7 @@ Return to orchestrator (minimal summary only):
 STATUS: complete|partial|error
 FILE: $RUN_DIR/s3.json
 METRICS: {buckets: N, public_buckets: N, findings: N}
+REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] (list bucket regions where resources were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
