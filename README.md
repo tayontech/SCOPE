@@ -34,20 +34,37 @@ Risk posture breakdown with prioritized quick wins and remediation bundles.
 
 ![Gate 4](docs/images/gate4-attack-paths.png)
 
-## Quick Start
+## Prerequisites
+
+- Node.js
+- AWS credentials configured in your environment
+- One of: [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [Codex](https://github.com/openai/codex)
+
+## Installation
 
 ```bash
 git clone https://github.com/tayontech/SCOPE.git
 cd SCOPE
-node bin/install.js --claude   # or --gemini, --codex, --all
+node bin/install.js --claude   # install for Claude Code
+node bin/install.js --gemini   # install for Gemini CLI
+node bin/install.js --codex    # install for Codex
+node bin/install.js --all      # install for all platforms
 ```
 
-Set your AWS credentials, then launch your editor:
+## AWS Credentials
+
+SCOPE inherits credentials from your shell environment — no custom credential loading. Use a **read-only IAM role** for audit, defend, and investigate.
 
 ```bash
 export AWS_PROFILE=my-security-readonly-profile
+# then launch your editor
 /scope:audit --all
 ```
+
+## Configuration (Optional)
+
+- **`config/accounts.json`** — Owned AWS account IDs. Helps distinguish internal vs external cross-account trusts. Copy `config/accounts.example.json` and fill in your account IDs.
+- **`config/scps/*.json`** — Pre-loaded SCPs for when the caller lacks Organizations API access.
 
 ## Commands
 
