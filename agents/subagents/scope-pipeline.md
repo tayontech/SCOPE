@@ -1,7 +1,7 @@
 ---
 name: scope-pipeline
 description: Post-processing middleware — Phase 1 normalizes artifacts to ./data/, Phase 2 indexes evidence to ./agent-logs/. Auto-called by source agents after each run.
-allowed-tools: Read, Write, Bash, Glob
+tools: Read, Write, Bash, Glob
 color: gray
 ---
 
@@ -44,6 +44,29 @@ When invoked, the calling agent provides two values:
 - **PHASE**: one of `audit`, `defend`, `exploit`
 - **RUN_DIR**: path to the run directory containing raw artifacts (e.g., `./audit/audit-20260301-143022-all/`)
 
+### Pre-Flight Checks
+
+Before any processing, perform two existence checks:
+
+**1. RUN_DIR existence check:**
+```bash
+if [ ! -d "$RUN_DIR" ]; then
+  echo "Warning: RUN_DIR does not exist: $RUN_DIR — pipeline exiting early"
+  exit 0
+fi
+```
+If RUN_DIR does not exist, log the warning and exit early. Do not continue.
+
+**2. Source artifact existence check:**
+Check that the primary source artifact (`results.json`) exists in RUN_DIR before normalization begins:
+```bash
+if [ ! -f "$RUN_DIR/results.json" ]; then
+  echo "Warning: results.json not found in $RUN_DIR — producing partial-status entry"
+  SOURCE_ARTIFACT_MISSING=true
+fi
+```
+If results.json is missing, set `SOURCE_ARTIFACT_MISSING=true` and produce an index entry with `status: partial` (not skip entirely — the operator must see the attempt was made).
+
 ### Dispatch
 
 1. Ensure `./data/<PHASE>/` directory exists:
@@ -80,7 +103,14 @@ When invoked, the calling agent provides two values:
 
 5. Write to `./data/<PHASE>/<RUN_ID>.json`
 
-6. Update `./data/index.json` per `<index_management>`
+6. **Write-after-verify gate:** After writing the normalized JSON file, read it back and verify it is valid JSON:
+   ```bash
+   python3 -c "import json,sys; json.load(open('$DATA_FILE'))" 2>/dev/null \
+     || echo "Warning: write-after-verify failed for $DATA_FILE — setting status to unverifiable"
+   ```
+   If verification fails (file unreadable or not valid JSON), set `DATA_STATUS="unverifiable"`. The index entry MUST still be written with `status: failed` — the operator must see that the attempt was made.
+
+7. Update `./data/index.json` per `<index_management>` (upsert+cull+atomic-write)
 
 ### Status Field
 
@@ -532,28 +562,13 @@ If present, extract the exfiltration analysis section:
 <index_management>
 ## Index Management — ./data/index.json
 
-After every successful normalization, update the unified run index.
+After every normalization attempt (including partial and failed runs), update the unified run index using the **upsert+cull+atomic-write** pattern.
 
-### Read or Initialize
+> **Note:** This pattern is not safe for concurrent pipeline invocations from separate terminals. SCOPE runs one audit at a time (operator-driven), so no lock file is needed.
 
-```bash
-# Ensure ./data/ exists
-mkdir -p ./data
-```
+### New Entry Format
 
-If `./data/index.json` exists, read it. Otherwise, initialize:
-
-```json
-{
-  "version": "1.0.0",
-  "updated": "<ISO8601>",
-  "runs": []
-}
-```
-
-### Append Entry
-
-Add a new entry to the `runs` array:
+Build a new index entry from the normalization result:
 
 ```json
 {
@@ -564,23 +579,64 @@ Add a new entry to the `runs` array:
   "account_id": "<from envelope>",
   "data_file": "./data/<PHASE>/<RUN_ID>.json",
   "run_dir": "<RUN_DIR>",
-  "summary": {}  // phase-specific quick-look fields — see below. Empty {} is valid for failed/partial runs.
+  "summary": {}
 }
 ```
 
-The `summary` object is phase-specific (populate from the normalized data):
+The `summary` object is phase-specific (populate from the normalized data — empty `{}` is valid for failed/partial runs):
 
 - **audit**: `{"risk_score": "...", "attack_paths": N, "target": "..."}`
 - **defend**: `{"audit_runs_analyzed": N, "scps": N, "rcps": N, "detections": N}`
 - **exploit**: `{"target_arn": "...", "paths_found": N, "highest_priv": "...", "persistence_techniques": N, "exfiltration_vectors": N}`
 
-### Deduplication
+**Strict Template Enforcement:** Build every index entry using `jq -n` with exactly the 8 fields listed above (run_id, phase, timestamp, status, account_id, data_file, run_dir, summary). Do NOT add any fields beyond these 8. Do NOT omit any field — use empty string `""` for unknown string fields and `{}` for unknown summary. This ensures every entry in data/index.json has exactly the same schema regardless of phase or run outcome. The upsert dedup (step 2) naturally removes any pre-existing entries with variant schemas for the same run_id.
 
-Before appending, check if a run with the same `run_id` already exists in the `runs` array. If so, replace it (re-normalization overwrites).
+### Upsert+Cull+Atomic-Write (single-pass)
 
-### Write
+1. **Read or initialize:** If `./data/index.json` exists, read it. Otherwise, initialize with `{"version": "1.1.0", "updated": "<ISO8601>", "runs": []}`.
 
-Update the `updated` timestamp and write `./data/index.json` with pretty-printed JSON (2-space indent).
+2. **Single-pass filter:** Iterate the existing `runs` array and remove:
+   - Any entry whose `data_file` does not exist on disk (orphan cull — resolve relative paths to absolute using `$(pwd)`)
+   - Any entry with the same `run_id` as the current run (dedup — enables upsert)
+
+   Track the count of orphan entries removed for logging.
+
+3. **Prepend** the new entry to the filtered array.
+
+4. **Set version** to `"1.1.0"` and update the `"updated"` timestamp.
+
+5. **Atomic write:** Write to `./data/index.json.tmp` first, then rename:
+   ```bash
+   # Write filtered+updated index to temp file, then atomic rename
+   # (temp file in same directory guarantees same filesystem — mv is always atomic)
+   python3 -c "import json; ..." > ./data/index.json.tmp && mv ./data/index.json.tmp ./data/index.json
+   ```
+
+5.5. **Post-write validation (defend phase only):** After writing the index entry, compare the detection count in the index summary against the source results.json. This is NON-BLOCKING — log a warning if they diverge, do not abort.
+
+   For defend-phase runs only:
+   ```bash
+   # Extract detection count from source results.json
+   RESULTS_DET=$(jq '.summary.detections_generated // (.detections | length) // 0' "$RUN_DIR/results.json" 2>/dev/null || echo "0")
+   # Extract detection count from the index entry just written
+   INDEX_DET=$(jq --arg rid "$RUN_ID" '.runs[] | select(.run_id == $rid) | .summary.detections // 0' ./data/index.json 2>/dev/null || echo "0")
+   # Compare
+   if [ "$RESULTS_DET" != "$INDEX_DET" ]; then
+     echo "[WARN] pipeline: defend detection count mismatch -- results.json: $RESULTS_DET, index.json: $INDEX_DET"
+   fi
+   ```
+
+   Skip this check for audit and exploit phases (no detection count field in their summaries).
+
+6. **Log orphan cull activity** (only when at least one orphan was removed):
+   ```json
+   {"type": "pipeline_maintenance", "action": "orphan_cull", "removed": N, "timestamp": "<ISO8601>"}
+   ```
+   Append this line to `$RUN_DIR/agent-log.jsonl`.
+
+The orphan cull resolves each `data_file` relative path to an absolute path at check time. Example check: `test -f "$(pwd)/data/$PHASE/$RUN_ID.json"`. The executing model may use any equivalent bash or Python file-existence check.
+
+**Version note:** The version field is informational only. No version gate — old 1.0.0 indexes are naturally upgraded: next pipeline run reads the old index, applies upsert+cull, and writes back with 1.1.0.
 </index_management>
 
 <data_verification>
@@ -714,7 +770,7 @@ Read raw evidence logs (`agent-log.jsonl`) from agent run directories, validate 
 6. Write to `./agent-logs/<phase>/<run-id>.json`
 7. Update `./agent-logs/index.json` with the new entry
 
-**On failure:** Log a warning and return. Do not stop the calling agent's run. If `agent-log.jsonl` is missing, write a failed-status envelope so downstream agents know evidence was expected but unavailable.
+**On failure:** Log a warning and return. Do not stop the calling agent's run. If `agent-log.jsonl` is missing, write a partial-status envelope so downstream agents know evidence was expected but unavailable. **Semantic distinction: `status: failed` means the pipeline itself crashed. `status: partial` means the pipeline ran successfully but source data was incomplete.**
 
 <evidence_schema>
 ## Evidence Record Types
@@ -1078,28 +1134,13 @@ The `depends_on` array in the envelope contains validated upstream run IDs. This
 <evidence_index_management>
 ## Index Management — ./agent-logs/index.json
 
-After every successful evidence indexing, update the evidence run index.
+After every evidence indexing attempt (including partial-status envelopes), update the evidence run index using the **upsert+cull+atomic-write** pattern.
 
-### Read or Initialize
+> **Note:** This pattern is not safe for concurrent pipeline invocations from separate terminals.
 
-```bash
-# Ensure ./agent-logs/ exists
-mkdir -p ./evidence
-```
+### New Entry Format
 
-If `./agent-logs/index.json` exists, read it. Otherwise, initialize:
-
-```json
-{
-  "version": "1.0.0",
-  "updated": "ISO8601",
-  "runs": []
-}
-```
-
-### Append Entry
-
-Add a new entry to the `runs` array:
+Build a new index entry from the evidence indexing result:
 
 ```json
 {
@@ -1125,13 +1166,35 @@ Add a new entry to the `runs` array:
 }
 ```
 
-### Deduplication
+**Strict Template Enforcement:** Build every evidence index entry using exactly the 10 fields listed above (run_id, phase, timestamp, status, account_id, evidence_file, data_file, source_run_dir, depends_on, summary). Do NOT add any fields beyond these 10. Do NOT omit any field — use empty string `""` for unknown strings, `[]` for empty depends_on, and `{}` for empty summary. This ensures every entry in agent-logs/index.json has exactly the same schema. The upsert dedup naturally removes pre-existing variant entries.
 
-Before appending, check if a run with the same `run_id` already exists in the `runs` array. If so, replace it (re-indexing overwrites).
+### Upsert+Cull+Atomic-Write (single-pass)
 
-### Write
+1. **Read or initialize:** If `./agent-logs/index.json` exists, read it. Otherwise, initialize with `{"version": "1.1.0", "updated": "<ISO8601>", "runs": []}`.
 
-Update the `updated` timestamp and write `./agent-logs/index.json` with pretty-printed JSON (2-space indent).
+2. **Single-pass filter:** Iterate the existing `runs` array and remove:
+   - Any entry whose `evidence_file` does not exist on disk (orphan cull — check that `./agent-logs/<PHASE>/<RUN_ID>.json` exists). **Only check for the envelope JSON — do NOT check for source `agent-log.jsonl` in RUN_DIR.**
+   - Any entry with the same `run_id` as the current run (dedup — enables upsert)
+
+   Track the count of orphan entries removed for logging.
+
+3. **Prepend** the new entry to the filtered array.
+
+4. **Set version** to `"1.1.0"` and update the `"updated"` timestamp.
+
+5. **Atomic write:** Write to `./agent-logs/index.json.tmp` first, then rename:
+   ```bash
+   # Write filtered+updated index to temp file, then atomic rename
+   python3 -c "import json; ..." > ./agent-logs/index.json.tmp && mv ./agent-logs/index.json.tmp ./agent-logs/index.json
+   ```
+
+6. **Log orphan cull activity** (only when at least one orphan was removed):
+   ```json
+   {"type": "pipeline_maintenance", "action": "orphan_cull", "removed": N, "timestamp": "<ISO8601>"}
+   ```
+   Append this line to `$RUN_DIR/agent-log.jsonl`.
+
+**Version note:** The version field is informational only. No version gate — old 1.0.0 indexes are naturally upgraded on next pipeline run.
 </evidence_index_management>
 
 <evidence_error_handling>
@@ -1142,9 +1205,10 @@ Evidence indexing is a best-effort middleware layer. Failures must never block t
 ### agent-log.jsonl Not Found
 
 If `$RUN_DIR/agent-log.jsonl` does not exist:
-- Log: `"Warning: agent-log.jsonl not found in <RUN_DIR> — writing failed-status envelope"`
-- Write a minimal envelope with status `"failed"` and empty arrays for claims, api_log, policy_evaluations, and coverage
-- Still update the index so downstream agents know evidence was expected but unavailable
+- Log: `"Warning: agent-log.jsonl not found in <RUN_DIR> — writing partial-status envelope"`
+- Write a minimal envelope with `status: "partial"` and consistent empty structure: `events: [], claims: [], api_log: [], policy_evaluations: [], coverage: {}`
+- Still update the evidence index so downstream agents know the pipeline ran but source data was incomplete
+- **Status semantics:** `status: partial` means the pipeline itself succeeded but source data was incomplete. `status: failed` is reserved for pipeline crashes (e.g., unable to write the envelope file).
 
 ### Parse Failure
 

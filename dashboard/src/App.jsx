@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
 import * as d3 from "d3";
 
 // No sample data — dashboard only shows real audit results
@@ -28,11 +28,16 @@ const COLORS = {
   detection: "#06b6d4",
   nodeEsc: "#ef4444",
   nodeData: "#22c55e",
+  nodeGroup: "#ec4899",
   nodeExternal: "#f59e0b",
   edgeNormal: "#334155",
   edgePrivEsc: "#ef4444",
   edgeCrossAccount: "#f59e0b",
   edgeDataAccess: "#22c55e",
+  edgeTrust: "#64748b",
+  edgeService: "#a78bfa",
+  edgeNetwork: "#f97316",
+  edgePublicAccess: "#ef4444",
 };
 
 const SEVERITY_CONFIG = {
@@ -89,12 +94,55 @@ function normalizeForDashboard(json, indexSource) {
 
   // Audit-specific normalization
   if (source === "audit") {
-    if (data.summary) {
-      const s = data.summary;
-      if (s.total_users == null && s.users != null) s.total_users = s.users;
-      if (s.total_roles == null && s.roles != null) s.total_roles = s.roles;
-      if (s.total_attack_paths == null && s.attack_paths != null) s.total_attack_paths = s.attack_paths;
-      if (s.total_attack_paths == null) s.total_attack_paths = data.attack_paths?.length ?? 0;
+    if (!data.summary) data.summary = {};
+    const s = data.summary;
+    if (s.total_attack_paths == null && s.attack_paths != null) s.total_attack_paths = s.attack_paths;
+    if (s.total_attack_paths == null) s.total_attack_paths = data.attack_paths?.length ?? 0;
+
+    // Array-first KPI derivation: principals[] wins over summary when present and non-empty
+    if (data.principals?.length > 0) {
+      const derivedUsers = data.principals.filter((p) => p.type === "user").length;
+      const derivedRoles = data.principals.filter((p) => p.type === "role").length;
+      if (s.total_users != null && s.total_users !== derivedUsers && s.total_users > 0) {
+        console.warn(`[SCOPE] Derived total_users from principals array (summary was ${s.total_users})`);
+      }
+      s.total_users = derivedUsers;
+      if (s.total_roles != null && s.total_roles !== derivedRoles && s.total_roles > 0) {
+        console.warn(`[SCOPE] Derived total_roles from principals array (summary was ${s.total_roles})`);
+      }
+      s.total_roles = derivedRoles;
+    } else {
+      // Fall back to summary field variants when principals array is absent or empty
+      if (s.total_users == null) s.total_users = s.users ?? 0;
+      if (s.total_roles == null) s.total_roles = s.roles ?? 0;
+    }
+
+    // DASH-04: Canonicalize is_wildcard field and normalize risk to lowercase BEFORE KPI derivation
+    // This must run before the filter() calls below so is_wildcard is consistent
+    if (Array.isArray(data.trust_relationships)) {
+      data.trust_relationships = data.trust_relationships.map((t) => ({
+        ...t,
+        is_wildcard: t.is_wildcard ?? t.wildcard ?? false,
+        risk: t.risk?.toLowerCase() ?? "low",
+      }));
+    }
+
+    // Derive trust relationship KPIs from array when available (DASH-02: extended breakdown)
+    if (Array.isArray(data.trust_relationships)) {
+      s.total_trust_relationships = data.trust_relationships.length;
+      s.cross_account_trusts = data.trust_relationships.filter(
+        (t) => t.trust_type === "cross-account"
+      ).length;
+      // NEW: breakdown counts for Trust KPI subtext
+      s.service_trusts = data.trust_relationships.filter(
+        (t) => t.trust_type === "service"
+      ).length;
+      s.same_account_trusts = data.trust_relationships.filter(
+        (t) => t.trust_type === "same-account"
+      ).length;
+      s.wildcard_trust_policies = data.trust_relationships.filter(
+        (t) => t.is_wildcard
+      ).length;
     }
   }
 
@@ -110,17 +158,13 @@ function normalizeForDashboard(json, indexSource) {
   // Defend-specific normalization
   if (source === "defend") {
     // Map summary field variants to dashboard-expected names
-    if (data.summary) {
-      const s = data.summary;
-      if (s.scps_generated == null && s.scps != null) s.scps_generated = s.scps;
-      if (s.rcps_generated == null && s.rcps != null) s.rcps_generated = s.rcps;
-      if (s.detections_generated == null) {
-        s.detections_generated = s.detections ?? s.spl_detections ?? data.detections?.length ?? 0;
-      }
-      if (s.controls_recommended == null) {
-        s.controls_recommended = data.security_controls?.length ?? 0;
-      }
-    }
+    if (!data.summary) data.summary = {};
+    const s = data.summary;
+    // Array lengths ALWAYS win for defend KPIs — summary fields become informational only
+    s.detections_generated = data.detections?.length ?? 0;
+    s.scps_generated = data.scps?.length ?? s.scps_generated ?? s.scps ?? 0;
+    s.rcps_generated = data.rcps?.length ?? s.rcps_generated ?? s.rcps ?? 0;
+    s.controls_recommended = data.security_controls?.length ?? 0;
 
     // Normalize audit_run (string) → audit_runs_analyzed (array)
     if (!data.audit_runs_analyzed && data.audit_run) {
@@ -149,10 +193,54 @@ function normalizeForDashboard(json, indexSource) {
     }
   }
 
+  // Severity canonicalization: normalize aliases to canonical values
+  // Canonical enum: critical, high, medium, low, info
+  const SEVERITY_ALIASES = { informational: "info" };
+  const canonicalizeSeverity = (s, fallback = "medium") => {
+    const lower = s?.toLowerCase() ?? fallback;
+    return SEVERITY_ALIASES[lower] ?? lower;
+  };
+
+  // Normalize severity fields to lowercase across all phases
+  // Guarantees SEVERITY_CONFIG lowercase keys always match regardless of agent casing
+  // Coerce attack_path array fields that agents may emit as strings (e.g. Gemini remediation)
+  const ensureArray = (v) => Array.isArray(v) ? v : (typeof v === "string" && v ? [v] : []);
+  if (Array.isArray(data.attack_paths)) {
+    data.attack_paths = data.attack_paths.map((p) => ({
+      ...p,
+      severity: canonicalizeSeverity(p.severity),
+      steps: ensureArray(p.steps || p.exploit_steps),
+      remediation: ensureArray(p.remediation),
+      detection_opportunities: ensureArray(p.detection_opportunities),
+      mitre_techniques: ensureArray(p.mitre_techniques),
+      affected_resources: ensureArray(p.affected_resources),
+    }));
+  }
+  if (Array.isArray(data.detections)) {
+    data.detections = data.detections.map((d) => ({
+      ...d,
+      severity: canonicalizeSeverity(d.severity),
+    }));
+  }
+  if (Array.isArray(data.trust_relationships)) {
+    data.trust_relationships = data.trust_relationships.map((t) => ({
+      ...t,
+      is_wildcard: t.is_wildcard ?? t.wildcard ?? false,
+      risk: t.risk?.toLowerCase() ?? "low",
+    }));
+  }
+  if (data.summary?.risk_score && typeof data.summary.risk_score === "string") {
+    data.summary.risk_score = data.summary.risk_score.toLowerCase();
+  }
+
   // Map technical_remediation → technical_recommendations (data layer uses former)
   if (data.technical_remediation && !data.technical_recommendations) {
     data.technical_recommendations = data.technical_remediation;
   }
+
+  // Propagate run status from _run_status field (set by generate-report.js for inline HTML)
+  // Absent/undefined = "complete" — backward compat with old runs that predate status support
+  data.runStatus = data._run_status || "complete";
 
   return { data, source };
 }
@@ -184,28 +272,132 @@ function CopyButton({ text }) {
   );
 }
 
+// ─── Trust Display Name Helper (DASH-05) ───
+// Extracts a human-readable display name from a trust principal.
+// Service principals: "lambda.amazonaws.com" → "lambda"
+// ARN principals: arn:aws:iam::123456789012:role/MyRole → "Account 123456789012 / MyRole"
+function extractTrustDisplayName(trustPrincipal, trustType) {
+  if (!trustPrincipal) return "Unknown";
+  if (trustType === "service") {
+    return trustPrincipal.split(".")[0];
+  }
+  if (trustPrincipal.startsWith("arn:")) {
+    const parts = trustPrincipal.split(":");
+    const accountId = parts[4] || "";
+    const resourcePart = (parts[5] || "").replace(/^(role|user|assumed-role)\//, "");
+    if (resourcePart && resourcePart !== "root") {
+      return `Account ${accountId} / ${resourcePart}`;
+    }
+    return `Account ${accountId}`;
+  }
+  return trustPrincipal;
+}
+
+// ─── Edge Style Helper ───
+// Centralizes all edge color/strokeWidth/dashArray logic.
+// PITFALL: trust edges with trust_type==="cross-account" must return cross_account style.
+function getEdgeStyle(edge_type, trust_type) {
+  if (edge_type === "trust" && trust_type === "cross-account") {
+    return { color: COLORS.edgeCrossAccount, strokeWidth: 2, dashArray: "5,3" };
+  }
+  switch (edge_type) {
+    case "priv_esc":     return { color: COLORS.edgePrivEsc,      strokeWidth: 2.5, dashArray: "6,3" };
+    case "cross_account":return { color: COLORS.edgeCrossAccount,  strokeWidth: 2,   dashArray: "5,3" };
+    case "data_access":  return { color: COLORS.edgeDataAccess,    strokeWidth: 1.5, dashArray: "none" };
+    case "trust":        return { color: COLORS.edgeTrust,         strokeWidth: 1.5, dashArray: "none" };
+    case "network":      return { color: COLORS.edgeNetwork,       strokeWidth: 2.5, dashArray: "none" };
+    case "public_access":return { color: COLORS.edgePublicAccess,  strokeWidth: 3,   dashArray: "none" };
+    case "service":      return { color: COLORS.edgeService,       strokeWidth: 1.5, dashArray: "4,2" };
+    case "membership":   return { color: COLORS.nodeGroup,         strokeWidth: 1.2, dashArray: "3,2" };
+    default:             return { color: COLORS.edgeNormal,        strokeWidth: 1.5, dashArray: "none" };
+  }
+}
+
 // ─── Attack Graph Visualization (D3) ───
-function AttackGraph({ data, selectedPath, onNodeClick }) {
+const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNodeClick, onDeselect }, ref) {
   const svgRef = useRef(null);
   const simRef = useRef(null);
+  const zoomRef = useRef(null);
+  const nodesRef = useRef([]);
+  const [disconnectedNodes, setDisconnectedNodes] = useState([]);
+  const [showDisconnectedSidebar, setShowDisconnectedSidebar] = useState(false);
+  const [edgeTooltip, setEdgeTooltip] = useState(null); // { x, y, edge_type, source, target }
 
+  useImperativeHandle(ref, () => ({
+    panToNode(nodeId) {
+      const target = nodesRef.current.find((n) => n.id === nodeId);
+      if (!target || !svgRef.current || !zoomRef.current) return;
+      const svg = d3.select(svgRef.current);
+      const w = svgRef.current.clientWidth;
+      const h = svgRef.current.clientHeight;
+      const scale = 1.2;
+      const tx = w / 2 - (target.x ?? 0) * scale;
+      const ty = h / 2 - (target.y ?? 0) * scale;
+      svg.transition().duration(400).call(
+        zoomRef.current.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      );
+    },
+    fitNodes(nodeIds) {
+      if (!svgRef.current || !zoomRef.current || !nodeIds?.length) return;
+      const targets = nodesRef.current.filter((n) => nodeIds.includes(n.id));
+      if (targets.length === 0) return;
+      const xs = targets.map((n) => n.x ?? 0);
+      const ys = targets.map((n) => n.y ?? 0);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const w = svgRef.current.clientWidth;
+      const h = svgRef.current.clientHeight;
+      const pad = 200;
+      const spanX = Math.max(maxX - minX, 300) + pad * 2;
+      const spanY = Math.max(maxY - minY, 300) + pad * 2;
+      const scale = Math.min(w / spanX, h / spanY, 1.0);
+      const tx = w / 2 - cx * scale;
+      const ty = h / 2 - cy * scale;
+      d3.select(svgRef.current).transition().duration(400).call(
+        zoomRef.current.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      );
+    },
+    resetView() {
+      if (!svgRef.current || !zoomRef.current) return;
+      d3.select(svgRef.current)
+        .transition().duration(300)
+        .call(zoomRef.current.transform, d3.zoomIdentity.translate(0, 0).scale(0.85));
+    },
+  }), []);
+
+  // Resolve affected_resources (ARNs) to graph node IDs for highlighting
   const highlightedNodes = useMemo(() => {
-    if (!selectedPath) return new Set();
-    return new Set(selectedPath.affected_resources || []);
-  }, [selectedPath]);
+    if (!selectedPath || !data?.graph?.nodes) return new Set();
+    const resources = selectedPath.affected_resources || [];
+    const matched = new Set();
+    const nodes = data.graph.nodes;
+    for (const r of resources) {
+      // Direct match
+      if (nodes.some((n) => n.id === r)) { matched.add(r); continue; }
+      // ARN → node label/id match
+      const resName = r.includes("/") ? r.split("/").pop() : r.split(":").pop();
+      const node = nodes.find((n) => n.label === resName || n.id.endsWith(":" + resName));
+      if (node) matched.add(node.id);
+    }
+    return matched;
+  }, [selectedPath, data]);
 
   const highlightedEdges = useMemo(() => {
-    if (!selectedPath || !selectedPath.affected_resources) return new Set();
-    const resources = selectedPath.affected_resources || [];
+    if (!selectedPath || highlightedNodes.size === 0) return new Set();
     const edgeKeys = new Set();
-    for (let i = 0; i < resources.length; i++) {
-      for (let j = i + 1; j < resources.length; j++) {
-        edgeKeys.add(`${resources[i]}|${resources[j]}`);
-        edgeKeys.add(`${resources[j]}|${resources[i]}`);
+    const ids = [...highlightedNodes];
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        edgeKeys.add(`${ids[i]}|${ids[j]}`);
+        edgeKeys.add(`${ids[j]}|${ids[i]}`);
       }
     }
     return edgeKeys;
-  }, [selectedPath]);
+  }, [selectedPath, highlightedNodes]);
 
   useEffect(() => {
     if (!svgRef.current || !data?.graph) return;
@@ -219,14 +411,19 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
 
     const zoom = d3.zoom().scaleExtent([0.2, 4]).on("zoom", (e) => g.attr("transform", e.transform));
     svg.call(zoom);
+    zoomRef.current = zoom;
+
+    // Background click deselect (DASH-03)
+    svg.on("click", (e) => {
+      if (e.target === svgRef.current) {
+        onDeselect?.();
+      }
+    });
 
     const defs = svg.append("defs");
 
-    ["normal", "priv_esc", "cross_account", "data_access"].forEach((type) => {
-      const color = type === "priv_esc" ? COLORS.edgePrivEsc
-        : type === "cross_account" ? COLORS.edgeCrossAccount
-        : type === "data_access" ? COLORS.edgeDataAccess
-        : COLORS.edgeNormal;
+    ["normal", "trust", "priv_esc", "cross_account", "data_access", "service", "network", "public_access"].forEach((type) => {
+      const { color } = getEdgeStyle(type === "public_access" ? "public_access" : type, undefined);
       defs.append("marker")
         .attr("id", `arrow-${type}`)
         .attr("viewBox", "0 -5 10 10")
@@ -244,10 +441,23 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
     feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
     const nodes = (data.graph.nodes || []).map((d) => ({ ...d }));
+    nodesRef.current = nodes;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const links = (data.graph.edges || [])
       .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
       .map((d) => ({ ...d }));
+
+    // Disconnected node detection — compute BEFORE simulation starts
+    const connectedNodeIds = new Set();
+    links.forEach((l) => {
+      const srcId = typeof l.source === "object" ? l.source.id : l.source;
+      const tgtId = typeof l.target === "object" ? l.target.id : l.target;
+      connectedNodeIds.add(srcId);
+      connectedNodeIds.add(tgtId);
+    });
+    const disconnected = nodes.filter((n) => !connectedNodeIds.has(n.id));
+    const disconnectedSet = new Set(disconnected.map((n) => n.id));
+    setDisconnectedNodes(disconnected);
 
     const sim = d3.forceSimulation(nodes)
       .force("link", d3.forceLink(links).id((d) => d.id).distance(120))
@@ -266,27 +476,32 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
 
     const link = g.append("g").selectAll("line")
       .data(links).enter().append("line")
-      .attr("stroke", (d) => {
-        if (d.edge_type === "priv_esc") return COLORS.edgePrivEsc;
-        if (d.trust_type === "cross-account") return COLORS.edgeCrossAccount;
-        if (d.edge_type === "data_access") return COLORS.edgeDataAccess;
-        return COLORS.edgeNormal;
-      })
+      .attr("stroke", (d) => getEdgeStyle(d.edge_type, d.trust_type).color)
       .attr("stroke-width", (d) => {
         if (hasHighlight && isEdgeHighlighted(d)) return 4;
-        return d.edge_type === "priv_esc" ? 2.5 : 1.5;
+        return getEdgeStyle(d.edge_type, d.trust_type).strokeWidth;
       })
-      .attr("stroke-dasharray", (d) => d.edge_type === "priv_esc" ? "6,3" : "none")
+      .attr("stroke-dasharray", (d) => getEdgeStyle(d.edge_type, d.trust_type).dashArray)
       .attr("stroke-opacity", (d) => {
         if (!hasHighlight) return 0.6;
         return isEdgeHighlighted(d) ? 1 : 0.08;
       })
       .attr("marker-end", (d) => {
-        if (d.edge_type === "priv_esc") return "url(#arrow-priv_esc)";
-        if (d.trust_type === "cross-account") return "url(#arrow-cross_account)";
-        if (d.edge_type === "data_access") return "url(#arrow-data_access)";
-        return "url(#arrow-normal)";
-      });
+        const t = d.edge_type === "priv_esc" ? "priv_esc"
+          : (d.edge_type === "trust" && d.trust_type === "cross-account") ? "cross_account"
+          : d.edge_type === "cross_account" ? "cross_account"
+          : d.edge_type || "normal";
+        return `url(#arrow-${t})`;
+      })
+      .style("cursor", "pointer")
+      .on("mousemove", (event, d) => {
+        const srcId = typeof d.source === "object" ? d.source.id : d.source;
+        const tgtId = typeof d.target === "object" ? d.target.id : d.target;
+        const srcLabel = typeof d.source === "object" ? (d.source.label || srcId) : srcId;
+        const tgtLabel = typeof d.target === "object" ? (d.target.label || tgtId) : tgtId;
+        setEdgeTooltip({ x: event.clientX, y: event.clientY, edge_type: d.edge_type || "normal", source: srcLabel, target: tgtLabel });
+      })
+      .on("mouseout", () => setEdgeTooltip(null));
 
     const node = g.append("g").selectAll("g")
       .data(nodes).enter().append("g")
@@ -301,19 +516,20 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
     node.append("circle")
       .attr("r", (d) => d.type === "escalation" ? 14 : d.type === "data" ? 12 : 16)
       .attr("fill", (d) => {
-        const c = { user: COLORS.nodeUser, role: COLORS.nodeRole, escalation: COLORS.nodeEsc, data: COLORS.nodeData, external: COLORS.nodeExternal }[d.type] || "#666";
+        const c = { user: COLORS.nodeUser, role: COLORS.nodeRole, group: COLORS.nodeGroup, escalation: COLORS.nodeEsc, data: COLORS.nodeData, external: COLORS.nodeExternal }[d.type] || "#666";
         return c;
       })
-      .attr("stroke", (d) => highlightedNodes.has(d.id) ? COLORS.accent : "transparent")
-      .attr("stroke-width", 3)
-      .attr("opacity", (d) => !hasHighlight || highlightedNodes.has(d.id) ? 1 : 0.08)
+      .attr("stroke", (d) => disconnectedSet.has(d.id) ? COLORS.high : highlightedNodes.has(d.id) ? COLORS.accent : "transparent")
+      .attr("stroke-width", (d) => disconnectedSet.has(d.id) ? 2 : 3)
+      .attr("stroke-dasharray", (d) => disconnectedSet.has(d.id) ? "4,2" : "none")
+      .attr("opacity", (d) => disconnectedSet.has(d.id) ? 0.45 : (!hasHighlight || highlightedNodes.has(d.id) ? 1 : 0.08))
       .attr("filter", (d) => highlightedNodes.has(d.id) ? "url(#glow)" : "none");
 
     node.append("text")
       .attr("text-anchor", "middle").attr("dominant-baseline", "central")
       .attr("font-size", "10px").attr("fill", "#fff").attr("pointer-events", "none")
       .attr("opacity", (d) => !hasHighlight || highlightedNodes.has(d.id) ? 1 : 0.08)
-      .text((d) => ({ user: "\uD83D\uDC64", role: "\uD83D\uDD11", escalation: "\u26A1", data: "\uD83D\uDCBE", external: "\uD83C\uDF10" }[d.type] || "?"));
+      .text((d) => ({ user: "\uD83D\uDC64", role: "\uD83D\uDD11", group: "\uD83D\uDC65", escalation: "\u26A1", data: "\uD83D\uDCBE", external: "\uD83C\uDF10" }[d.type] || "?"));
 
     node.append("title").text((d) => d.label);
 
@@ -337,9 +553,82 @@ function AttackGraph({ data, selectedPath, onNodeClick }) {
   }, [data, highlightedNodes, highlightedEdges, onNodeClick]);
 
   return (
-    <svg ref={svgRef} style={{ width: "100%", height: "100%", background: COLORS.bg, borderRadius: "8px" }} />
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <svg ref={svgRef} style={{ width: "100%", height: "100%", background: COLORS.bg, borderRadius: "8px" }} />
+
+      {/* Disconnected node warning badge */}
+      {disconnectedNodes.length > 0 && (
+        <div
+          onClick={() => setShowDisconnectedSidebar((v) => !v)}
+          style={{
+            position: "absolute", top: 12, right: 12,
+            background: COLORS.highBg, border: `1px solid ${COLORS.high}`,
+            borderRadius: 6, padding: "4px 10px", cursor: "pointer",
+            fontSize: 11, color: COLORS.high, fontWeight: 600,
+            display: "flex", alignItems: "center", gap: 5, zIndex: 10,
+          }}
+          title="Click to see disconnected nodes"
+        >
+          <span style={{ fontSize: 13 }}>&#9888;</span>
+          {disconnectedNodes.length} disconnected
+        </div>
+      )}
+
+      {/* Disconnected node sidebar */}
+      {showDisconnectedSidebar && disconnectedNodes.length > 0 && (
+        <div style={{
+          position: "absolute", top: 0, right: 0, width: 240, height: "100%",
+          background: "rgba(17,24,39,0.97)", borderLeft: `1px solid ${COLORS.high}`,
+          overflowY: "auto", zIndex: 20, padding: 14,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.high }}>
+              Disconnected Nodes ({disconnectedNodes.length})
+            </span>
+            <button
+              onClick={() => setShowDisconnectedSidebar(false)}
+              style={{ background: "none", border: "none", color: COLORS.textDim, cursor: "pointer", fontSize: 14 }}
+            >&#215;</button>
+          </div>
+          <div style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 10, lineHeight: 1.5 }}>
+            These nodes have no edges in the graph — they may be incomplete attack path data or isolated resources requiring investigation.
+          </div>
+          {disconnectedNodes.map((n, i) => (
+            <div key={i} style={{
+              marginBottom: 6, padding: "7px 10px", borderRadius: 5,
+              background: COLORS.bgCard, border: `1px solid ${COLORS.high}33`,
+            }}>
+              <div style={{ fontWeight: 600, color: COLORS.text, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                title={n.label}>{n.label}</div>
+              <div style={{ fontSize: 10, color: COLORS.textDim, marginTop: 2 }}>
+                {n.type || "unknown"}{n.id && n.id !== n.label ? ` \u2014 ${n.id}` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Edge hover tooltip */}
+      {edgeTooltip && (
+        <div style={{
+          position: "fixed", left: edgeTooltip.x + 12, top: edgeTooltip.y - 10,
+          background: "rgba(17,24,39,0.95)", border: `1px solid ${COLORS.border}`,
+          borderRadius: 6, padding: "6px 10px", fontSize: 11, color: COLORS.text,
+          pointerEvents: "none", zIndex: 1000, maxWidth: 260,
+        }}>
+          <div style={{ fontWeight: 700, color: getEdgeStyle(edgeTooltip.edge_type).color, marginBottom: 3 }}>
+            {edgeTooltip.edge_type}
+          </div>
+          <div style={{ color: COLORS.textDim, fontSize: 10 }}>
+            <span style={{ color: COLORS.text }}>{edgeTooltip.source}</span>
+            <span style={{ margin: "0 4px" }}>{"\u2192"}</span>
+            <span style={{ color: COLORS.text }}>{edgeTooltip.target}</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
-}
+});
 
 // ─── Stat Card ───
 function StatCard({ label, value, color, subtext, active, onClick }) {
@@ -427,17 +716,40 @@ function PathDetail({ path }) {
 
       {/* Steps */}
       <SectionHeader title="Attack Steps" icon={"\u2694"} />
-      <div style={{ marginLeft: 8 }}>
-        {path.steps?.map((step, i) => (
-          <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
-            <div style={{
-              minWidth: 24, height: 24, borderRadius: "50%", background: sev.bg,
-              color: sev.color, display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 11, fontWeight: 700,
-            }}>{i + 1}</div>
-            <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.5 }}>{step}</span>
-          </div>
-        ))}
+      <div style={{ marginLeft: 4, position: "relative" }}>
+        {path.steps?.map((step, i) => {
+          const isLast = i === path.steps.length - 1;
+          return (
+            <div key={i} style={{ display: "flex", gap: 0, marginBottom: 0, alignItems: "stretch" }}>
+              {/* Timeline column */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 32 }}>
+                <div style={{
+                  minWidth: 26, height: 26, borderRadius: "50%",
+                  background: i === 0 ? sev.color : sev.bg,
+                  color: i === 0 ? "#fff" : sev.color,
+                  border: `2px solid ${sev.color}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, fontWeight: 700, flexShrink: 0, zIndex: 1,
+                }}>{i + 1}</div>
+                {!isLast && (
+                  <div style={{
+                    width: 2, flex: 1, minHeight: 12,
+                    background: `linear-gradient(to bottom, ${sev.color}66, ${sev.color}22)`,
+                  }} />
+                )}
+              </div>
+              {/* Step content card */}
+              <div style={{
+                flex: 1, marginLeft: 12, marginBottom: isLast ? 0 : 6, padding: "10px 14px",
+                background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
+                borderLeft: `3px solid ${i === 0 ? sev.color : sev.color + "66"}`,
+                borderRadius: 6, transition: "border-color 0.2s",
+              }}>
+                <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.6 }}>{step}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* MITRE */}
@@ -582,9 +894,13 @@ function GraphLegend() {
     { color: COLORS.nodeEsc, label: "Escalation", shape: "circle" },
     { color: COLORS.nodeData, label: "Data Store", shape: "circle" },
     { color: COLORS.nodeExternal, label: "External", shape: "circle" },
+    { color: COLORS.edgeTrust, label: "Trust", shape: "line" },
     { color: COLORS.edgePrivEsc, label: "Priv Esc", shape: "line-dashed" },
-    { color: COLORS.edgeCrossAccount, label: "Cross-Account", shape: "line" },
+    { color: COLORS.edgeCrossAccount, label: "Cross-Acct", shape: "line-dashed" },
     { color: COLORS.edgeDataAccess, label: "Data Access", shape: "line" },
+    { color: COLORS.edgeService, label: "Service", shape: "line-dashed" },
+    { color: COLORS.edgeNetwork, label: "Network", shape: "line" },
+    { color: COLORS.edgePublicAccess, label: "Public Access", shape: "line" },
   ];
   return (
     <div style={{
@@ -649,9 +965,16 @@ function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
 
   const associatedPaths = useMemo(() => {
     if (!data?.attack_paths) return [];
-    return data.attack_paths.filter(
-      (p) => p.affected_resources?.includes(node.id)
-    );
+    const nodeId = node.id || "";
+    const nodeLabel = node.label || "";
+    return data.attack_paths.filter((p) => {
+      const resources = p.affected_resources || [];
+      return resources.some((r) => {
+        if (r === nodeId) return true;
+        const resName = r.includes("/") ? r.split("/").pop() : r.split(":").pop();
+        return resName === nodeLabel || nodeId.endsWith(":" + resName);
+      });
+    });
   }, [data, node]);
 
   return (
@@ -703,17 +1026,21 @@ function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
             const isSource = e.source === node.id;
             const otherId = isSource ? e.target : e.source;
             const direction = isSource ? "\u2192" : "\u2190";
-            const edgeColor = e.edge_type === "priv_esc" ? COLORS.edgePrivEsc
-              : e.trust_type === "cross-account" ? COLORS.edgeCrossAccount
-              : e.edge_type === "data_access" ? COLORS.edgeDataAccess
-              : COLORS.textDim;
+            const edgeColor = getEdgeStyle(e.edge_type, e.trust_type).color;
+            const edgeLabel = e.label || e.edge_type || e.trust_type || "";
             return (
               <div key={i} style={{
-                fontSize: 11, color: COLORS.text, marginBottom: 4,
-                display: "flex", alignItems: "center", gap: 4,
+                fontSize: 11, color: COLORS.text, marginBottom: 6,
+                background: COLORS.bgCard, borderRadius: 4, padding: "4px 8px",
+                borderLeft: `2px solid ${edgeColor}`,
               }}>
-                <span style={{ color: edgeColor }}>{direction}</span>
-                <span style={{ fontFamily: "monospace", fontSize: 10 }}>{otherId}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ color: edgeColor, fontWeight: 600 }}>{direction}</span>
+                  <span style={{ fontFamily: "monospace", fontSize: 10, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={otherId}>{otherId}</span>
+                </div>
+                {edgeLabel && (
+                  <div style={{ fontSize: 9, color: edgeColor, marginTop: 2, paddingLeft: 16 }}>{edgeLabel}{e.trust_type && e.trust_type !== edgeLabel ? ` (${e.trust_type})` : ""}</div>
+                )}
               </div>
             );
           })}
@@ -819,10 +1146,15 @@ function StatDetailPanel({ statKey, data, onClose, onSelectPath, onHighlightNode
       case "roles":
         return { title: "Roles", items: principals.filter((p) => p.type === "role") };
       case "trusts": {
+        const RISK_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+        const TRUST_TYPE_ORDER = { "cross-account": 0, service: 1, "same-account": 2 };
         const trustItems = trusts.length > 0 ? [...trusts].sort((a, b) => {
-          // External trusts first (higher risk), then internal
-          if (a.is_internal !== b.is_internal) return a.is_internal ? 1 : -1;
-          return 0;
+          // Sort by risk level (critical first), then trust_type (cross-account first), then role_id
+          const riskDiff = (RISK_ORDER[a.risk] ?? 4) - (RISK_ORDER[b.risk] ?? 4);
+          if (riskDiff !== 0) return riskDiff;
+          const typeDiff = (TRUST_TYPE_ORDER[a.trust_type] ?? 3) - (TRUST_TYPE_ORDER[b.trust_type] ?? 3);
+          if (typeDiff !== 0) return typeDiff;
+          return (a.role_id || "").localeCompare(b.role_id || "");
         }) : paths.filter((p) => p.category === "trust_misconfiguration");
         return { title: "Trust Relationships", items: trustItems };
       }
@@ -906,7 +1238,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
             MFA: {item.mfa_enabled ? "Yes" : "No"}
           </span>
           <span style={{ color: COLORS.textDim }}>Console: {item.console_access ? "Yes" : "No"}</span>
-          <span style={{ color: COLORS.textDim }}>Keys: {item.access_keys ?? 0}</span>
+          <span style={{ color: COLORS.textDim }}>Keys: {Array.isArray(item.access_keys) ? item.access_keys.length : (item.access_keys ?? 0)}</span>
         </div>
         {item.groups?.length > 0 && (
           <div style={{ fontSize: 10, color: COLORS.textDim, marginTop: 6 }}>Groups: {item.groups.join(", ")}</div>
@@ -966,22 +1298,43 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
   }
 
   if (statKey === "trusts" || statKey === "wildcards") {
-    const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[item.risk] || COLORS.textDim;
+    const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[item.risk] || COLORS.textDim;
+    // Trust entity (role_name) is the focus; trusted principal is secondary
+    const principal = item.trust_principal || item.principal || "";
+    const trustedByName = extractTrustDisplayName(principal, item.trust_type);
     return (
       <div
         onClick={() => onHighlightNode?.(item.role_id)}
         style={{
-          background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
+          background: COLORS.bgCard,
+          border: `1px solid ${item.is_wildcard ? COLORS.critical + "66" : COLORS.border}`,
           borderRadius: 8, padding: 14, marginBottom: 10, cursor: "pointer",
           borderLeft: `3px solid ${riskColor}`,
           transition: "border-color 0.2s",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text }}>{item.role_id}</span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: riskColor, background: riskColor + "18", padding: "1px 8px", borderRadius: 8 }}>{item.risk}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+            {item.is_wildcard && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, color: COLORS.critical,
+                background: COLORS.criticalBg, padding: "1px 6px", borderRadius: 4, flexShrink: 0,
+              }}>
+                {"\u26A0"} WILDCARD
+              </span>
+            )}
+            <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.role_name || item.role_arn}>{item.role_name || item.role_id || "Unknown Role"}</span>
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 700, color: riskColor, background: riskColor + "18", padding: "1px 8px", borderRadius: 8, flexShrink: 0 }}>{item.risk}</span>
         </div>
-        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 6 }}>{item.principal}</div>
+        {/* Trusted-by line: who/what is trusted to assume this role */}
+        <div style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 4 }}>
+          Trusted by: <span style={{ color: COLORS.text, fontWeight: 500 }}>{trustedByName}</span>
+        </div>
+        {/* Full principal in monospace below */}
+        {principal && (
+          <div style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 6 }}>{principal}</div>
+        )}
         {item.is_internal != null && (
           <div style={{ marginBottom: 6 }}>
             <span style={{
@@ -996,7 +1349,6 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
         )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10 }}>
           <span style={{ color: COLORS.textDim }}>{item.trust_type}</span>
-          {item.is_wildcard && <span style={{ color: COLORS.critical }}>Wildcard</span>}
           <span style={{ color: item.has_external_id ? COLORS.low : COLORS.high }}>
             ExtID: {item.has_external_id ? "Yes" : "No"}
           </span>
@@ -1049,6 +1401,36 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
 function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, tab, setTab, selectedNode, setSelectedNode, searchQuery, setSearchQuery, activeSeverities, handleToggleSeverity, activeCategories, handleToggleCategory, sortMode, setSortMode, activeStatPanel, handleStatClick }) {
   const summary = data?.summary || {};
   const isExploit = data?.source === "exploit";
+  // Run status: absent/undefined treated as "complete" — backward compat with pre-status runs
+  const runStatus = data?.runStatus || "complete";
+  const isIncomplete = runStatus === "partial" || runStatus === "failed";
+
+  // DASH-03: ref for graph navigation
+  const graphRef = useRef(null);
+
+  // DASH-03: deselect handler — clears path and node selection, called on SVG background click
+  const handleDeselect = useCallback(() => {
+    setSelectedPath(null);
+    setSelectedNode(null);
+  }, [setSelectedPath, setSelectedNode]);
+
+  // DASH-03: node-click filtering — when a node is selected, filter paths to those involving that node
+  // Node IDs are "user:name" / "role:name" / "data:s3:name" but affected_resources are ARNs
+  // Match by: exact ID, node label in resource name, or resource name in node ID
+  const displayedPaths = useMemo(() => {
+    if (!selectedNode) return filteredPaths;
+    const nodeId = selectedNode.id || "";
+    const nodeLabel = selectedNode.label || "";
+    return filteredPaths.filter((p) => {
+      const resources = p.affected_resources || [];
+      return resources.some((r) => {
+        if (r === nodeId) return true;
+        // Extract resource name from ARN (last segment after : or /)
+        const resName = r.includes("/") ? r.split("/").pop() : r.split(":").pop();
+        return resName === nodeLabel || nodeId.endsWith(":" + resName);
+      });
+    });
+  }, [filteredPaths, selectedNode]);
 
   return (
     <>
@@ -1066,7 +1448,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
           <>
             <StatCard label="Users" value={summary.total_users ?? 0} subtext={`${summary.users_without_mfa || 0} no MFA`} color={summary.users_without_mfa > 0 ? COLORS.high : COLORS.text} active={activeStatPanel === "users"} onClick={() => handleStatClick("users")} />
             <StatCard label="Roles" value={summary.total_roles ?? 0} active={activeStatPanel === "roles"} onClick={() => handleStatClick("roles")} />
-            <StatCard label="Trust Relationships" value={summary.total_trust_relationships ?? 0} subtext={`${summary.cross_account_trusts || 0} cross-account`} active={activeStatPanel === "trusts"} onClick={() => handleStatClick("trusts")} />
+            <StatCard label="Trust Relationships" value={summary.total_trust_relationships ?? 0} subtext={`${summary.cross_account_trusts || 0} cross-account / ${summary.service_trusts || 0} service / ${summary.same_account_trusts || 0} same-account`} active={activeStatPanel === "trusts"} onClick={() => handleStatClick("trusts")} />
             <StatCard label="Wildcard Trusts" value={summary.wildcard_trust_policies ?? 0} color={(summary.wildcard_trust_policies ?? 0) > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "wildcards"} onClick={() => handleStatClick("wildcards")} />
             <StatCard label="Critical PrivEsc" value={summary.critical_priv_esc_risks ?? 0} color={(summary.critical_priv_esc_risks ?? 0) > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "privesc"} onClick={() => handleStatClick("privesc")} />
             <StatCard label="Attack Paths" value={data.attack_paths?.length || 0} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
@@ -1077,7 +1459,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
       {/* Main Content */}
       <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0, overflow: "hidden" }}>
         {/* Left: Attack Paths List */}
-        <div style={{ width: 320, minWidth: 280, display: "flex", flexDirection: "column" }}>
+        <div style={{ width: 320, minWidth: 280, display: "flex", flexDirection: "column", opacity: (isIncomplete && !data?.attack_paths?.length) ? 0.6 : 1 }}>
           <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 600, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Attack Paths
           </div>
@@ -1124,17 +1506,44 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
             ))}
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {filteredPaths.length === 0 ? (
+            {selectedNode && (
+              <div style={{ fontSize: 10, color: COLORS.accent, marginBottom: 6, padding: "3px 8px", background: COLORS.accent + "12", borderRadius: 4 }}>
+                Showing paths for: {selectedNode.label}
+              </div>
+            )}
+            {displayedPaths.length === 0 ? (
               <div style={{ color: COLORS.textDim, fontSize: 12, textAlign: "center", padding: 20 }}>
                 No paths match filters
               </div>
             ) : (
-              filteredPaths.map((path, i) => (
+              displayedPaths.map((path, i) => (
                 <AttackPathCard
                   key={i}
                   path={path}
                   isSelected={selectedPath === path}
-                  onClick={() => setSelectedPath(selectedPath === path ? null : path)}
+                  onClick={() => {
+                    const newPath = selectedPath === path ? null : path;
+                    setSelectedPath(newPath);
+                    if (newPath && graphRef.current) {
+                      const resources = newPath.affected_resources || [];
+                      const fitTo = () => {
+                        const nodes = data?.graph?.nodes || [];
+                        const resolved = resources.map((r) => {
+                          if (nodes.some((n) => n.id === r)) return r;
+                          const resName = r.includes("/") ? r.split("/").pop() : r.split(":").pop();
+                          const match = nodes.find((n) => n.label === resName || n.id.endsWith(":" + resName));
+                          return match ? match.id : null;
+                        }).filter(Boolean);
+                        if (resolved.length) graphRef.current.fitNodes(resolved);
+                      };
+                      if (tab !== "graph") {
+                        setTab("graph");
+                        setTimeout(fitTo, 100);
+                      } else {
+                        setTimeout(fitTo, 50);
+                      }
+                    }
+                  }}
                 />
               ))
             )}
@@ -1143,7 +1552,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
 
         {/* Center: Graph / Detail toggle */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
             {["graph", "detail"].map((t) => (
               <button
                 key={t}
@@ -1158,27 +1567,69 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
                 {t === "graph" ? "Attack Graph" : "Path Detail"}
               </button>
             ))}
+            {/* Amber warning badge — only shown for partial or failed runs */}
+            {isIncomplete && (
+              <span style={{ color: "#f59e0b", fontWeight: 600, fontSize: 11, marginLeft: 8 }}>
+                {runStatus.toUpperCase()}
+              </span>
+            )}
           </div>
           <div style={{
             flex: 1, background: COLORS.bgCard, borderRadius: 8,
-            border: `1px solid ${COLORS.border}`, position: "relative", overflow: "hidden",
+            border: `1px solid ${isIncomplete ? "#f59e0b40" : COLORS.border}`, position: "relative", overflow: "hidden",
           }}>
             {tab === "graph" ? (
               <>
-                <AttackGraph data={data} selectedPath={selectedPath} onNodeClick={setSelectedNode} />
-                <GraphLegend />
-                {selectedNode && (
-                  <NodeDetailPanel
-                    node={selectedNode}
-                    data={data}
-                    selectedPath={selectedPath}
-                    onSelectPath={(p) => { setSelectedPath(p); setTab("detail"); }}
-                    onClose={() => setSelectedNode(null)}
-                  />
+                {/* Attack graph unavailable state for partial/failed runs with no graph data */}
+                {isIncomplete && (!data?.graph?.nodes?.length) ? (
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    height: "100%", opacity: 0.6,
+                  }}>
+                    <div style={{ textAlign: "center", color: COLORS.textDim, fontSize: 13 }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>{"\u26A0"}</div>
+                      Attack graph unavailable — run was incomplete
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <AttackGraph
+                      ref={graphRef}
+                      data={data}
+                      selectedPath={selectedPath}
+                      onNodeClick={setSelectedNode}
+                      onDeselect={handleDeselect}
+                    />
+                    <GraphLegend />
+                    {/* Reset View button (DASH-03) */}
+                    <button
+                      onClick={() => { graphRef.current?.resetView(); setSelectedPath(null); setSelectedNode(null); }}
+                      style={{
+                        position: "absolute", top: 12, right: 12, zIndex: 10,
+                        background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
+                        color: COLORS.textDim, borderRadius: 6, padding: "4px 10px",
+                        fontSize: 11, cursor: "pointer",
+                      }}
+                    >
+                      Reset View
+                    </button>
+                    {selectedNode && (
+                      <NodeDetailPanel
+                        node={selectedNode}
+                        data={data}
+                        selectedPath={selectedPath}
+                        onSelectPath={(p) => { setSelectedPath(p); setTab("detail"); }}
+                        onClose={() => setSelectedNode(null)}
+                      />
+                    )}
+                  </>
                 )}
               </>
             ) : (
-              selectedPath ? <PathDetail path={selectedPath} /> : <div className="empty-state">Select an attack path to view details</div>
+              selectedPath ? <PathDetail path={selectedPath} /> : <div style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                height: "100%", color: COLORS.textDim, fontSize: 13, opacity: 0.6,
+              }}>Select an attack path to view details</div>
             )}
           </div>
         </div>
@@ -1526,7 +1977,7 @@ function PrioritizationSidebar({ items, onScrollTo }) {
 function ExecutiveSummaryView({ data }) {
   const exec = data?.executive_summary;
   const summary = data?.summary || {};
-  const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[summary.risk_score] || COLORS.text;
+  const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[summary.risk_score] || COLORS.text;
 
   if (!exec) {
     return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No executive summary data available. Re-run defend to generate.</div>;
@@ -1703,7 +2154,7 @@ function TechnicalRecommendationsView({ data }) {
 }
 
 function DefendView({ data }) {
-  const [defendTab, setDefendTab] = useState("policies");
+  const [defendTab, setDefendTab] = useState(data?.executive_summary ? "executive" : "policies");
   const summary = data?.summary || {};
 
   return (
@@ -1770,6 +2221,8 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activePhase, setActivePhase] = useState("audit");
+  // Run index state — loaded from index.json when available (enables run selector + status)
+  const [runIndex, setRunIndex] = useState([]);  // array of { run_id, source, date, status, file }
 
   // Interactive state
   const [searchQuery, setSearchQuery] = useState("");
@@ -1777,6 +2230,14 @@ export default function App() {
   const [activeCategories, setActiveCategories] = useState(new Set(Object.keys(CATEGORY_CONFIG)));
   const [sortMode, setSortMode] = useState("severity");
   const [activeStatPanel, setActiveStatPanel] = useState(null);
+
+  // DASH-01: Reset view state when switching between phases to prevent blank pages
+  useEffect(() => {
+    setTab("graph");
+    setSelectedPath(null);
+    setSelectedNode(null);
+    setActiveStatPanel(null);
+  }, [activePhase]);
 
   // Derive active data from allData + activePhase
   const data = useMemo(() => {
@@ -1810,6 +2271,10 @@ export default function App() {
       }
       setAllData((prev) => ({ ...prev, ...loaded }));
     }
+    // Try to load index.json for run selector (only works in dev server mode, not inline HTML)
+    fetch("index.json").then((r) => r.ok ? r.json() : null).then((idx) => {
+      if (idx?.runs?.length) setRunIndex(idx.runs);
+    }).catch(() => { /* index.json not available — inline mode */ });
     setLoading(false);
   }, []);
 
@@ -1906,7 +2371,7 @@ export default function App() {
   // Get account info from any available data source (for header)
   const anyData = data || Object.values(allData)[0] || {};
   const summary = data?.summary || {};
-  const riskColor = { CRITICAL: COLORS.critical, HIGH: COLORS.high, MEDIUM: COLORS.medium, LOW: COLORS.low }[summary.risk_score] || COLORS.text;
+  const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[summary.risk_score] || COLORS.text;
   const phaseColor = PHASE_CONFIG[activePhase]?.color || COLORS.accent;
 
   return (
@@ -1948,34 +2413,77 @@ export default function App() {
         </div>
       </div>
 
-      {/* Phase Tab Bar */}
+      {/* Phase Tab Bar + Run Selector */}
       <div style={{
         display: "flex", gap: 0, padding: "0 24px",
         borderBottom: `1px solid ${COLORS.border}`,
+        justifyContent: "space-between", alignItems: "center",
       }}>
-        {Object.entries(PHASE_CONFIG).map(([key, cfg]) => {
-          const isActive = activePhase === key;
-          const hasData = !!allData[key] || ((key === "audit" || key === "exploit") && (allData["audit"] || allData["exploit"]));
+        <div style={{ display: "flex" }}>
+          {Object.entries(PHASE_CONFIG).map(([key, cfg]) => {
+            const isActive = activePhase === key;
+            const phaseRuns = runIndex.filter((r) => r.source === key || (key === "audit" && r.source === "audit") || (key === "exploit" && r.source === "exploit"));
+            const hasData = !!allData[key] || ((key === "audit" || key === "exploit") && (allData["audit"] || allData["exploit"]));
+            // Show amber dot in tab if the loaded run for this phase is partial/failed
+            const phaseRunStatus = allData[key]?.runStatus || "complete";
+            const isPartialOrFailed = phaseRunStatus === "partial" || phaseRunStatus === "failed";
+            return (
+              <button
+                key={key}
+                onClick={() => setActivePhase(key)}
+                style={{
+                  padding: "10px 20px", cursor: "pointer",
+                  fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: `2px solid ${isActive ? cfg.color : "transparent"}`,
+                  color: isActive ? cfg.color : COLORS.textMuted,
+                  transition: "all 0.15s",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}
+              >
+                {cfg.label}
+                {hasData && !isPartialOrFailed && <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, opacity: isActive ? 1 : 0.5 }} />}
+                {hasData && isPartialOrFailed && <span style={{ fontSize: 10, color: "#f59e0b", fontWeight: 700 }}>{"\u26A0"} {phaseRunStatus}</span>}
+              </button>
+            );
+          })}
+        </div>
+        {/* Run selector dropdown — only shown when index.json has multiple runs for the active phase */}
+        {(() => {
+          const phaseRuns = runIndex.filter((r) => {
+            const matchPhase = activePhase === "audit" ? (r.source === "audit" || r.source === "exploit") : r.source === activePhase;
+            return matchPhase;
+          });
+          if (phaseRuns.length < 2) return null;
+          const runStatusLabel = (s) => s === "partial" ? " \u26A0 partial" : s === "failed" ? " \u26A0 failed" : " \u2714";
+          const currentId = data?.run_id || "";
           return (
-            <button
-              key={key}
-              onClick={() => setActivePhase(key)}
+            <select
+              value={currentId}
+              onChange={(e) => {
+                const run = phaseRuns.find((r) => r.run_id === e.target.value);
+                if (run) fetch(run.file || `${run.run_id}.json`).then((r) => r.json()).then((json) => {
+                  // Attach status from index before normalizing
+                  json._run_status = run.status || "complete";
+                  handleDataLoad(json);
+                }).catch(() => {});
+              }}
               style={{
-                padding: "10px 20px", cursor: "pointer",
-                fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em",
-                background: "transparent",
-                border: "none",
-                borderBottom: `2px solid ${isActive ? cfg.color : "transparent"}`,
-                color: isActive ? cfg.color : COLORS.textMuted,
-                transition: "all 0.15s",
-                display: "flex", alignItems: "center", gap: 6,
+                background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
+                color: COLORS.text, borderRadius: 6, fontSize: 11,
+                padding: "4px 8px", cursor: "pointer", maxWidth: 260,
+                marginRight: 0,
               }}
             >
-              {cfg.label}
-              {hasData && <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, opacity: isActive ? 1 : 0.5 }} />}
-            </button>
+              {phaseRuns.map((run) => (
+                <option key={run.run_id} value={run.run_id}>
+                  {run.run_id}{runStatusLabel(run.status)}
+                </option>
+              ))}
+            </select>
           );
-        })}
+        })()}
       </div>
 
       {/* Phase Content */}

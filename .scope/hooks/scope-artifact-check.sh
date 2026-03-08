@@ -22,24 +22,45 @@ ERRORS=()
 LATEST_AUDIT=$(find "$CWD/audit" -maxdepth 1 -type d -name "audit-*" -mmin -30 2>/dev/null | sort -r | head -1 || true)
 
 if [ -n "$LATEST_AUDIT" ]; then
-  # Mandatory audit artifacts
-  if [ ! -f "$LATEST_AUDIT/findings.md" ]; then
-    ERRORS+=("MISSING: $LATEST_AUDIT/findings.md (mandatory audit artifact)")
-  fi
-  if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
-    ERRORS+=("MISSING: $LATEST_AUDIT/agent-log.jsonl (mandatory audit artifact)")
-  fi
-
-  # results.json is mandatory unless Gate 4 was skipped
-  # We can't detect Gate 4 skip from here, so warn instead of block
-  if [ ! -f "$LATEST_AUDIT/results.json" ]; then
-    ERRORS+=("WARNING: $LATEST_AUDIT/results.json not found. If Gate 4 was not skipped, this file is mandatory.")
+  if [ -f "$LATEST_AUDIT/results.json" ]; then
+    # results.json exists — check if any module reported partial/error (indicates interrupted run)
+    PARTIAL_MODULES=$(find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "enumeration.json" -exec jq -r 'select(.status == "partial" or .status == "error") | .module' {} \; 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+    if [ -n "$PARTIAL_MODULES" ]; then
+      # Interrupted run — downgrade findings.md and dashboard export to warnings
+      if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
+        ERRORS+=("WARNING: $LATEST_AUDIT/agent-log.jsonl missing (run had partial modules: $PARTIAL_MODULES)")
+      fi
+      if [ ! -f "$LATEST_AUDIT/findings.md" ]; then
+        ERRORS+=("WARNING: $LATEST_AUDIT/findings.md missing (run had partial modules: $PARTIAL_MODULES)")
+      fi
+    else
+      # Clean run — enforce mandatory artifacts
+      if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
+        ERRORS+=("MISSING: $LATEST_AUDIT/agent-log.jsonl (mandatory audit artifact)")
+      fi
+      if [ ! -f "$LATEST_AUDIT/findings.md" ]; then
+        ERRORS+=("MISSING: $LATEST_AUDIT/findings.md (mandatory audit artifact)")
+      fi
+    fi
+  else
+    # No results.json — run may not have started or crashed before Gate 4
+    # Downgrade to warnings only
+    if [ ! -f "$LATEST_AUDIT/findings.md" ]; then
+      ERRORS+=("WARNING: $LATEST_AUDIT/findings.md missing (run may not have completed)")
+    fi
+    if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
+      ERRORS+=("WARNING: $LATEST_AUDIT/agent-log.jsonl missing (run may not have completed)")
+    fi
   fi
 
   # Check dashboard export
   RUN_ID=$(basename "$LATEST_AUDIT")
   if [ -f "$LATEST_AUDIT/results.json" ] && [ ! -f "$CWD/dashboard/public/$RUN_ID.json" ]; then
-    ERRORS+=("MISSING: dashboard/public/$RUN_ID.json — results.json exists but dashboard export was not written.")
+    if [ -n "$PARTIAL_MODULES" ]; then
+      ERRORS+=("WARNING: dashboard/public/$RUN_ID.json missing (run had partial modules: $PARTIAL_MODULES)")
+    else
+      ERRORS+=("MISSING: dashboard/public/$RUN_ID.json — results.json exists but dashboard export was not written.")
+    fi
   fi
 
   # Check for per-module JSON output (at least one module file expected in orchestrated runs)

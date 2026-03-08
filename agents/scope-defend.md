@@ -1,9 +1,10 @@
 ---
 name: scope-defend
 description: Defensive controls generation — reads audit output and generates SCPs/RCPs, security controls, SPL detections, and prioritized remediation. Dispatched by the audit orchestrator after audit completes, or invoked directly by the operator via /scope:defend [run-dir].
-compatibility: Orchestrator-spawned (receives RUN_DIR in initial message) or operator-invoked (scans all audit runs if no run-dir provided). AWS Organizations context optional but enhances OU-aware recommendations.
-allowed-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
+compatibility: Orchestrator-spawned (receives AUDIT_RUN_DIR in initial message) or operator-invoked (scans all audit runs if no run-dir provided). AWS Organizations context optional but enhances OU-aware recommendations.
+tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: green
+model: sonnet
 ---
 
 <invocation_modes>
@@ -109,6 +110,38 @@ test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/executive-summary.md" && te
 ```
 
 If ANY mandatory file is MISSING, go back and create it before proceeding. Do not report completion with missing files.
+
+### Output Coverage Gate (MANDATORY)
+
+After generating all artifacts but BEFORE writing results.json, verify proportional coverage.
+(controls_recommended is advisory only -- it is NOT part of this gate.)
+
+**Minimum SCP thresholds (per attack path count):**
+- If attack_paths >= 5: at least 2 SCPs required
+- If attack_paths >= 15: at least 4 SCPs required
+- If attack_paths >= 30: at least 5 SCPs required
+
+**Minimum detection thresholds:**
+- If attack_paths >= 5: at least 3 detections required
+- If attack_paths >= 15: at least 8 detections required
+- If attack_paths >= 30: at least 12 detections required
+
+**RCP gate (independent):**
+- If Organizations access was available during this run: at least 1 RCP per service category present in attack paths
+- If Organizations access was NOT available: log `[INFO] RCP gate skipped -- no Organizations access` and skip this gate entirely
+- Do NOT fail the overall coverage check because of RCP count when Organizations was inaccessible
+
+**CRITICAL path coverage:**
+- Every CRITICAL-severity attack path MUST map to at least 1 SCP or 1 detection
+- If any CRITICAL path has no control, add one before proceeding
+
+**On threshold failure:**
+1. Go back and generate additional controls for the specific uncovered attack paths
+2. After retry: if thresholds are STILL not met, set STATUS: partial and include in ERRORS:
+   `[COVERAGE] No SCP for attack path: {path description}`
+   `[COVERAGE] Detection count {N} below threshold {M} for {attack_paths_count} attack paths`
+3. Do NOT block completion if the only failed gate is RCP and Organizations access was unavailable
+4. Write results.json with STATUS: partial and the coverage gap details in the errors field
 </mandatory_outputs>
 
 <post_processing_pipeline>
@@ -184,9 +217,18 @@ At the start of every defend run (after audit intake, before any processing), cr
 ```bash
 # Generate run ID from timestamp
 RUN_ID="defend-$(date +%Y%m%d-%H%M%S)-$(head -c 2 /dev/urandom | xxd -p)"
-RUN_DIR="./defend/$RUN_ID"
+RUN_DIR="$(pwd)/defend/$RUN_ID"
 mkdir -p "$RUN_DIR/policies"
 ```
+
+**Standalone mode path canonicalization:** When an operator provides a run-dir argument (i.e., AUDIT_RUN_DIR is set from operator input, not from orchestrator dispatch), canonicalize the path before creating the defend run directory:
+
+```bash
+# Standalone mode only — canonicalize operator-provided path to absolute
+AUDIT_RUN_DIR=$(cd "$INPUT_DIR" && pwd)
+```
+
+Evaluate this BEFORE creating the defend run directory. Store the absolute result in AUDIT_RUN_DIR. This ensures that relative paths like `./audit/audit-20260301-143022-all` are resolved against the shell's current working directory at invocation time, preventing path drift when the shell CWD changes during execution.
 
 Examples:
 ```
@@ -1823,123 +1865,184 @@ Review technical-remediation.md for deployment-ready SCP/RCP JSON and impact ana
 
 After writing executive-summary.md and technical-remediation.md, export structured results for the SCOPE dashboard.
 
-### Step 1: Build results.json
+### CRITICAL: Array-First Construction Discipline
+# No count field is ever set from a narrative estimate or placeholder.
+# Every count is `jq 'length'` applied to the actual array.
+# The arrays MUST be fully built before ANY summary field references them.
 
-Construct `results.json` from the generated artifacts:
+### Step 1: Build all arrays FIRST
 
-```json
-{
-  "account_id": "<12-digit AWS account ID from the audit run(s) consumed — extract from audit results.json account_id field, or from the RISK SUMMARY header in findings.md, or from ./data/audit/*.json envelope. If multiple audit runs span different accounts, use the account_id from the most recent run. MUST be a 12-digit number, not 'unknown'.>",
-  "source": "defend",
-  "summary": {
-    "scps_generated": "<count of SCP policies>",
-    "rcps_generated": "<count of RCP policies>",
-    "detections_generated": "<count of SPL detections>",
-    "controls_recommended": "<count of security control recommendations>",
-    "quick_wins": "<count of items with effort=low>",
-    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW"
-  },
-  "audit_runs_analyzed": ["<array of audit run IDs consumed, e.g., audit-20260301-143022-all>"],
-  "executive_summary": {
-    "risk_posture": "<overall risk posture assessment>",
-    "category_breakdown": [
-      { "category": "<category name>", "count": "<number of paths>", "severity": "critical | high | medium | low" }
-    ],
-    "quick_wins": [
-      { "rank": 1, "action": "<action description>", "impact": "<business impact statement>" }
-    ],
-    "remediation_timeline": {
-      "this_week": ["<immediate actions>"],
-      "this_month": ["<short-term actions>"],
-      "this_quarter": ["<long-term actions>"]
-    }
-  },
-  "technical_recommendations": {
-    "attack_path_bundles": [
-      {
-        "attack_path": "<attack path name>",
-        "severity": "critical | high | medium | low",
-        "source_run_ids": ["<audit run IDs>"],
-        "classification": "systemic | one-off",
-        "scp_names": ["<SCP names addressing this path>"],
-        "rcp_names": ["<RCP names addressing this path>"],
-        "detection_names": ["<detection names for this path>"],
-        "control_names": ["<security control names for this path>"]
-      }
-    ]
-  },
-  "scps": [
-    {
-      "name": "<SCP name>",
-      "file": "<relative path to policy JSON, e.g., policies/scp-deny-admin-attach.json>",
-      "policy_json": {},
-      "source_attack_paths": ["<attack path names this SCP addresses>"],
-      "source_run_ids": ["<audit run IDs that surfaced the source attack paths>"],
-      "impact_analysis": {
-        "prevents": ["<IAM actions blocked, e.g., iam:AttachUserPolicy>"],
-        "blast_radius": "low | medium | high",
-        "affected_services": ["<AWS service names affected, e.g., IAM, STS>"],
-        "break_glass": "<break-glass mechanism or 'none'>"
-      }
-    }
-  ],
-  "rcps": [
-    {
-      "name": "<RCP name>",
-      "file": "<relative path to policy JSON>",
-      "policy_json": {},
-      "source_attack_paths": ["<attack path names>"],
-      "source_run_ids": ["<audit run IDs that surfaced the source attack paths>"],
-      "impact_analysis": {
-        "prevents": ["<actions blocked>"],
-        "blast_radius": "low | medium | high",
-        "affected_services": ["<AWS service names affected>"],
-        "break_glass": "<break-glass mechanism or 'none'>"
-      }
-    }
-  ],
-  "detections": [
-    {
-      "name": "<detection name>",
-      "spl": "<full SPL query>",
-      "severity": "critical | high | medium | low",
-      "category": "<attack path category>",
-      "mitre_technique": "<e.g., T1078.004>",
-      "source_attack_paths": ["<attack path names this detection addresses>"],
-      "source_run_ids": ["<audit run IDs that surfaced the source attack paths>"]
-    }
-  ],
-  "security_controls": [
-    {
-      "service": "<GuardDuty | Config | Access Analyzer | CloudWatch>",
-      "recommendation": "<recommendation text>",
-      "priority": "critical | high | medium | low",
-      "effort": "low | medium | high",
-      "source_attack_paths": ["<attack path names>"]
-    }
-  ],
-  "prioritization": [
-    {
-      "rank": 1,
-      "action": "<action description>",
-      "risk": "critical | high | medium | low",
-      "effort": "low | medium | high",
-      "category": "scp | rcp | detection | control"
-    }
-  ]
-}
-```
-
-### Step 2: Write to run directory
+Build every array in full before computing any count. Use the generated artifacts from this session:
 
 ```bash
-# Write results.json to run directory
-cat > "$RUN_DIR/results.json" << 'RESULTS_EOF'
-<results JSON>
-RESULTS_EOF
+# STEP 1: Build all arrays FIRST — every array must be complete before any count is computed
+
+# SCPS_ARRAY: one object per generated SCP policy
+# Each object: name, file, policy_json (object), source_attack_paths, source_run_ids, impact_analysis
+SCPS_ARRAY=$(jq -n '[
+  {
+    "name": "<SCP name>",
+    "file": "<relative path, e.g., policies/scp-deny-admin-attach.json>",
+    "policy_json": {},
+    "source_attack_paths": ["<attack path names>"],
+    "source_run_ids": ["<audit run IDs>"],
+    "impact_analysis": {
+      "prevents": ["<IAM actions blocked>"],
+      "blast_radius": "low | medium | high",
+      "affected_services": ["<AWS services>"],
+      "break_glass": "<break-glass mechanism or none>"
+    }
+  }
+  // ... one entry per generated SCP
+]')
+
+# RCPS_ARRAY: one object per generated RCP policy
+# Each object: name, file, policy_json (object), source_attack_paths, source_run_ids, impact_analysis
+RCPS_ARRAY=$(jq -n '[
+  {
+    "name": "<RCP name>",
+    "file": "<relative path>",
+    "policy_json": {},
+    "source_attack_paths": ["<attack path names>"],
+    "source_run_ids": ["<audit run IDs>"],
+    "impact_analysis": {
+      "prevents": ["<actions blocked>"],
+      "blast_radius": "low | medium | high",
+      "affected_services": ["<AWS services>"],
+      "break_glass": "<break-glass mechanism or none>"
+    }
+  }
+  // ... one entry per generated RCP
+]')
+
+# DETECTIONS_ARRAY: one object per SPL detection
+# Each object: name, spl, severity, category, mitre_technique, source_attack_paths, source_run_ids
+DETECTIONS_ARRAY=$(jq -n '[
+  {
+    "name": "<detection name>",
+    "spl": "<full SPL query>",
+    "severity": "critical | high | medium | low",
+    "category": "<attack path category>",
+    "mitre_technique": "<e.g., T1078.004>",
+    "source_attack_paths": ["<attack path names>"],
+    "source_run_ids": ["<audit run IDs>"]
+  }
+  // ... one entry per generated detection
+]')
+
+# CONTROLS_ARRAY: one object per security control recommendation
+# Each object: service, recommendation, priority, effort, source_attack_paths
+CONTROLS_ARRAY=$(jq -n '[
+  {
+    "service": "<GuardDuty | Config | Access Analyzer | CloudWatch>",
+    "recommendation": "<recommendation text>",
+    "priority": "critical | high | medium | low",
+    "effort": "low | medium | high",
+    "source_attack_paths": ["<attack path names>"]
+  }
+  // ... one entry per control recommendation
+]')
+
+# PRIORITIZATION_ARRAY: all remediation actions ranked by Risk x Effort
+# Each object: rank, action, risk, effort, category
+PRIORITIZATION_ARRAY=$(jq -n '[
+  {
+    "rank": 1,
+    "action": "<action description>",
+    "risk": "critical | high | medium | low",
+    "effort": "low | medium | high",
+    "category": "scp | rcp | detection | control | config"
+  }
+  // ... all prioritized actions
+]')
 ```
 
-### Step 3: Export to dashboard
+### Step 2: Derive summary counts FROM arrays
+
+```bash
+# STEP 2: Derive counts from arrays — NEVER hardcode or estimate counts
+SCPS_COUNT=$(echo "$SCPS_ARRAY" | jq 'length')
+RCPS_COUNT=$(echo "$RCPS_ARRAY" | jq 'length')
+DETECTIONS_COUNT=$(echo "$DETECTIONS_ARRAY" | jq 'length')
+CONTROLS_COUNT=$(echo "$CONTROLS_ARRAY" | jq 'length')
+QUICK_WINS_COUNT=$(echo "$PRIORITIZATION_ARRAY" | jq '[.[] | select(.effort == "low")] | length')
+```
+
+### Step 3: Assemble and write results.json using derived counts
+
+```bash
+# STEP 3: Assemble results.json — counts are derived variables, arrays are complete
+# Extract account_id from audit results.json or findings.md (must be 12-digit number, not 'unknown')
+# Extract audit_runs_analyzed from consumed audit run directories
+
+jq -n \
+  --arg account_id "$ACCOUNT_ID" \
+  --arg source "defend" \
+  --arg region "global" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg risk_score "$RISK_SCORE" \
+  --argjson audit_runs '["<audit run ID 1>", "..."]' \
+  --argjson scps "$SCPS_ARRAY" \
+  --argjson rcps "$RCPS_ARRAY" \
+  --argjson detections "$DETECTIONS_ARRAY" \
+  --argjson controls "$CONTROLS_ARRAY" \
+  --argjson prioritization "$PRIORITIZATION_ARRAY" \
+  --argjson scps_count "$SCPS_COUNT" \
+  --argjson rcps_count "$RCPS_COUNT" \
+  --argjson detections_count "$DETECTIONS_COUNT" \
+  --argjson controls_count "$CONTROLS_COUNT" \
+  --argjson quick_wins_count "$QUICK_WINS_COUNT" \
+  '{
+    account_id: $account_id,
+    source: $source,
+    region: $region,
+    timestamp: $ts,
+    summary: {
+      scps_generated: $scps_count,
+      rcps_generated: $rcps_count,
+      detections_generated: $detections_count,
+      controls_recommended: $controls_count,
+      quick_wins: $quick_wins_count,
+      risk_score: $risk_score
+    },
+    audit_runs_analyzed: $audit_runs,
+    executive_summary: {
+      risk_posture: "<overall risk posture assessment>",
+      category_breakdown: [
+        { "category": "<category name>", "count": "<number of paths>", "severity": "critical | high | medium | low" }
+      ],
+      quick_wins: [
+        { "rank": 1, "action": "<action description>", "impact": "<business impact statement>" }
+      ],
+      remediation_timeline: {
+        "this_week": ["<immediate actions>"],
+        "this_month": ["<short-term actions>"],
+        "this_quarter": ["<long-term actions>"]
+      }
+    },
+    technical_recommendations: {
+      attack_path_bundles: [
+        {
+          "attack_path": "<attack path name>",
+          "severity": "critical | high | medium | low",
+          "source_run_ids": ["<audit run IDs>"],
+          "classification": "systemic | one-off",
+          "scp_names": ["<SCP names addressing this path>"],
+          "rcp_names": ["<RCP names addressing this path>"],
+          "detection_names": ["<detection names for this path>"],
+          "control_names": ["<security control names for this path>"]
+        }
+      ]
+    },
+    scps: $scps,
+    rcps: $rcps,
+    detections: $detections,
+    security_controls: $controls,
+    prioritization: $prioritization
+  }' > "$RUN_DIR/results.json"
+```
+
+### Step 4: Export to dashboard
 
 ```bash
 # Extract RUN_ID from RUN_DIR
@@ -1954,12 +2057,12 @@ if [ -f dashboard/public/index.json ]; then
   node -e "
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
     idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
-    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', file: '$RUN_ID.json' });
+    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$PIPELINE_STATUS', file: '$RUN_ID.json' });
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 else
   node -e "
-    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', file: '$RUN_ID.json' }] };
+    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$PIPELINE_STATUS', file: '$RUN_ID.json' }] };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 fi

@@ -8,7 +8,13 @@
 
 set -euo pipefail
 
+# Fast-path: read stdin once, check for 'aws' before parsing JSON.
+# Avoids jq overhead on non-AWS commands (mkdir, echo, cp, etc.)
 INPUT=$(cat /dev/stdin)
+if ! echo "$INPUT" | grep -q '"aws '; then
+  exit 0
+fi
+
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
 # Only inspect commands that contain AWS CLI calls (including subshells and pipes)

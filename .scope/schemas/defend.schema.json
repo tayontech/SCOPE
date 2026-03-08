@@ -36,7 +36,7 @@
         "detections_generated": { "type": "integer" },
         "controls_recommended": { "type": "integer" },
         "quick_wins": { "type": "integer" },
-        "risk_score": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] }
+        "risk_score": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
       }
     },
     "executive_summary": {

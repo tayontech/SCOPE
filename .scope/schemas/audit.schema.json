@@ -46,7 +46,7 @@
         "users_without_mfa": { "type": "integer" },
         "risk_score": {
           "type": "string",
-          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+          "enum": ["critical", "high", "medium", "low"]
         },
         "services_analyzed": { "type": "integer" },
         "top_findings": {
@@ -81,7 +81,7 @@
             "properties": {
               "id": { "type": "string" },
               "label": { "type": "string" },
-              "type": { "type": "string", "enum": ["user", "role", "escalation", "data", "external"] }
+              "type": { "type": "string", "enum": ["user", "role", "group", "escalation", "data", "external"] }
             }
           }
         },
@@ -94,7 +94,7 @@
               "source": { "type": "string" },
               "target": { "type": "string" },
               "trust_type": { "type": "string" },
-              "edge_type": { "type": "string" },
+              "edge_type": { "type": "string", "enum": ["priv_esc", "trust", "data_access", "network", "service", "public_access", "cross_account", "membership"] },
               "severity": { "type": "string" },
               "label": { "type": "string" }
             }
@@ -132,7 +132,7 @@
         "required": ["id", "type", "arn"],
         "properties": {
           "id": { "type": "string" },
-          "type": { "type": "string", "enum": ["user", "role"] },
+          "type": { "type": "string", "enum": ["user", "role", "group"] },
           "arn": { "type": "string" }
         }
       }

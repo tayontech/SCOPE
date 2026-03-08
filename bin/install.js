@@ -66,12 +66,30 @@ function parseFrontmatter(content) {
 /**
  * Rebuild frontmatter YAML string from a key-value map,
  * omitting specified keys.
+ *
+ * Values are quoted with double quotes when they contain characters that would
+ * produce invalid YAML in an unquoted scalar:
+ *   - ": " (colon + space) — YAML parsers treat this as a mapping entry separator
+ *   - "#"  at any position  — YAML comment marker
+ *   - leading "["  or "{"  — YAML flow sequence/mapping
+ *   - leading ">"  or "|"  — YAML block scalar indicators
+ *
+ * Any existing double quotes within the value are escaped as \".
  */
 function rebuildFrontmatter(frontmatter, omitKeys) {
   const lines = [];
   for (const [key, value] of Object.entries(frontmatter)) {
     if (omitKeys.includes(key)) continue;
-    lines.push(`${key}: ${value}`);
+    const needsQuoting =
+      value.includes(': ') ||
+      value.includes(' #') ||
+      /^[#[{>|]/.test(value);
+    if (needsQuoting) {
+      const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      lines.push(`${key}: "${escaped}"`);
+    } else {
+      lines.push(`${key}: ${value}`);
+    }
   }
   return lines.join('\n');
 }
@@ -104,7 +122,7 @@ function installGemini(skillName, skillMdContent, targetDir) {
   }
   const { frontmatter, body } = parsed;
 
-  const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'color', 'compatibility'];
+  const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'color', 'compatibility', 'memory', 'context', 'agent'];
   const cleanedFm = rebuildFrontmatter(frontmatter, GEMINI_STRIP_KEYS);
   const cleanedContent = `---\n${cleanedFm}\n---\n\n${body}`;
 
@@ -128,7 +146,7 @@ function installCodex(skillName, skillMdContent, targetDir) {
   }
   const { frontmatter, body } = parsed;
 
-  const CODEX_STRIP_KEYS = ['argument-hint', 'color', 'compatibility', 'disable-model-invocation', 'allowed-tools', 'tools'];
+  const CODEX_STRIP_KEYS = ['argument-hint', 'color', 'compatibility', 'disable-model-invocation', 'allowed-tools', 'tools', 'memory', 'context', 'agent'];
   const cleanedFm = rebuildFrontmatter(frontmatter, CODEX_STRIP_KEYS);
   const cleanedContent = `---\n${cleanedFm}\n---\n\n${body}`;
 
@@ -144,17 +162,28 @@ function installCodex(skillName, skillMdContent, targetDir) {
 // ---------------------------------------------------------------------------
 
 // Agents that are user-invocable slash commands.
-// All others (verify-*, data, evidence, defend) are auto-called internally
-// and should NOT be installed as skills.
+// All others (defend) are auto-called internally and should NOT be installed as skills.
 const INSTALLABLE_AGENTS = new Set([
   'scope-audit',
   'scope-exploit',
   'scope-investigate',
 ]);
 
-// Model assignments for subagents.
-// Enumeration subagents use haiku (fast, cheap, structured data only).
-// Attack-paths and defend use inherit (full reasoning required).
+// Agents from agents/ (top-level) that must also be deployed as subagents.
+// scope-defend: operator-invocable AND dispatched by scope-audit — needs both skill and subagent paths.
+// On Claude Code it is read inline from agents/scope-defend.md via Agent tool path.
+// On Gemini/Codex it must be deployed to .agents/agents/ so the orchestrator can delegate to it.
+const TOP_LEVEL_SUBAGENTS = new Set([
+  'scope-defend',
+]);
+
+// Model assignments for subagents — two-tier routing.
+// Tier 1 (haiku): Enum subagents — structured CLI data collection, no reasoning.
+//   Fast and cheap; haiku is correct for AWS API calls and JSON output.
+// Tier 2 (sonnet): Reasoning agents — attack path analysis and defensive controls.
+//   These agents evaluate policy chains, generate SCP/RCP policies, and write SPL.
+//   Explicit sonnet pin prevents session-model inheritance (e.g., --model haiku)
+//   from silently degrading security-critical reasoning to an under-powered model.
 // scope-verify and scope-pipeline are NOT deployed as subagents — they are read inline.
 const SUBAGENT_MODEL_MAP = {
   'scope-enum-iam': 'haiku',
@@ -168,11 +197,9 @@ const SUBAGENT_MODEL_MAP = {
   'scope-enum-sns': 'haiku',
   'scope-enum-sqs': 'haiku',
   'scope-enum-apigateway': 'haiku',
-  'scope-enum-bedrock': 'haiku',
-  'scope-enum-sagemaker': 'haiku',
   'scope-enum-codebuild': 'haiku',
-  'scope-attack-paths': 'inherit',
-  'scope-defend': 'inherit',
+  'scope-attack-paths': 'sonnet',
+  'scope-defend': 'sonnet',
 };
 
 /**
@@ -207,36 +234,91 @@ function discoverAgents(agentsDir) {
     agents.push({ name, content });
   }
   if (skipped.length > 0) {
-    console.log(`Skipped ${skipped.length} internal agent(s): ${skipped.join(', ')}`);
+    const asSubagents = skipped.filter(n => TOP_LEVEL_SUBAGENTS.has(n));
+    const truelySkipped = skipped.filter(n => !TOP_LEVEL_SUBAGENTS.has(n));
+    if (asSubagents.length > 0) {
+      console.log(`Skipped ${asSubagents.length} agent(s) from skills (will be deployed as subagents): ${asSubagents.join(', ')}`);
+    }
+    if (truelySkipped.length > 0) {
+      console.log(`Skipped ${truelySkipped.length} inline-only agent(s): ${truelySkipped.join(', ')}`);
+    }
   }
   return agents;
 }
 
 /**
- * Discover subagent .md files from agents/subagents/.
+ * Discover subagent .md files from agents/subagents/ and select top-level agents/.
  * Excludes scope-verify.md and scope-pipeline.md — those are read inline
  * at runtime, not deployed as dispatchable subagents.
+ * Also includes agents in TOP_LEVEL_SUBAGENTS from the agents/ root dir
+ * (e.g., scope-defend — dispatched by orchestrator on Gemini/Codex).
  * Returns array of { name: string, content: string }.
  */
 function discoverSubagents(subagentsDir) {
-  if (!fs.existsSync(subagentsDir)) {
-    return [];
-  }
-
   // Files that are read inline by source agents — do NOT deploy as subagents
   const INLINE_ONLY = new Set(['scope-verify', 'scope-pipeline']);
 
   const subagents = [];
-  const entries = fs.readdirSync(subagentsDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-    const name = entry.name.replace(/\.md$/, '');
-    if (INLINE_ONLY.has(name)) continue;
-    const filePath = path.join(subagentsDir, entry.name);
+
+  // Primary: agents/subagents/ directory
+  if (fs.existsSync(subagentsDir)) {
+    const entries = fs.readdirSync(subagentsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      const name = entry.name.replace(/\.md$/, '');
+      if (INLINE_ONLY.has(name)) continue;
+      const filePath = path.join(subagentsDir, entry.name);
+      const content = fs.readFileSync(filePath, 'utf8');
+      const parsed = parseFrontmatter(content);
+      if (!parsed || !parsed.frontmatter.name) {
+        console.warn(`  WARN: Skipping subagent ${entry.name} — no frontmatter or missing name field`);
+        continue;
+      }
+      subagents.push({ name, content });
+    }
+  }
+
+  // Secondary: top-level agents/ that are also dispatched as subagents
+  const agentsDir = path.join(subagentsDir, '..');
+  for (const name of TOP_LEVEL_SUBAGENTS) {
+    const filePath = path.join(agentsDir, `${name}.md`);
+    if (!fs.existsSync(filePath)) {
+      console.warn(`  WARN: TOP_LEVEL_SUBAGENT ${name}.md not found in agents/`);
+      continue;
+    }
     const content = fs.readFileSync(filePath, 'utf8');
     subagents.push({ name, content });
   }
+
   return subagents;
+}
+
+/**
+ * Prune stale subagent .md files from target agents directory.
+ * Deletes any .md file whose basename (without .md) is NOT in the current installed set.
+ * Only removes .md files — safe for Codex dirs that contain .toml files too.
+ *
+ * @param {string} agentsDir - Target agents directory (e.g., .claude/agents/)
+ * @param {Set<string>} installedNames - Set of currently-valid agent names from discoverSubagents()
+ * @returns {number} Count of pruned files
+ */
+function pruneStaleSubagentFiles(agentsDir, installedNames) {
+  if (!fs.existsSync(agentsDir)) return 0;
+  const existing = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+  let pruned = 0;
+  for (const file of existing) {
+    const name = file.replace(/\.md$/, '');
+    if (!installedNames.has(name)) {
+      fs.unlinkSync(path.join(agentsDir, file));
+      const displayPath = path.join(agentsDir, file).replace(os.homedir(), '~');
+      console.log(`  Pruned stale subagent: ${displayPath}`);
+      pruned++;
+    }
+  }
+  if (pruned > 0) {
+    console.log(`Pruned ${pruned} stale subagent file(s)`);
+  }
+  return pruned;
 }
 
 /**
@@ -279,17 +361,38 @@ function installSubagentsClaude(subagents, scope) {
 
 /**
  * Gemini CLI subagent deployment.
- * Deploys to .agents/agents/ (local) or ~/.agents/agents/ (global).
- * Strips model field (Gemini subagents inherit parent model) and Claude-specific keys.
+ * Deploys to .gemini/agents/ (local) or ~/.gemini/agents/ (global).
+ * Requires experimental.enableAgents: true in gemini settings.json.
+ * Strips model field and Claude-specific keys.
  */
 function installSubagentsGemini(subagents, scope) {
   const agentsDir = scope === 'local'
-    ? path.join(process.cwd(), '.agents', 'agents')
-    : path.join(os.homedir(), '.agents', 'agents');
+    ? path.join(process.cwd(), '.gemini', 'agents')
+    : path.join(os.homedir(), '.gemini', 'agents');
 
   fs.mkdirSync(agentsDir, { recursive: true });
-  const GEMINI_STRIP_KEYS = ['model', 'argument-hint', 'disable-model-invocation', 'color', 'compatibility'];
+  const GEMINI_STRIP_KEYS = ['model', 'argument-hint', 'disable-model-invocation', 'allowed-tools', 'tools', 'color', 'compatibility', 'memory', 'context', 'agent', 'maxTurns'];
   let count = 0;
+
+  // Gemini defaults: max_turns=15 — too low for SCOPE agents.
+  // Inject appropriate turn limits and explicit tool access per agent type.
+  // NOTE: timeout_mins removed — was causing agents to be killed mid-execution.
+  const GEMINI_AGENT_CONFIG = {
+    'scope-enum-iam':        { max_turns: 50, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-ec2':        { max_turns: 50, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-s3':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-lambda':     { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-kms':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-secrets':    { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-sts':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-rds':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-sns':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-sqs':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-apigateway': { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-enum-codebuild':  { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
+    'scope-attack-paths':    { max_turns: 80, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-defend':          { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+  };
 
   for (const subagent of subagents) {
     const parsed = parseFrontmatter(subagent.content);
@@ -297,8 +400,18 @@ function installSubagentsGemini(subagents, scope) {
 
     if (parsed) {
       const { frontmatter, body } = parsed;
+      // Inject Gemini-specific config
+      const config = GEMINI_AGENT_CONFIG[subagent.name];
+      if (config) {
+        frontmatter.max_turns = String(config.max_turns);
+      }
       const fm = rebuildFrontmatter(frontmatter, GEMINI_STRIP_KEYS);
-      content = `---\n${fm}\n---\n\n${body}`;
+      // Build tools as YAML array (rebuildFrontmatter only handles strings)
+      let toolsYaml = '';
+      if (config && config.tools) {
+        toolsYaml = '\ntools:\n' + config.tools.map(t => `  - ${t}`).join('\n');
+      }
+      content = `---\n${fm}${toolsYaml}\n---\n\n${body}`;
     }
 
     const destFile = path.join(agentsDir, `${subagent.name}.md`);
@@ -314,34 +427,175 @@ function installSubagentsGemini(subagents, scope) {
 
 /**
  * Codex subagent deployment.
- * Deploys to .agents/agents/ (local) or ~/.agents/agents/ (global).
- * Strips model field and Claude-specific keys.
+ * Codex does not use file-based agent discovery — agents are registered via
+ * [agents] sections in .codex/config.toml (project) or ~/.codex/config.toml (global).
+ * This function:
+ *   1. Deploys stripped .md files to .codex/agents/ (local) or ~/.codex/agents/ (global).
+ *      The .md files are present on disk for runtime reads but are NOT the primary instruction
+ *      delivery mechanism for Codex (which uses developer_instructions in the .toml instead).
+ *   2. Generates per-agent .toml config layer files at .codex/agents/<name>.toml.
+ *      Per Codex multi-agent docs (developers.openai.com/codex/multi-agent/), per-role
+ *      config layers support ONLY: model, model_reasoning_effort, sandbox_mode,
+ *      developer_instructions. The field model_instructions_file does NOT exist in the
+ *      ConfigProfile schema (ConfigProfile.additionalProperties: false — unknown fields
+ *      cause silent deserialization failure, making the agent role fall back to generic worker).
+ *      Strategy: read the .md body at install time and embed it as developer_instructions
+ *      using TOML multi-line literal string syntax ('''...''') — no backslash escaping needed,
+ *      safe for bash line-continuation backslashes and all other content in the .md files.
+ *      developer_instructions is sent as a role=developer message to the spawned agent,
+ *      which has higher priority than user-level AGENTS.md instructions.
+ *   3. Ensures [features] multi_agent = true is present in config.toml.
+ *      Codex multi-agent is an experimental feature disabled by default. Without this flag,
+ *      automatic agent role dispatch is unavailable and the orchestrator falls back to inline
+ *      sequential execution. The installer idempotently injects this flag on every run.
+ *   4. Auto-merges [agents] entries into .codex/config.toml (local) or ~/.codex/config.toml
+ *      (global). Uses a marked SCOPE block that is replaced on re-install.
+ *      Each [agents.<name>] entry references the per-agent .toml via config_file.
+ * Strips model field and Claude-specific keys from the .md frontmatter.
  */
 function installSubagentsCodex(subagents, scope) {
   const agentsDir = scope === 'local'
-    ? path.join(process.cwd(), '.agents', 'agents')
-    : path.join(os.homedir(), '.agents', 'agents');
+    ? path.join(process.cwd(), '.codex', 'agents')
+    : path.join(os.homedir(), '.codex', 'agents');
 
   fs.mkdirSync(agentsDir, { recursive: true });
-  const CODEX_STRIP_KEYS = ['model', 'argument-hint', 'color', 'compatibility', 'disable-model-invocation', 'allowed-tools', 'tools'];
+  const CODEX_STRIP_KEYS = ['model', 'argument-hint', 'color', 'compatibility', 'disable-model-invocation', 'allowed-tools', 'tools', 'memory', 'context', 'agent', 'maxTurns'];
   let count = 0;
+  const tomlEntries = [];
 
   for (const subagent of subagents) {
     const parsed = parseFrontmatter(subagent.content);
     let content = subagent.content;
+    let description = subagent.name;
 
     if (parsed) {
       const { frontmatter, body } = parsed;
+      if (frontmatter.description) description = frontmatter.description;
       const fm = rebuildFrontmatter(frontmatter, CODEX_STRIP_KEYS);
       content = `---\n${fm}\n---\n\n${body}`;
     }
 
-    const destFile = path.join(agentsDir, `${subagent.name}.md`);
-    fs.writeFileSync(destFile, content, 'utf8');
-    const displayPath = destFile.replace(os.homedir(), '~');
-    console.log(`  Installing subagent ${subagent.name} -> ${displayPath}`);
+    // Deploy stripped .md file
+    const destMd = path.join(agentsDir, `${subagent.name}.md`);
+    fs.writeFileSync(destMd, content, 'utf8');
+    const displayMd = destMd.replace(os.homedir(), '~');
+    console.log(`  Installing subagent ${subagent.name} -> ${displayMd}`);
     count++;
+
+    // Determine model — gpt-5.3-codex for enum (haiku tier), gpt-5.4 for reasoning (sonnet tier)
+    const scopeModel = SUBAGENT_MODEL_MAP[subagent.name] || 'haiku';
+    const codexModel = scopeModel === 'sonnet' ? 'gpt-5.4' : 'gpt-5.3-codex';
+    const reasoningEffort = 'medium';
+
+    // Generate per-agent .toml config layer.
+    // Per Codex multi-agent docs, valid fields: model, model_reasoning_effort, sandbox_mode,
+    // developer_instructions. ConfigProfile.additionalProperties: false — unknown fields OR
+    // invalid enum values cause silent deserialization failure.
+    //
+    // sandbox_mode valid values: "read-only", "workspace-write", "danger-full-access".
+    // SCOPE uses "workspace-write" — subagents need network + filesystem access.
+    //
+    // developer_instructions: full .md body inlined as TOML multi-line literal string (''').
+    // Sent as role=developer message (higher priority than AGENTS.md).
+    const mdBody = parsed ? parsed.body : subagent.content;
+    const agentToml = [
+      `# SCOPE subagent config layer — auto-generated by bin/install.js`,
+      `# Referenced from .codex/config.toml via config_file = "agents/${subagent.name}.toml"`,
+      ``,
+      `model = "${codexModel}"`,
+      `model_reasoning_effort = "${reasoningEffort}"`,
+      `sandbox_mode = "workspace-write"`,
+      ``,
+      `# developer_instructions is sent as role=developer to the spawned agent (higher priority`,
+      `# than user-level AGENTS.md). Inlined from agents/subagents/${subagent.name}.md body.`,
+      `# Uses TOML multi-line literal string (''') — no backslash escaping required.`,
+      `developer_instructions = '''`,
+      mdBody.trimEnd(),
+      `'''`,
+    ].join('\n') + '\n';
+
+    const destToml = path.join(agentsDir, `${subagent.name}.toml`);
+    fs.writeFileSync(destToml, agentToml, 'utf8');
+    const displayToml = destToml.replace(os.homedir(), '~');
+    console.log(`  Installing config layer  ${subagent.name} -> ${displayToml}`);
+
+    // config_file is resolved relative to the directory containing config.toml (.codex/).
+    // Use "agents/<name>.toml" — Codex resolves to .codex/agents/<name>.toml.
+    // IMPORTANT: config_file must point to a .toml file (a config layer), not the .md file.
+    // Agent instructions are delivered via developer_instructions inside the .toml.
+    const configFilePath = `agents/${subagent.name}.toml`;
+
+    tomlEntries.push(
+      `[agents.${subagent.name}]`,
+      `description = "${description}"`,
+      `config_file = "${configFilePath}"`,
+      ``
+    );
   }
+
+  // Auto-merge into config.toml
+  const configTomlPath = scope === 'local'
+    ? path.join(process.cwd(), '.codex', 'config.toml')
+    : path.join(os.homedir(), '.codex', 'config.toml');
+
+  const scopeHeader = '# --- SCOPE subagent registrations (auto-generated) ---';
+  const scopeFooter = '# --- END SCOPE subagent registrations ---';
+  // [agents] global must appear BEFORE [agents.*] sub-tables in TOML
+  const agentsGlobalBlock = '[agents]\nmax_threads = 16\nmax_depth = 1\njob_max_runtime_seconds = 3600\n';
+  const scopeBlock = [scopeHeader, '', agentsGlobalBlock, ...tomlEntries, scopeFooter].join('\n');
+
+  let existingConfig = '';
+  if (fs.existsSync(configTomlPath)) {
+    existingConfig = fs.readFileSync(configTomlPath, 'utf8');
+  }
+
+  // Ensure [features] multi_agent = true is present.
+  // Codex multi-agent is experimental and disabled by default. Without this flag,
+  // the spawn_agents_on_csv tool and automatic agent role dispatch are not available
+  // at runtime — the orchestrator will fall back to inline sequential execution.
+  // Strategy: if a [features] section already exists, inject multi_agent = true into it
+  // (if missing). If no [features] section exists, prepend one before the SCOPE block.
+  let configWithFeatures = existingConfig;
+  const featuresHeaderRe = /^\[features\]/m;
+  const multiAgentLineRe = /^\s*multi_agent\s*=/m;
+
+  if (featuresHeaderRe.test(configWithFeatures)) {
+    // [features] section exists — inject multi_agent = true if not already there
+    if (!multiAgentLineRe.test(configWithFeatures)) {
+      configWithFeatures = configWithFeatures.replace(
+        /(\[features\][^\n]*\n)/,
+        '$1multi_agent = true\n'
+      );
+      console.log(`  Injected multi_agent = true into existing [features] section`);
+    }
+    // else: already present, nothing to do
+  } else {
+    // No [features] section at all — prepend it
+    const featuresBlock = '[features]\nmulti_agent = true\n';
+    configWithFeatures = configWithFeatures
+      ? featuresBlock + '\n' + configWithFeatures
+      : featuresBlock;
+    console.log(`  Added [features] section with multi_agent = true`);
+  }
+
+  // Replace existing SCOPE block or append
+  const scopeBlockRegex = new RegExp(
+    scopeHeader.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+    '[\\s\\S]*?' +
+    scopeFooter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  );
+
+  let newConfig;
+  if (scopeBlockRegex.test(configWithFeatures)) {
+    newConfig = configWithFeatures.replace(scopeBlockRegex, scopeBlock);
+    console.log(`  Updated SCOPE block in config.toml`);
+  } else {
+    newConfig = configWithFeatures ? configWithFeatures.trimEnd() + '\n\n' + scopeBlock + '\n' : scopeBlock + '\n';
+    console.log(`  Added SCOPE block to config.toml`);
+  }
+  fs.writeFileSync(configTomlPath, newConfig, 'utf8');
+  const configDisplay = configTomlPath.replace(os.homedir(), '~');
+  console.log(`  Config: ${configDisplay}`);
 
   console.log(`Installed ${count} subagent${count !== 1 ? 's' : ''} to codex (${scope})`);
   return count;
@@ -376,7 +630,7 @@ function cleanupOldModules(scope) {
   if (staleDirs.length > 0) {
     console.warn('\n  WARN: Stale module skill directories found (from pre-Phase-3 installs):');
     staleDirs.forEach(d => console.warn(`    - ${d.replace(os.homedir(), '~')}`));
-    console.warn('  These are now replaced by subagents in .claude/agents/ and .agents/agents/.');
+    console.warn('  These are now replaced by subagents in .claude/agents/, .gemini/agents/, and .codex/agents/.');
     console.warn('  Remove stale directories manually:');
     staleDirs.forEach(d => console.warn(`    rm -rf "${d.replace(os.homedir(), '~')}"`));
     console.warn('');
@@ -436,8 +690,8 @@ Editors (pick one or more, or --all):
   --all       Install to all three editors
 
 Scope:
-  --global    Install to user home directory (default)
-  --local     Install to current project directory
+  --local     Install to current project directory (default)
+  --global    Install to user home directory
 
 Options:
   --help      Print this usage message
@@ -446,8 +700,11 @@ What gets installed:
   Skills      Operator-invoked slash commands (scope-audit, scope-exploit, scope-investigate)
               -> .claude/skills/ (Claude Code) or .agents/skills/ (Gemini/Codex)
   Subagents   Orchestrator-dispatched workers (enum subagents, attack-paths, scope-defend)
-              -> .claude/agents/ (Claude Code) or .agents/agents/ (Gemini/Codex)
+              -> .claude/agents/ (Claude Code)
+              -> .gemini/agents/ (Gemini CLI) — requires experimental.enableAgents: true
+              -> .codex/agents/ + .codex/config.toml (Codex)
               Note: scope-verify and scope-pipeline are read inline, not deployed as subagents
+              Note (Codex): installer also adds [features] multi_agent = true — required for parallel dispatch
 
 Examples:
   node bin/install.js --all
@@ -522,7 +779,7 @@ function main() {
   const wantClaude = args.includes('--claude') || args.includes('--all');
   const wantGemini = args.includes('--gemini') || args.includes('--all');
   const wantCodex = args.includes('--codex') || args.includes('--all');
-  const scope = args.includes('--local') ? 'local' : 'global';
+  const scope = args.includes('--global') ? 'global' : 'local';
 
   let editors = [];
   if (wantClaude) editors.push('claude');
@@ -601,23 +858,23 @@ function runInstall(editors, scope) {
 
   console.log(`Found ${agents.length} agent${agents.length !== 1 ? 's' : ''}: ${agents.map(a => a.name).join(', ')}\n`);
 
-  // Detect collision: Gemini and Codex both write to .agents/ — install once
-  // using the union of both strip lists (most restrictive common denominator).
+  // Detect skill collision: Gemini and Codex both write to .agents/skills/ — install once.
+  // Subagents no longer collide: Gemini -> .gemini/agents/, Codex -> .codex/agents/.
   const hasGemini = editors.includes('gemini');
   const hasCodex = editors.includes('codex');
-  const agentsCollision = hasGemini && hasCodex;
+  const skillsCollision = hasGemini && hasCodex;
 
-  if (agentsCollision) {
-    console.log('NOTE: Gemini + Codex both target .agents/ — installing shared-compatible files once.\n');
+  if (skillsCollision) {
+    console.log('NOTE: Gemini + Codex both target .agents/skills/ — installing shared-compatible skill files once.\n');
   }
 
-  // Deduplicate: when both collide, install .agents/ skills/subagents once via
-  // Codex (superset strip list), skip Gemini's .agents/ pass.
-  const effectiveEditors = agentsCollision
+  // For skills: when both collide, install .agents/skills/ once via Codex (superset strip list),
+  // skip Gemini's .agents/skills/ pass. Subagents always run per-editor (different dirs).
+  const effectiveSkillEditors = skillsCollision
     ? editors.filter(e => e !== 'gemini')
     : editors;
 
-  for (const editor of effectiveEditors) {
+  for (const editor of effectiveSkillEditors) {
     installForEditor(editor, scope, agents);
   }
 
@@ -626,15 +883,32 @@ function runInstall(editors, scope) {
     installHooks(editor, scope);
   }
 
-  // Subagent deployment
+  // Subagent deployment — each editor has its own target dir, no collision
   const subagentsDir = path.join(agentsDir, 'subagents');
   const subagents = discoverSubagents(subagentsDir);
+  const installedNames = new Set(subagents.map(s => s.name));
   if (subagents.length > 0) {
     console.log(`\nFound ${subagents.length} subagent(s): ${subagents.map(s => s.name).join(', ')}\n`);
-    for (const editor of effectiveEditors) {
-      if (editor === 'claude') installSubagentsClaude(subagents, scope);
-      else if (editor === 'gemini') installSubagentsGemini(subagents, scope);
-      else if (editor === 'codex') installSubagentsCodex(subagents, scope);
+    for (const editor of editors) {
+      if (editor === 'claude') {
+        installSubagentsClaude(subagents, scope);
+        const claudeAgentsDir = scope === 'local'
+          ? path.join(process.cwd(), '.claude', 'agents')
+          : path.join(os.homedir(), '.claude', 'agents');
+        pruneStaleSubagentFiles(claudeAgentsDir, installedNames);
+      } else if (editor === 'gemini') {
+        installSubagentsGemini(subagents, scope);
+        const geminiAgentsDir = scope === 'local'
+          ? path.join(process.cwd(), '.gemini', 'agents')
+          : path.join(os.homedir(), '.gemini', 'agents');
+        pruneStaleSubagentFiles(geminiAgentsDir, installedNames);
+      } else if (editor === 'codex') {
+        installSubagentsCodex(subagents, scope);
+        const codexAgentsDir = scope === 'local'
+          ? path.join(process.cwd(), '.codex', 'agents')
+          : path.join(os.homedir(), '.codex', 'agents');
+        pruneStaleSubagentFiles(codexAgentsDir, installedNames);
+      }
     }
   }
 

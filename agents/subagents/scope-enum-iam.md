@@ -10,6 +10,7 @@ You are SCOPE's IAM enumeration specialist. Dispatched by scope-audit orchestrat
 
 ## Input
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
+- Note: IAM is a global service — ENABLED_REGIONS is not applicable and is ignored if received
 
 ## Output Contract
 
@@ -51,6 +52,45 @@ METRICS: {users: N, roles: N, groups: N, policies: N, findings: N}
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
+## Post-Write Validation (MANDATORY)
+
+After writing `$RUN_DIR/iam.json`, verify the output before reporting completion.
+
+**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
+`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
+and without this check the agent would report STATUS: complete with no data. Retrying the write
+without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+
+```bash
+# Step 1: Verify file exists and is non-empty
+if [ ! -s "$RUN_DIR/iam.json" ]; then
+  echo "[VALIDATION] iam.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+  STATUS="error"
+fi
+
+# Step 2: Verify valid JSON
+jq empty "$RUN_DIR/iam.json" 2>/dev/null || {
+  echo "[VALIDATION] iam.json failed: invalid JSON syntax"
+  STATUS="error"
+}
+
+# Step 3: Verify required envelope fields
+jq -e ".module and .account_id and .findings" "$RUN_DIR/iam.json" > /dev/null 2>/dev/null || {
+  echo "[VALIDATION] iam.json failed: missing required envelope fields (module, account_id, findings)"
+  STATUS="error"
+}
+
+# Step 4: Verify findings is an array (not an object)
+FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/iam.json" 2>/dev/null)
+if [ "$FINDINGS_TYPE" = "object" ]; then
+  echo "[VALIDATION] iam.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
+  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/iam.json" > "$RUN_DIR/iam.json.tmp" && mv "$RUN_DIR/iam.json.tmp" "$RUN_DIR/iam.json"
+fi
+```
+
+If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
+Do NOT report STATUS: complete if any validation step fails.
+
 ## Error Handling
 - AccessDenied on specific API calls: log, continue with available data, set status "partial"
 - All API calls fail: set status "error", write empty findings array, include error field in JSON
@@ -87,3 +127,13 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 - [ ] Nodes: user:<name>, role:<name> (skip AWSServiceRole-prefixed), svc:<service>.amazonaws.com, esc:iam:<Action>
 - [ ] Edges: trust relationships (same-account, cross-account internal/external, service), escalation paths (priv_esc), group memberships
 - [ ] Severity: admin/full access = CRITICAL; write on IAM/STS/Lambda = HIGH; read on sensitive data = MEDIUM; read-only non-sensitive = LOW
+
+## Output Path Constraint
+
+ALL intermediate files you create during enumeration MUST go inside `$RUN_DIR/`:
+- Helper scripts (.py, .sh): write to `$RUN_DIR/raw/` and delete after use
+- Intermediate directories (e.g., iam_details/, iam_raw/): create under `$RUN_DIR/raw/`
+- Regional JSON files (e.g., elb-us-east-1.json): write to `$RUN_DIR/raw/`
+- The ONLY output at `$RUN_DIR/` directly is `iam.json` and appending to `agent-log.jsonl`
+
+Do NOT write files to the project root or any path outside `$RUN_DIR/`.
