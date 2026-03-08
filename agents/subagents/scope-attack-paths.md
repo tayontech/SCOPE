@@ -248,6 +248,14 @@ SUMMARY_JSON=$(jq -n \
 #   - Privilege escalation paths (priv_esc edges — principal -> escalation)
 #   - Data access findings (data_access edges — principal -> data store)
 #   - Service integrations (service edges — resource -> resource)
+#
+# DEDUPLICATION (REQUIRED before building GRAPH_JSON):
+# Nodes are built in Phase A (identity) and Phase B (analysis). The merge step
+# (step 4: pre-built iam.json graph) and the completeness enforcement loop can
+# both re-add nodes that are already in NODES_ARRAY. Deduplicate by node id
+# (keep first occurrence) and edges by source+target+edge_type before assembly:
+NODES_ARRAY=$(echo "$NODES_ARRAY" | jq 'unique_by(.id)')
+EDGES_ARRAY=$(echo "$EDGES_ARRAY" | jq 'unique_by([.source, .target, .edge_type])')
 GRAPH_JSON=$(jq -n --argjson nodes "$NODES_ARRAY" --argjson edges "$EDGES_ARRAY" '{nodes: $nodes, edges: $edges}')
 ```
 

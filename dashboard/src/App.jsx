@@ -238,6 +238,65 @@ function normalizeForDashboard(json, indexSource) {
     data.technical_recommendations = data.technical_remediation;
   }
 
+  // DASH-06: Deduplicate graph nodes and edges.
+  // scope-attack-paths builds nodes in two phases (Phase A: identity from raw IAM lists;
+  // Phase B: analysis nodes from attack path reasoning) and may also merge nodes from a
+  // pre-built graph in iam.json. Without explicit dedup, the same node id can appear
+  // multiple times, causing D3 to render duplicate SVG circles for the same resource.
+  // Dedup nodes by id (first occurrence wins — preserves Phase A identity data).
+  // Dedup edges by composite key source+"|"+target+"|"+edge_type (first occurrence wins).
+  if (data.graph) {
+    if (Array.isArray(data.graph.nodes)) {
+      const seenNodeIds = new Set();
+      data.graph.nodes = data.graph.nodes.filter((n) => {
+        if (!n.id || seenNodeIds.has(n.id)) return false;
+        seenNodeIds.add(n.id);
+        return true;
+      });
+    }
+    if (Array.isArray(data.graph.edges)) {
+      const seenEdgeKeys = new Set();
+      data.graph.edges = data.graph.edges.filter((e) => {
+        const key = `${e.source}|${e.target}|${e.edge_type ?? ""}`;
+        if (seenEdgeKeys.has(key)) return false;
+        seenEdgeKeys.add(key);
+        return true;
+      });
+    }
+  }
+
+  // Remove escalation nodes (permission actions like iam:CreatePolicyVersion) from the graph.
+  // These are dead-end leaf nodes that clutter the visualization. The escalation capability is
+  // preserved as metadata on the source principal's priv_esc edges are converted to self-annotations.
+  if (data.graph && Array.isArray(data.graph.nodes)) {
+    const escNodeIds = new Set(
+      data.graph.nodes.filter((n) => n.type === "escalation").map((n) => n.id)
+    );
+    if (escNodeIds.size > 0) {
+      // Collect escalation capabilities per source principal before removing edges
+      const escCapabilities = {};
+      if (Array.isArray(data.graph.edges)) {
+        data.graph.edges.forEach((e) => {
+          if (escNodeIds.has(e.target)) {
+            if (!escCapabilities[e.source]) escCapabilities[e.source] = [];
+            escCapabilities[e.source].push(e.label || e.target.replace("esc:", ""));
+          }
+        });
+      }
+      // Annotate source principals with their escalation capabilities
+      data.graph.nodes.forEach((n) => {
+        if (escCapabilities[n.id]) {
+          n.escalation_capabilities = escCapabilities[n.id];
+        }
+      });
+      // Filter out escalation nodes and edges pointing to them
+      data.graph.nodes = data.graph.nodes.filter((n) => n.type !== "escalation");
+      if (Array.isArray(data.graph.edges)) {
+        data.graph.edges = data.graph.edges.filter((e) => !escNodeIds.has(e.target) && !escNodeIds.has(e.source));
+      }
+    }
+  }
+
   // Propagate run status from _run_status field (set by generate-report.js for inline HTML)
   // Absent/undefined = "complete" — backward compat with old runs that predate status support
   data.runStatus = data._run_status || "complete";
