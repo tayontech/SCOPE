@@ -1,123 +1,115 @@
-# SCOPE
+# SCOPE: Security Cloud Ops Purple Engagement
 
-**AI-powered purple team toolkit for AWS — runs inside Claude Code, Gemini CLI, and Codex.**
+[![GitHub stars](https://img.shields.io/github/stars/tayontech/SCOPE?style=social)](https://github.com/tayontech/SCOPE/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/tayontech/SCOPE?style=social)](https://github.com/tayontech/SCOPE/network/members)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/tayontech/SCOPE/blob/main/LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/tayontech/SCOPE)](https://github.com/tayontech/SCOPE/commits/main)
 
-SCOPE runs the full security operations loop: enumerate your AWS account, map attack paths, generate defensive controls, and investigate alerts. The AI reasons about what it finds — it doesn't just run scripts.
+*One framework. Full purple team loop. From enumeration to defense.*
 
-![Attack Graph](docs/images/dashboard-attack-graph.png)
+Most AWS security assessments are manual, fragmented, and slow. Enumeration scripts dump raw output that someone has to stitch together. Findings live in spreadsheets. Attack paths exist only in the assessor's head. Defensive recommendations are generic and disconnected from what was actually found.
 
-![Defensive Controls](docs/images/dashboard-defend-policies.png)
-
-![Attack Paths](docs/images/dashboard-attack-paths.png)
-
-## Prerequisites
-
-- Node.js
-- AWS credentials configured in your environment
-- One of: [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [Codex](https://github.com/openai/codex)
-
-## Installation
-
-```bash
-git clone https://github.com/tayontech/SCOPE.git
-cd SCOPE
-node bin/install.js --claude   # install for Claude Code
-node bin/install.js --gemini   # install for Gemini CLI
-node bin/install.js --codex    # install for Codex
-node bin/install.js --all      # install for all platforms
-```
-
-## AWS Credentials
-
-SCOPE inherits credentials from your shell environment — no custom credential loading. Use a **read-only IAM role** for audit, defend, and investigate.
-
-```bash
-export AWS_PROFILE=my-security-readonly-profile
-# then launch your editor
-/scope:audit --all
-```
-
-## Configuration (Optional)
-
-- **`config/accounts.json`** — Owned AWS account IDs. Helps distinguish internal vs external cross-account trusts. Copy `config/accounts.example.json` and fill in your account IDs.
-- **`config/scps/*.json`** — Pre-loaded SCPs for when the caller lacks Organizations API access.
+**SCOPE changes that.** It's an agentic AI framework that runs the full purple team loop: enumerate AWS resources, reason about attack paths, generate exploit playbooks, produce targeted defensive controls, and investigate alerts.
 
 ## How It Works
 
-When you run `/scope:audit --all`, the pipeline flows through four gates:
+SCOPE runs as a set of AI agents inside [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [Codex CLI](https://github.com/openai/codex). One command kicks off the full pipeline:
 
 ```
-Gate 1 — Credential Check
-  sts:GetCallerIdentity → verify AWS access, resolve account ID and caller identity
-
-Gate 2 — Parallel Enumeration
-  Dispatches subagents in parallel across services:
-  IAM · STS · S3 · KMS · EC2 · Lambda · Secrets Manager · SNS · SQS · RDS · API Gateway · CodeBuild
-  Each subagent scans all enabled regions, writes structured JSON to the run directory
-
-Gate 3 — Attack Path Analysis
-  Reads all module outputs, reasons about cross-service attack chains:
-  privilege escalation · trust misconfigurations · data exposure · credential risk
-  excessive permissions · network exposure · persistence · lateral movement · post-exploitation
-
-Gate 4 — Operator Review
-  Presents findings summary → you approve, skip, or stop
-  If approved: generates findings report, exports to dashboard, auto-chains defend
+/scope:audit --all
 ```
 
-Defend then reads the audit output and generates SCPs, RCPs, Splunk detections, and remediation bundles. The full pipeline runs in a single session — audit through defensive controls — with operator approval at each gate.
+The orchestrator dispatches parallel enumeration agents across AWS services, feeds findings into an attack path reasoning engine, auto-chains defensive control generation, and renders everything into an interactive dashboard. No manual handoffs.
 
-## Usage
+| Phase | What Happens |
+|-------|-------------|
+| **Audit** | 12 parallel agents enumerate IAM, S3, Lambda, EC2, KMS, Secrets Manager, STS, RDS, API Gateway, SNS, SQS, CodeBuild |
+| **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
+| **Defend** | Generates SCPs, resource control policies, SPL detections, and prioritized remediation, mapped to what was found |
+| **Exploit** | Produces ready-to-execute playbooks for specific principals (red team use) |
+| **Investigate** | Guides SOC analysts through CloudTrail-based alert triage in Splunk |
 
-### 1. Run an audit
+## Quick Start
 
-From inside Claude Code, Gemini CLI, or Codex:
+```bash
+# Clone and install
+git clone https://github.com/tayontech/SCOPE.git
+cd SCOPE
+node bin/install.js
 
-```
-/scope:audit --all                    # Full account audit (all services)
-/scope:audit iam s3 kms               # Specific services
-/scope:audit arn:aws:iam::123456789012:user/alice   # Specific principal
-```
+# Configure AWS credentials (any standard method)
+export AWS_PROFILE=your-profile
 
-The audit orchestrator will:
-- Enumerate resources across IAM, STS, S3, KMS, EC2, Lambda, Secrets Manager, and more
-- Pause at operator gates for your approval before proceeding
-- Map attack paths across 9 categories (privilege escalation, trust misconfigurations, data exposure, etc.)
-- Auto-generate defensive controls (SCPs, Splunk detections) after the audit completes
-- Produce an interactive dashboard — open `dashboard/dashboard.html` in any browser
+# Run a full audit
+/scope:audit --all
 
-### 2. Generate exploit playbooks
+# Or target specific services
+/scope:audit iam s3 lambda
 
-```
-/scope:exploit arn:aws:iam::123456789012:user/alice
-```
+# Generate exploit playbooks for a principal
+/scope:exploit arn:aws:iam::123456789012:role/target-role
 
-Takes a principal ARN and produces a red team playbook: escalation paths with CLI commands, persistence techniques, and exfiltration vectors. Read-only — generates the playbook but does not execute anything.
-
-### 3. Investigate alerts
-
-```
+# Investigate a SOC alert
 /scope:investigate
 ```
 
-Guides you through CloudTrail-based alert investigation in Splunk. Works in two modes:
-- **Connected** — Splunk MCP available, queries execute directly after your approval
-- **Manual** — No MCP, displays SPL for you to run in Splunk and paste results back
+> **Requirements:** AWS CLI configured with read-only credentials. Node.js for tooling. Claude Code, Gemini CLI, or Codex CLI as the runtime.
 
-### 4. View the dashboard
+## Architecture
 
-```bash
-cd dashboard && npm install && npm run dashboard
+```
+agents/               Core agents: audit orchestrator, defend, exploit, investigate
+agents/subagents/     12 enumeration agents, attack path reasoning, verification, data pipeline
+dashboard/            React + D3 interactive dashboard (self-contained HTML output)
+.scope/hooks/         Lifecycle hooks: safety guard, SPL lint, schema validation
+.scope/schemas/       JSON Schema definitions for structured output
+bin/                  Tooling: installer, report generator
+config/               Optional account config and pre-loaded SCPs
 ```
 
-Opens `dashboard/dashboard.html` in any browser — no server required. Shows attack graphs, path details, defensive controls, and Splunk detections from your latest runs.
+### Safety by Default
 
-> **Codex users:** Use dollar-sign prefix with hyphens: `$scope-audit`, `$scope-exploit`, etc.
+SCOPE agents are **read-only**. A lifecycle hook blocks every destructive AWS API call before it executes. Exploit generates playbooks with write commands but never runs them. Execution requires explicit human approval per-step.
 
-## Safety
+| Hook | Purpose |
+|------|---------|
+| Safety Guard | Blocks destructive AWS operations at the shell level |
+| SPL Lint | Hard-fails on Splunk query anti-patterns |
+| Schema Validate | Enforces structured output on all results |
+| Artifact Check | Verifies mandatory outputs before agent completion |
 
-SCOPE is **read-only by default**. Lifecycle hooks block destructive AWS operations at the tool level. Before any write operation, SCOPE shows an approval block with the action, target resources, and risk level — then waits for your explicit Y/N. Approvals are per-step, never batched.
+## Dashboard
 
-## License
+Agents produce structured JSON that feeds into an interactive React + D3 dashboard. One command generates a self-contained HTML file. No server required.
 
-MIT
+The dashboard visualizes trust relationships, attack paths, privilege escalation chains, and defensive control mappings across your entire AWS account.
+
+## Multi-Platform
+
+SCOPE runs on three AI coding platforms with the same agent definitions:
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Claude Code** | Full support | Lifecycle hooks, model routing, memory |
+| **Gemini CLI** | Full support | Hooks via settings templates |
+| **Codex CLI** | Supported | Safety enforced via AGENTS.md (no hook support) |
+
+## Documentation
+
+| | |
+|---|---|
+| [CLAUDE.md](https://github.com/tayontech/SCOPE/blob/main/CLAUDE.md) | Full technical reference: agents, hooks, data layer, error handling |
+| [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
+| [Hooks](https://github.com/tayontech/SCOPE/tree/main/.scope/hooks) | Safety and validation hook reference |
+| [Schemas](https://github.com/tayontech/SCOPE/tree/main/.scope/schemas) | JSON Schema definitions for audit, defend, exploit output |
+
+## Community
+
+- [Issues](https://github.com/tayontech/SCOPE/issues) Bugs and feature requests
+- [Pull Requests](https://github.com/tayontech/SCOPE/pulls) Contributions welcome
+
+---
+
+Created by **Tayvion Payton**
+
+*Enumerate. Reason. Defend. One command, full loop.*
