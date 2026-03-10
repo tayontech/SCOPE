@@ -277,8 +277,24 @@ On Claude Code: Use the Agent tool to dispatch each subagent defined in
 agents/subagents/scope-enum-{service}.md (installed to .claude/agents/).
 Dispatch ALL subagents concurrently in the same response — they run in parallel.
 
-On Gemini CLI: Delegate to enumeration subagents in .agents/agents/.
-Dispatch all concurrently using native subagent delegation.
+On Gemini CLI: Delegate to enumeration subagents in .gemini/agents/
+(e.g., scope-enum-iam, scope-enum-s3, etc.) using native subagent delegation.
+Each subagent MUST receive the ENABLED_REGIONS value in its dispatch message —
+subagents must parse this from the message and set it as a shell variable
+before enumeration. Do NOT fall back to a generalist agent — always use the
+named scope-enum-* agent files.
+
+**Wave-based dispatch (Gemini CLI only):** Do NOT dispatch all 12 subagents at once.
+The three heaviest agents run solo to guarantee full resources. Everything else runs
+concurrently in a final wave:
+
+  Wave 1: scope-enum-iam (solo — deepest per-entity API calls)
+  Wave 2 (after Wave 1 completes): scope-enum-ec2 (solo — 17 regions × 5 resource types)
+  Wave 3 (after Wave 2 completes): scope-enum-s3 (solo — per-bucket deep checks)
+  Wave 4 (after Wave 3 completes): scope-enum-sts, scope-enum-kms, scope-enum-secrets, scope-enum-lambda, scope-enum-rds, scope-enum-sns, scope-enum-sqs, scope-enum-apigateway, scope-enum-codebuild (all 9 concurrently)
+
+Wait for each wave to finish before dispatching the next wave.
+Collect return summaries from each wave as they complete.
 
 On Codex: Dispatch all enumeration subagents in parallel using the registered Codex agent
 roles from .codex/config.toml (e.g., scope-enum-iam, scope-enum-s3, etc.). With
@@ -415,9 +431,9 @@ Wait for operator approval. If operator says "skip", jump to findings.md generat
 </gate_3_enumeration_summary>
 
 <module_validation>
-## Module JSON Validation (Inline Post-Check)
+## Module JSON Validation (Node Script Post-Check)
 
-After all enumeration subagents complete and before presenting Gate 3, validate each module JSON file in $RUN_DIR/. This catches schema violations in module output that bypasses the Write tool hook (subagents write via Bash redirect).
+After all enumeration subagents complete and before presenting Gate 3, validate each module JSON file in $RUN_DIR/ using `bin/validate-enum-output.js`. This performs full per-service schema validation (envelope fields, per-resource required fields, trust entries, sort order) using a single source of truth.
 
 This check is NON-BLOCKING — log warnings, do not abort the run. Invalid module data degrades attack-paths quality but partial data is better than no data.
 
@@ -438,26 +454,23 @@ for MODULE_FILE in "$RUN_DIR"/*.json; do
   MODULE=$(jq -r '.module // empty' "$MODULE_FILE" 2>/dev/null)
   [ -z "$MODULE" ] && continue
 
-  # Validate status enum
-  STATUS=$(jq -r '.status // empty' "$MODULE_FILE" 2>/dev/null)
-  case "$STATUS" in
-    complete|partial|error) ;;
-    "") VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing required field 'status'") ;;
-    *) VALIDATION_WARNINGS+=("[WARN] $BASENAME: invalid status '$STATUS' (expected: complete|partial|error)") ;;
-  esac
+  # Run full schema validation via node script
+  if command -v node >/dev/null 2>&1; then
+    OUTPUT=$(node bin/validate-enum-output.js "$MODULE_FILE" 2>&1)
+    EXIT_CODE=$?
 
-  # Validate findings is an array
-  FINDINGS_TYPE=$(jq -r '.findings | type' "$MODULE_FILE" 2>/dev/null || echo "null")
-  if [ "$FINDINGS_TYPE" != "array" ]; then
-    VALIDATION_WARNINGS+=("[WARN] $BASENAME: findings is $FINDINGS_TYPE, expected array")
-  fi
-
-  # Validate required fields exist
-  for FIELD in account_id region timestamp; do
-    if [ "$(jq "has(\"$FIELD\")" "$MODULE_FILE" 2>/dev/null)" != "true" ]; then
-      VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing required field '$FIELD'")
+    if [ $EXIT_CODE -eq 1 ]; then
+      # Validation errors -- collect as warnings (non-blocking)
+      while IFS= read -r line; do
+        VALIDATION_WARNINGS+=("[WARN] $line")
+      done <<< "$OUTPUT"
+    elif [ $EXIT_CODE -eq 2 ]; then
+      VALIDATION_WARNINGS+=("[WARN] $BASENAME: validator could not process file")
     fi
-  done
+    # EXIT_CODE 0 = pass, no action needed
+  else
+    VALIDATION_WARNINGS+=("[WARN] node not available -- skipping schema validation for $BASENAME")
+  fi
 done
 
 # Display warnings at Gate 3 if any

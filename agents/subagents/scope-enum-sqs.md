@@ -17,6 +17,132 @@ You are SCOPE's SQS enumeration specialist. You are dispatched by the scope-audi
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-sqs: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Extraction Templates
+
+### Trust Classification Shared Snippet
+
+This jq snippet is used by all trust-bearing agents. It classifies AWS policy principals into canonical trust_entry objects per _base.schema.json.
+
+```bash
+# Trust classification jq definitions — include in jq invocations via variable
+TRUST_CLASSIFY_JQ='
+def classify_principal:
+  if . == "*" then
+    {principal: "*", trust_type: "wildcard", is_wildcard: true}
+  elif . == "arn:aws:iam::*:root" then
+    {principal: ., trust_type: "wildcard", is_wildcard: true}
+  elif test("^arn:aws:iam::[0-9]+:root$") then
+    (if test("^arn:aws:iam::" + $account_id + ":root$") then
+      {principal: ., trust_type: "same-account", is_wildcard: false}
+    else
+      {principal: ., trust_type: "cross-account", is_wildcard: false}
+    end)
+  elif test("\\.amazonaws\\.com$") then
+    {principal: ., trust_type: "service", is_wildcard: false}
+  elif test("^arn:aws:iam::[0-9]+:") then
+    (if test("^arn:aws:iam::" + $account_id + ":") then
+      {principal: ., trust_type: "same-account", is_wildcard: false}
+    else
+      {principal: ., trust_type: "cross-account", is_wildcard: false}
+    end)
+  elif test("^arn:aws:iam::.*:saml-provider/|^arn:aws:iam::.*:oidc-provider/|cognito-identity\\.amazonaws\\.com") then
+    {principal: ., trust_type: "federated", is_wildcard: false}
+  else
+    {principal: ., trust_type: "same-account", is_wildcard: false}
+  end;
+
+def normalize_principals:
+  if type == "string" then [.]
+  elif type == "object" then
+    [(.AWS // empty | if type == "string" then [.] else . end | .[]),
+     (.Service // empty | if type == "string" then [.] else . end | .[]),
+     (.Federated // empty | if type == "string" then [.] else . end | .[])]
+  else []
+  end;
+
+def derive_risk:
+  if .trust_type == "wildcard" then "critical"
+  elif .trust_type == "cross-account" then
+    (if .has_external_id and .has_mfa_condition then "low"
+     elif .has_external_id then "medium"
+     else "high" end)
+  elif .trust_type == "federated" then
+    (if .has_mfa_condition then "low" else "medium" end)
+  elif .trust_type == "service" then "low"
+  elif .trust_type == "same-account" then "low"
+  else "medium"
+  end;
+'
+```
+
+### sqs_queue (from list-queues + get-queue-attributes, per region)
+
+```bash
+QUEUE_FINDINGS=$(echo "$QUEUE_ATTRS" | jq --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  --arg queue_url "$QUEUE_URL" \
+  "$TRUST_CLASSIFY_JQ"'
+  .Attributes as $attrs |
+  ($attrs.Policy // "{}" | fromjson) as $policy |
+  [($policy.Statement // [])[] |
+    select(.Effect == "Allow") |
+    .Principal | normalize_principals | .[] | classify_principal
+  ] as $raw_principals |
+  ($policy.Statement // []) as $stmts |
+  ($raw_principals | unique_by(.principal)) as $unique_principals |
+  [$unique_principals[] |
+    . + {
+      has_external_id: ([($stmts[] | select(.Effect == "Allow") | .Condition.StringEquals["sts:ExternalId"] // empty)] | length > 0),
+      has_mfa_condition: ([($stmts[] | select(.Effect == "Allow") | .Condition.Bool["aws:MultiFactorAuthPresent"] // empty)] | length > 0)
+    } |
+    . + {risk: (. | derive_risk)}
+  ] as $principals |
+  {
+    resource_type: "sqs_queue",
+    resource_id: ($attrs.QueueArn | split(":") | last),
+    arn: $attrs.QueueArn,
+    region: $region,
+    resource_policy_principals: $principals,
+    fifo: (($attrs.FifoQueue // "false") == "true"),
+    has_dlq: ($attrs.RedrivePolicy != null and $attrs.RedrivePolicy != ""),
+    kms_key_id: ($attrs.KmsMasterKeyId // ""),
+    visibility_timeout: (($attrs.VisibilityTimeout // "30") | tonumber),
+    findings: []
+  }
+' 2>/dev/null) || { echo "[ERROR] jq extraction failed for sqs_queue in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for list-queues or get-queue-attributes: `QUEUE_FINDINGS="[]"`
+
+### Regional Iteration
+
+```bash
+ALL_FINDINGS="[]"
+for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  QUEUES=$(aws sqs list-queues --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sqs:ListQueues AccessDenied $CURRENT_REGION"); continue; }
+  for QUEUE_URL in $(echo "$QUEUES" | jq -r '.QueueUrls[]? // empty'); do
+    QUEUE_ATTRS=$(aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names All --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sqs:GetQueueAttributes AccessDenied $QUEUE_URL"); continue; }
+    # Run sqs_queue extraction template above
+    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$QUEUE_FINDINGS]" '. + $new')
+  done
+done
+```
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`sqs list-queues`, `sqs get-queue-attributes --attribute-names All` per queue) per region, store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/sqs.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/sqs.json`
+
 ## Output Contract
 
 **Write this file:** `$RUN_DIR/sqs.json`
@@ -62,37 +188,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/sqs.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/sqs.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/sqs.json" ]; then
-  echo "[VALIDATION] sqs.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/sqs.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] sqs.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/sqs.json" 2>/dev/null || {
-  echo "[VALIDATION] sqs.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/sqs.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] sqs.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/sqs.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] sqs.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/sqs.json" > "$RUN_DIR/sqs.json.tmp" && mv "$RUN_DIR/sqs.json.tmp" "$RUN_DIR/sqs.json"
 fi
 ```
 
@@ -101,9 +204,11 @@ Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
-- AccessDenied on specific API calls: log the error, continue with available data, set status to "partial"
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
 - All API calls fail: set status to "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["sqs:ListQueues AccessDenied us-east-1"]`)
 
 ## Module Constraints
 

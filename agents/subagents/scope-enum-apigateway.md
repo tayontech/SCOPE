@@ -17,6 +17,207 @@ You are SCOPE's API Gateway enumeration specialist. You are dispatched by the sc
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-apigateway: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Extraction Templates
+
+### Trust Classification Shared Snippet
+
+This jq snippet is used by all trust-bearing agents. It classifies AWS policy principals into canonical trust_entry objects per _base.schema.json.
+
+```bash
+# Trust classification jq definitions — include in jq invocations via variable
+TRUST_CLASSIFY_JQ='
+def classify_principal:
+  if . == "*" then
+    {principal: "*", trust_type: "wildcard", is_wildcard: true}
+  elif . == "arn:aws:iam::*:root" then
+    {principal: ., trust_type: "wildcard", is_wildcard: true}
+  elif test("^arn:aws:iam::[0-9]+:root$") then
+    (if test("^arn:aws:iam::" + $account_id + ":root$") then
+      {principal: ., trust_type: "same-account", is_wildcard: false}
+    else
+      {principal: ., trust_type: "cross-account", is_wildcard: false}
+    end)
+  elif test("\\.amazonaws\\.com$") then
+    {principal: ., trust_type: "service", is_wildcard: false}
+  elif test("^arn:aws:iam::[0-9]+:") then
+    (if test("^arn:aws:iam::" + $account_id + ":") then
+      {principal: ., trust_type: "same-account", is_wildcard: false}
+    else
+      {principal: ., trust_type: "cross-account", is_wildcard: false}
+    end)
+  elif test("^arn:aws:iam::.*:saml-provider/|^arn:aws:iam::.*:oidc-provider/|cognito-identity\\.amazonaws\\.com") then
+    {principal: ., trust_type: "federated", is_wildcard: false}
+  else
+    {principal: ., trust_type: "same-account", is_wildcard: false}
+  end;
+
+def normalize_principals:
+  if type == "string" then [.]
+  elif type == "object" then
+    [(.AWS // empty | if type == "string" then [.] else . end | .[]),
+     (.Service // empty | if type == "string" then [.] else . end | .[]),
+     (.Federated // empty | if type == "string" then [.] else . end | .[])]
+  else []
+  end;
+
+def derive_risk:
+  if .trust_type == "wildcard" then "critical"
+  elif .trust_type == "cross-account" then
+    (if .has_external_id and .has_mfa_condition then "low"
+     elif .has_external_id then "medium"
+     else "high" end)
+  elif .trust_type == "federated" then
+    (if .has_mfa_condition then "low" else "medium" end)
+  elif .trust_type == "service" then "low"
+  elif .trust_type == "same-account" then "low"
+  else "medium"
+  end;
+'
+```
+
+### apigateway_api — REST API (from get-rest-apis + get-authorizers + get-stages, per region)
+
+```bash
+REST_API_FINDINGS=$(echo "$REST_API_POLICY" | jq \
+  --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  --arg api_id "$REST_API_ID" \
+  --arg api_name "$REST_API_NAME" \
+  --arg api_arn "arn:aws:apigateway:${CURRENT_REGION}::/restapis/${REST_API_ID}" \
+  --argjson has_authorizer "$REST_HAS_AUTHORIZER" \
+  --argjson stages "$REST_STAGES_JSON" \
+  --argjson lambda_integrations "$REST_LAMBDA_INTEGRATIONS_JSON" \
+  "$TRUST_CLASSIFY_JQ"'
+  (. // "{}" | if type == "string" then fromjson else . end) as $policy |
+  [($policy.Statement // [])[] |
+    select(.Effect == "Allow") |
+    .Principal | normalize_principals | .[] | classify_principal
+  ] as $raw_principals |
+  ($policy.Statement // []) as $stmts |
+  ($raw_principals | unique_by(.principal)) as $unique_principals |
+  [$unique_principals[] |
+    . + {
+      has_external_id: ([($stmts[] | select(.Effect == "Allow") | .Condition.StringEquals["sts:ExternalId"] // empty)] | length > 0),
+      has_mfa_condition: ([($stmts[] | select(.Effect == "Allow") | .Condition.Bool["aws:MultiFactorAuthPresent"] // empty)] | length > 0)
+    } |
+    . + {risk: (. | derive_risk)}
+  ] as $principals |
+  {
+    resource_type: "apigateway_api",
+    resource_id: $api_id,
+    arn: $api_arn,
+    region: $region,
+    api_name: $api_name,
+    api_type: "rest",
+    has_authorizer: $has_authorizer,
+    resource_policy_principals: $principals,
+    stages: $stages,
+    lambda_integrations: $lambda_integrations,
+    findings: []
+  }
+' 2>/dev/null) || { echo "[ERROR] jq extraction failed for REST API $REST_API_ID in $CURRENT_REGION"; STATUS="error"; }
+```
+
+### apigateway_api — HTTP/WebSocket API (from get-apis + get-authorizers, per region)
+
+```bash
+V2_API_FINDINGS=$(jq -n \
+  --arg region "$CURRENT_REGION" \
+  --arg api_id "$V2_API_ID" \
+  --arg api_name "$V2_API_NAME" \
+  --arg api_type "$V2_API_TYPE" \
+  --arg api_arn "arn:aws:apigateway:${CURRENT_REGION}::/apis/${V2_API_ID}" \
+  --argjson has_authorizer "$V2_HAS_AUTHORIZER" \
+  --argjson stages "$V2_STAGES_JSON" \
+  --argjson lambda_integrations "$V2_LAMBDA_INTEGRATIONS_JSON" \
+  '{
+    resource_type: "apigateway_api",
+    resource_id: $api_id,
+    arn: $api_arn,
+    region: $region,
+    api_name: $api_name,
+    api_type: $api_type,
+    has_authorizer: $has_authorizer,
+    resource_policy_principals: [],
+    stages: $stages,
+    lambda_integrations: $lambda_integrations,
+    findings: []
+  }
+' 2>/dev/null) || { echo "[ERROR] jq extraction failed for HTTP/WebSocket API $V2_API_ID in $CURRENT_REGION"; STATUS="error"; }
+```
+
+HTTP and WebSocket APIs do not support resource policies -- `resource_policy_principals` is always an empty array.
+
+### Regional Iteration
+
+```bash
+ALL_FINDINGS="[]"
+ERRORS=()
+for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  # REST APIs (apigateway v1)
+  REST_APIS=$(aws apigateway get-rest-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigateway:GetRestApis AccessDenied $CURRENT_REGION"); REST_APIS='{"items":[]}'; }
+  for REST_API_ID in $(echo "$REST_APIS" | jq -r '.items[]?.id // empty'); do
+    REST_API_NAME=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .name')
+    REST_API_POLICY=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .policy // "{}"')
+    # URL-decode the policy if needed (REST API policies are URL-encoded)
+    REST_API_POLICY=$(printf '%b' "${REST_API_POLICY//%/\\x}" 2>/dev/null || echo "$REST_API_POLICY")
+
+    # Get authorizers
+    AUTHORIZERS=$(aws apigateway get-authorizers --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+    REST_HAS_AUTHORIZER=$(echo "$AUTHORIZERS" | jq '(.items // []) | length > 0' 2>/dev/null || echo "false")
+
+    # Get stages
+    STAGES=$(aws apigateway get-stages --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+    REST_STAGES_JSON=$(echo "$STAGES" | jq '[.item[]?.stageName // empty]' 2>/dev/null || echo "[]")
+
+    # Get Lambda integrations (check resources for LAMBDA/AWS_PROXY integration type)
+    RESOURCES=$(aws apigateway get-resources --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+    REST_LAMBDA_INTEGRATIONS_JSON=$(echo "$RESOURCES" | jq '[.items[]?.resourceMethods // {} | to_entries[]? | .value.methodIntegration // {} | select(.type == "AWS_PROXY" or .type == "LAMBDA") | .uri // empty | capture("functions/(?<name>[^/]+)/") | .name] | unique' 2>/dev/null || echo "[]")
+
+    # Run REST API extraction template above
+    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$REST_API_FINDINGS]" '. + $new')
+  done
+
+  # HTTP and WebSocket APIs (apigatewayv2)
+  V2_APIS=$(aws apigatewayv2 get-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigatewayv2:GetApis AccessDenied $CURRENT_REGION"); V2_APIS='{"Items":[]}'; }
+  for V2_API_ID in $(echo "$V2_APIS" | jq -r '.Items[]?.ApiId // empty'); do
+    V2_API_NAME=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .Name')
+    V2_PROTOCOL=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .ProtocolType')
+    V2_API_TYPE=$(echo "$V2_PROTOCOL" | tr '[:upper:]' '[:lower:]')
+
+    # Get authorizers
+    V2_AUTHORIZERS=$(aws apigatewayv2 get-authorizers --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+    V2_HAS_AUTHORIZER=$(echo "$V2_AUTHORIZERS" | jq '(.Items // []) | length > 0' 2>/dev/null || echo "false")
+
+    # Get stages
+    V2_STAGES_RAW=$(aws apigatewayv2 get-stages --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+    V2_STAGES_JSON=$(echo "$V2_STAGES_RAW" | jq '[.Items[]?.StageName // empty]' 2>/dev/null || echo "[]")
+
+    # Get Lambda integrations
+    V2_INTEGRATIONS=$(aws apigatewayv2 get-integrations --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+    V2_LAMBDA_INTEGRATIONS_JSON=$(echo "$V2_INTEGRATIONS" | jq '[.Items[]? | select(.IntegrationType == "AWS_PROXY") | .IntegrationUri // empty | capture("functions/(?<name>[^/]+)") | .name] | unique' 2>/dev/null || echo "[]")
+
+    # Run HTTP/WebSocket API extraction template above
+    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$V2_API_FINDINGS]" '. + $new')
+  done
+done
+```
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`apigateway get-rest-apis`, `apigatewayv2 get-apis`, per-API: `get-authorizers`, `get-stages`, `get-resources`) per region, store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for REST API resource policies
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/apigateway.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/apigateway.json`
+
 ## Output Contract
 
 **Write this file:** `$RUN_DIR/apigateway.json`
@@ -50,7 +251,7 @@ jq -n \
   >> "$RUN_DIR/agent-log.jsonl"
 ```
 
-**Return to orchestrator (minimal summary only — do NOT return raw data):**
+**Return to orchestrator (minimal summary only -- do NOT return raw data):**
 ```
 STATUS: complete|partial|error
 FILE: $RUN_DIR/apigateway.json
@@ -62,37 +263,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/apigateway.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/apigateway.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/apigateway.json" ]; then
-  echo "[VALIDATION] apigateway.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/apigateway.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] apigateway.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/apigateway.json" 2>/dev/null || {
-  echo "[VALIDATION] apigateway.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/apigateway.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] apigateway.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/apigateway.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] apigateway.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/apigateway.json" > "$RUN_DIR/apigateway.json.tmp" && mv "$RUN_DIR/apigateway.json.tmp" "$RUN_DIR/apigateway.json"
 fi
 ```
 
@@ -101,9 +279,11 @@ Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
-- AccessDenied on specific API calls: log the error, continue with available data, set status to "partial"
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
 - All API calls fail: set status to "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["apigateway:GetRestApis AccessDenied us-east-1"]`)
 
 ## Module Constraints
 
@@ -128,18 +308,18 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 - [ ] Lambda integrations per API: identify which Lambda functions each API invokes (integration type `LAMBDA` or `AWS_PROXY`)
 
 ### Per-Resource Checks
-- [ ] Flag REST APIs with no authorizer on any method — CRITICAL (unauthenticated public invocation)
-- [ ] Flag HTTP/WebSocket APIs with no authorizer — CRITICAL
-- [ ] Flag APIs with resource policy containing `Principal: "*"` without IP conditions — HIGH
-- [ ] Flag stages with logging disabled (`executionLoggingEnabled: false`) — blind spot for CloudTrail-based detection
-- [ ] Flag stages with no throttling configured (`throttlingBurstLimit` and `throttlingRateLimit` absent) — DoS amplification risk
-- [ ] Note Lambda integrations: API Gateway → Lambda function (code execution path for unauthenticated callers if no authorizer)
-- [ ] Flag API key authentication only (API keys are not cryptographically secure auth — shared key rotation risk)
+- [ ] Flag REST APIs with no authorizer on any method -- CRITICAL (unauthenticated public invocation)
+- [ ] Flag HTTP/WebSocket APIs with no authorizer -- CRITICAL
+- [ ] Flag APIs with resource policy containing `Principal: "*"` without IP conditions -- HIGH
+- [ ] Flag stages with logging disabled (`executionLoggingEnabled: false`) -- blind spot for CloudTrail-based detection
+- [ ] Flag stages with no throttling configured (`throttlingBurstLimit` and `throttlingRateLimit` absent) -- DoS amplification risk
+- [ ] Note Lambda integrations: API Gateway -> Lambda function (code execution path for unauthenticated callers if no authorizer)
+- [ ] Flag API key authentication only (API keys are not cryptographically secure auth -- shared key rotation risk)
 
 ### Graph Data
 - [ ] Nodes: `{id: "data:apigateway:API_ID", label: "API_NAME", type: "data"}` for each API
-- [ ] Edges: API Gateway node → Lambda function node for each Lambda integration (`edge_type: "data_access"`, `access_level: "write"`, `label: "invokes"`)
-- [ ] Edges: External/public → API Gateway node when resource policy has `Principal: "*"` (`edge_type: "data_access"`, `trust_type: "public"`)
+- [ ] Edges: API Gateway node -> Lambda function node for each Lambda integration (`edge_type: "data_access"`, `access_level: "write"`, `label: "invokes"`)
+- [ ] Edges: External/public -> API Gateway node when resource policy has `Principal: "*"` (`edge_type: "data_access"`, `trust_type: "public"`)
 
 ## Output Path Constraint
 

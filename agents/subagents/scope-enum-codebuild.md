@@ -17,6 +17,62 @@ You are SCOPE's CodeBuild enumeration specialist. You are dispatched by the scop
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-codebuild: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Extraction Templates
+
+### codebuild_project (from list-projects + batch-get-projects, per region)
+
+```bash
+PROJECT_FINDINGS=$(echo "$PROJECTS_DATA" | jq --arg region "$CURRENT_REGION" '[
+  .projects[] | {
+    resource_type: "codebuild_project",
+    resource_id: .name,
+    arn: .arn,
+    region: $region,
+    service_role_arn: .serviceRole,
+    source_type: .source.type,
+    has_vpc_config: (.vpcConfig != null and .vpcConfig != {}),
+    env_var_secret_names: [
+      .environment.environmentVariables[]? |
+      select(.name | test("PASSWORD|SECRET|KEY|TOKEN|DB_|ACCESS_KEY|PRIVATE"; "i")) |
+      .name
+    ],
+    findings: []
+  }
+]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for codebuild_project in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for list-projects or batch-get-projects: `PROJECT_FINDINGS="[]"`
+
+### Regional Iteration
+
+```bash
+ALL_FINDINGS="[]"
+for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  PROJECT_LIST=$(aws codebuild list-projects --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("codebuild:ListProjects AccessDenied $CURRENT_REGION"); continue; }
+  PROJECT_NAMES=$(echo "$PROJECT_LIST" | jq -r '.projects[]?' 2>/dev/null)
+  if [ -n "$PROJECT_NAMES" ]; then
+    PROJECTS_DATA=$(aws codebuild batch-get-projects --names $PROJECT_NAMES --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("codebuild:BatchGetProjects AccessDenied $CURRENT_REGION"); continue; }
+    # Run codebuild_project extraction template above
+    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "$PROJECT_FINDINGS" '. + $new')
+  fi
+done
+```
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`codebuild list-projects`, `codebuild batch-get-projects`) per region, store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/codebuild.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/codebuild.json`
+
 ## Output Contract
 
 **Write this file:** `$RUN_DIR/codebuild.json`
@@ -62,37 +118,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/codebuild.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/codebuild.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/codebuild.json" ]; then
-  echo "[VALIDATION] codebuild.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/codebuild.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] codebuild.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/codebuild.json" 2>/dev/null || {
-  echo "[VALIDATION] codebuild.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/codebuild.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] codebuild.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/codebuild.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] codebuild.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/codebuild.json" > "$RUN_DIR/codebuild.json.tmp" && mv "$RUN_DIR/codebuild.json.tmp" "$RUN_DIR/codebuild.json"
 fi
 ```
 
@@ -101,9 +134,11 @@ Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
-- AccessDenied on specific API calls: log the error, continue with available data, set status to "partial"
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
 - All API calls fail: set status to "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["codebuild:ListProjects AccessDenied us-east-1"]`)
 
 ## Regional Sweep
 

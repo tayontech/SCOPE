@@ -14,8 +14,176 @@ You are SCOPE's Lambda enumeration specialist. Dispatched by scope-audit orchest
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-lambda: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Extraction Templates
+
+### Trust Classification Shared Snippet
+
+This jq snippet is used by all trust-bearing agents. It classifies AWS policy principals into canonical trust_entry objects per _base.schema.json.
+
+```bash
+# Trust classification jq definitions — include in jq invocations via variable
+TRUST_CLASSIFY_JQ='
+def classify_principal:
+  if . == "*" then
+    {principal: "*", trust_type: "wildcard", is_wildcard: true}
+  elif . == "arn:aws:iam::*:root" then
+    {principal: ., trust_type: "wildcard", is_wildcard: true}
+  elif test("^arn:aws:iam::[0-9]+:root$") then
+    (if test("^arn:aws:iam::" + $account_id + ":root$") then
+      {principal: ., trust_type: "same-account", is_wildcard: false}
+    else
+      {principal: ., trust_type: "cross-account", is_wildcard: false}
+    end)
+  elif test("\\.amazonaws\\.com$") then
+    {principal: ., trust_type: "service", is_wildcard: false}
+  elif test("^arn:aws:iam::[0-9]+:") then
+    (if test("^arn:aws:iam::" + $account_id + ":") then
+      {principal: ., trust_type: "same-account", is_wildcard: false}
+    else
+      {principal: ., trust_type: "cross-account", is_wildcard: false}
+    end)
+  elif test("^arn:aws:iam::.*:saml-provider/|^arn:aws:iam::.*:oidc-provider/|cognito-identity\\.amazonaws\\.com") then
+    {principal: ., trust_type: "federated", is_wildcard: false}
+  else
+    {principal: ., trust_type: "same-account", is_wildcard: false}
+  end;
+
+def normalize_principals:
+  if type == "string" then [.]
+  elif type == "object" then
+    [(.AWS // empty | if type == "string" then [.] else . end | .[]),
+     (.Service // empty | if type == "string" then [.] else . end | .[]),
+     (.Federated // empty | if type == "string" then [.] else . end | .[])]
+  else []
+  end;
+
+def derive_risk:
+  if .trust_type == "wildcard" then "critical"
+  elif .trust_type == "cross-account" then
+    (if .has_external_id and .has_mfa_condition then "low"
+     elif .has_external_id then "medium"
+     else "high" end)
+  elif .trust_type == "federated" then
+    (if .has_mfa_condition then "low" else "medium" end)
+  elif .trust_type == "service" then "low"
+  elif .trust_type == "same-account" then "low"
+  else "medium"
+  end;
+'
+```
+
+### lambda_function (from list-functions + get-policy + get-function-url-config, per region)
+
+```bash
+FUNC_FINDINGS=$(echo "$FUNC_POLICY_RAW" | jq \
+  --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  --arg func_name "$FUNC_NAME" \
+  --arg func_arn "$FUNC_ARN" \
+  --arg runtime "$FUNC_RUNTIME" \
+  --arg execution_role_arn "$FUNC_ROLE" \
+  --argjson has_function_url "$HAS_FUNCTION_URL" \
+  --arg last_modified "$FUNC_LAST_MODIFIED" \
+  --argjson layers "$FUNC_LAYERS_JSON" \
+  --argjson env_var_secret_names "$ENV_SECRET_NAMES_JSON" \
+  "$TRUST_CLASSIFY_JQ"'
+  (. // "{}" | if type == "string" then fromjson else . end) as $policy |
+  [($policy.Statement // [])[] |
+    select(.Effect == "Allow") |
+    .Principal | normalize_principals | .[] | classify_principal
+  ] as $raw_principals |
+  ($policy.Statement // []) as $stmts |
+  ($raw_principals | unique_by(.principal)) as $unique_principals |
+  [$unique_principals[] |
+    . + {
+      has_external_id: ([($stmts[] | select(.Effect == "Allow") | .Condition.StringEquals["sts:ExternalId"] // empty)] | length > 0),
+      has_mfa_condition: ([($stmts[] | select(.Effect == "Allow") | .Condition.Bool["aws:MultiFactorAuthPresent"] // empty)] | length > 0)
+    } |
+    . + {risk: (. | derive_risk)}
+  ] as $principals |
+  {
+    resource_type: "lambda_function",
+    resource_id: $func_name,
+    arn: $func_arn,
+    region: $region,
+    runtime: $runtime,
+    execution_role_arn: $execution_role_arn,
+    has_function_url: $has_function_url,
+    last_modified: $last_modified,
+    layers: $layers,
+    env_var_secret_names: $env_var_secret_names,
+    resource_policy_principals: $principals,
+    findings: []
+  }
+' 2>/dev/null) || { echo "[ERROR] jq extraction failed for lambda_function $FUNC_NAME in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On ResourceNotFoundException for get-policy (no resource-based policy): set `FUNC_POLICY_RAW="{}"` -- produces empty `resource_policy_principals` array.
+
+### Environment Variable Secret Detection (per function)
+
+```bash
+# Extract env var keys matching secret patterns — NEVER output values
+ENV_SECRET_NAMES_JSON=$(echo "$FUNC_CONFIG" | jq '[
+  .Configuration.Environment.Variables // {} | keys[] |
+  select(test("PASSWORD|SECRET|KEY|TOKEN|API_KEY|DB_|CREDENTIALS|AUTH"; "i"))
+]' 2>/dev/null || echo "[]")
+```
+
+### Regional Iteration
+
+```bash
+ALL_FINDINGS="[]"
+ERRORS=()
+for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  FUNCTIONS=$(aws lambda list-functions --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("lambda:ListFunctions AccessDenied $CURRENT_REGION"); continue; }
+  for FUNC_ARN in $(echo "$FUNCTIONS" | jq -r '.Functions[].FunctionArn'); do
+    FUNC_CONFIG=$(echo "$FUNCTIONS" | jq --arg arn "$FUNC_ARN" '.Functions[] | select(.FunctionArn == $arn)')
+    FUNC_NAME=$(echo "$FUNC_CONFIG" | jq -r '.FunctionName')
+    FUNC_RUNTIME=$(echo "$FUNC_CONFIG" | jq -r '.Runtime // "unknown"')
+    FUNC_ROLE=$(echo "$FUNC_CONFIG" | jq -r '.Role')
+    FUNC_LAST_MODIFIED=$(echo "$FUNC_CONFIG" | jq -r '.LastModified // ""')
+    FUNC_LAYERS_JSON=$(echo "$FUNC_CONFIG" | jq '[.Layers[]?.Arn // empty]' 2>/dev/null || echo "[]")
+
+    # Detect secret-pattern env var names
+    # (uses ENV_SECRET_NAMES_JSON extraction template above)
+
+    # Get function URL config
+    FUNC_URL=$(aws lambda get-function-url-config --function-name "$FUNC_NAME" --region "$CURRENT_REGION" --output json 2>&1)
+    if [ $? -eq 0 ]; then HAS_FUNCTION_URL=true; else HAS_FUNCTION_URL=false; fi
+
+    # Get resource-based policy
+    FUNC_POLICY_RAW=$(aws lambda get-policy --function-name "$FUNC_NAME" --region "$CURRENT_REGION" --output json 2>&1)
+    if [ $? -eq 0 ]; then
+      FUNC_POLICY_RAW=$(echo "$FUNC_POLICY_RAW" | jq -r '.Policy // "{}"')
+    else
+      FUNC_POLICY_RAW="{}"
+    fi
+
+    # Run lambda_function extraction template above
+    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$FUNC_FINDINGS]" '. + $new')
+  done
+done
+```
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`lambda list-functions`, `lambda get-policy`, `lambda get-function-url-config` per function) per region, store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for resource policies and env var secret detection
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/lambda.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/lambda.json`
+
 ## Output Contract
 
+**Write this file:** `$RUN_DIR/lambda.json`
 Write via Bash redirect (you do NOT have Write tool access):
 ```bash
 jq -n \
@@ -35,7 +203,7 @@ jq -n \
   }' > "$RUN_DIR/lambda.json"
 ```
 
-Append to agent log:
+**Append to agent log:**
 ```bash
 jq -n \
   --arg agent "scope-enum-lambda" \
@@ -46,7 +214,7 @@ jq -n \
   >> "$RUN_DIR/agent-log.jsonl"
 ```
 
-Return to orchestrator (minimal summary only):
+**Return to orchestrator (minimal summary only):**
 ```
 STATUS: complete|partial|error
 FILE: $RUN_DIR/lambda.json
@@ -58,38 +226,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/lambda.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/lambda.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/lambda.json" ]; then
-  echo "[VALIDATION] lambda.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/lambda.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] lambda.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/lambda.json" 2>/dev/null || {
-  echo "[VALIDATION] lambda.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/lambda.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] lambda.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/lambda.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] lambda.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  # Auto-coerce: convert object values to array
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/lambda.json" > "$RUN_DIR/lambda.json.tmp" && mv "$RUN_DIR/lambda.json.tmp" "$RUN_DIR/lambda.json"
 fi
 ```
 
@@ -97,9 +241,12 @@ If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above
 Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
-- AccessDenied on specific API calls: log, continue with available data, set status "partial"
-- All API calls fail: set status "error", write empty findings array, include error field in JSON
+
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
+- All API calls fail: set status to "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["lambda:ListFunctions AccessDenied us-east-1"]`)
 
 ## Module Constraints
 - Do NOT invoke Lambda functions — enumeration only
@@ -118,18 +265,18 @@ Do NOT report STATUS: complete if any validation step fails.
   Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
 - [ ] Per-function: execution role ARN, runtime, last modified, VPC config, layers, timeout, memory
 - [ ] Per-function: resource-based policy (get-policy); ResourceNotFoundException = no policy, not an error
-- [ ] Per-function: environment variable names — flag existence of names matching PASSWORD, SECRET, KEY, TOKEN, API_KEY, DB_, CREDENTIALS, AUTH (never output values)
+- [ ] Per-function: environment variable names -- flag existence of names matching PASSWORD, SECRET, KEY, TOKEN, API_KEY, DB_, CREDENTIALS, AUTH (never output values)
 - [ ] All layers in account (list-layers, list-layer-versions)
 - [ ] Event source mappings (list-event-source-mappings)
 
 ### Per-Resource Checks
-- [ ] Execution role with iam:* or AdministratorAccess: CRITICAL — Methods 23-25, 45 target
+- [ ] Execution role with iam:* or AdministratorAccess: CRITICAL -- Methods 23-25, 45 target
 - [ ] Deprecated runtime: flag as security risk
 - [ ] Function URL enabled: flag as direct invocation path (no IAM auth by default)
-- [ ] Resource policy Principal:*: CRITICAL — publicly invocable function
-- [ ] Resource policy cross-account invoke: HIGH — external account can invoke
+- [ ] Resource policy Principal:*: CRITICAL -- publicly invocable function
+- [ ] Resource policy cross-account invoke: HIGH -- external account can invoke
 - [ ] lambda:UpdateFunctionCode in resource policy: flag as code injection vector
-- [ ] lambda:AddPermission in resource policy: flag — allows modifying resource policy itself
+- [ ] lambda:AddPermission in resource policy: flag -- allows modifying resource policy itself
 - [ ] Environment variables with secret-pattern names: flag existence only, never values
 - [ ] Layers from external account ARNs: flag cross-account layer injection risk
 - [ ] Layers shared cross-account (layer policy allows external accounts): flag
@@ -138,11 +285,11 @@ Do NOT report STATUS: complete if any validation step fails.
 
 ### Graph Data
 - [ ] Nodes: data:lambda:FUNCTION_NAME (type: "data") for each function
-- [ ] Edges: execution role (data:lambda:FUNCTION_NAME → role:ROLE_NAME, trust_type: "service", label: "exec_role")
-- [ ] Edges: resource policy external (ext:arn:aws:iam::<id>:root → data:lambda:FUNCTION_NAME, trust_type: "cross-account")
-- [ ] Edges: public invoke (ext:internet → data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "read")
+- [ ] Edges: execution role (data:lambda:FUNCTION_NAME -> role:ROLE_NAME, trust_type: "service", label: "exec_role")
+- [ ] Edges: resource policy external (ext:arn:aws:iam::<id>:root -> data:lambda:FUNCTION_NAME, trust_type: "cross-account")
+- [ ] Edges: public invoke (ext:internet -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "read")
 - [ ] Edges: code injection priv_esc if principal has UpdateFunctionCode on function with admin role
-- [ ] Edges: event source triggers (data:<svc>:<id> → data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "triggers")
+- [ ] Edges: event source triggers (data:<svc>:<id> -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "triggers")
 - [ ] access_level: read = InvokeFunction only; write = UpdateFunctionCode or UpdateFunctionConfiguration
 
 ## Output Path Constraint
