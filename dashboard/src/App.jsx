@@ -1371,7 +1371,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
     );
   }
 
-  if (statKey === "trusts" || statKey === "wildcards") {
+  if ((statKey === "trusts" || statKey === "wildcards") && (item.role_id || item.role_arn)) {
     const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[item.risk] || COLORS.textDim;
     // Trust entity (role_name) is the focus; trusted principal is secondary
     const principal = item.trust_principal || item.principal || "";
