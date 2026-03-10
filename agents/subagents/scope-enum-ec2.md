@@ -14,8 +14,201 @@ You are SCOPE's EC2/VPC/EBS/ELB/SSM enumeration specialist. Dispatched by scope-
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-ec2: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Extraction Templates
+
+### ec2_instance (from describe-instances, per region)
+
+```bash
+INSTANCE_FINDINGS=$(echo "$INSTANCES" | jq --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  '[.Reservations[].Instances[] | select(.State.Name != "terminated") | {
+    resource_type: "ec2_instance",
+    resource_id: .InstanceId,
+    arn: ("arn:aws:ec2:" + $region + ":" + $account_id + ":instance/" + .InstanceId),
+    region: $region,
+    instance_type: .InstanceType,
+    state: .State.Name,
+    vpc_id: (.VpcId // ""),
+    subnet_id: (.SubnetId // ""),
+    public_ip: (.PublicIpAddress // ""),
+    iam_profile_arn: (.IamInstanceProfile.Arn // ""),
+    imds_v1_enabled: ((.MetadataOptions.HttpTokens // "optional") != "required"),
+    imds_hop_limit: (.MetadataOptions.HttpPutResponseHopLimit // 1),
+    findings: []
+  }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_instance in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for describe-instances: `INSTANCE_FINDINGS="[]"`
+
+### ec2_security_group (from describe-security-groups, per region)
+
+```bash
+SG_FINDINGS=$(echo "$SECURITY_GROUPS" | jq --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  '[.SecurityGroups[] | {
+    resource_type: "ec2_security_group",
+    resource_id: .GroupId,
+    arn: ("arn:aws:ec2:" + $region + ":" + $account_id + ":security-group/" + .GroupId),
+    region: $region,
+    vpc_id: (.VpcId // ""),
+    inbound_rules: [.IpPermissions[] |
+      (if .IpProtocol == "-1" then "all" else .IpProtocol end) as $proto |
+      (if .FromPort then (.FromPort | tostring) else "all" end) as $from |
+      (if .ToPort then (.ToPort | tostring) else "all" end) as $to |
+      ($from + "-" + $to) as $port_range |
+      (
+        ([.IpRanges[]? | {protocol: $proto, port_range: $port_range, source: .CidrIp}]),
+        ([.Ipv6Ranges[]? | {protocol: $proto, port_range: $port_range, source: .CidrIpv6}]),
+        ([.UserIdGroupPairs[]? | {protocol: $proto, port_range: $port_range, source: .GroupId}]),
+        ([.PrefixListIds[]? | {protocol: $proto, port_range: $port_range, source: .PrefixListId}])
+      ) | .[]
+    ],
+    findings: []
+  }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_security_group in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for describe-security-groups: `SG_FINDINGS="[]"`
+
+### ec2_vpc (from describe-vpcs, per region)
+
+```bash
+VPC_FINDINGS=$(echo "$VPCS" | jq --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  '[.Vpcs[] | {
+    resource_type: "ec2_vpc",
+    resource_id: .VpcId,
+    arn: ("arn:aws:ec2:" + $region + ":" + $account_id + ":vpc/" + .VpcId),
+    region: $region,
+    cidr_block: .CidrBlock,
+    is_default: (.IsDefault // false),
+    findings: []
+  }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_vpc in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for describe-vpcs: `VPC_FINDINGS="[]"`
+
+### ec2_ebs_snapshot (from describe-snapshots --owner-ids self, per region)
+
+```bash
+SNAPSHOT_FINDINGS=$(echo "$SNAPSHOTS" | jq --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  --argjson public_snapshots "$PUBLIC_SNAPSHOT_IDS" \
+  '[.Snapshots[] | {
+    resource_type: "ec2_ebs_snapshot",
+    resource_id: .SnapshotId,
+    arn: ("arn:aws:ec2:" + $region + ":" + $account_id + ":snapshot/" + .SnapshotId),
+    region: $region,
+    volume_id: (.VolumeId // ""),
+    encrypted: (.Encrypted // false),
+    public: ([.SnapshotId] | inside($public_snapshots)),
+    findings: []
+  }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_ebs_snapshot in $CURRENT_REGION"; STATUS="error"; }
+```
+
+Public snapshot detection — check createVolumePermission for "all" group:
+```bash
+PUBLIC_SNAPSHOT_IDS="[]"
+for SNAP_ID in $(echo "$SNAPSHOTS" | jq -r '.Snapshots[].SnapshotId'); do
+  PERMS=$(aws ec2 describe-snapshot-attribute --snapshot-id "$SNAP_ID" --attribute createVolumePermission --region "$CURRENT_REGION" --output json 2>&1) || continue
+  IS_PUBLIC=$(echo "$PERMS" | jq '[.CreateVolumePermissions[]? | select(.Group == "all")] | length > 0')
+  if [ "$IS_PUBLIC" = "true" ]; then
+    PUBLIC_SNAPSHOT_IDS=$(echo "$PUBLIC_SNAPSHOT_IDS" | jq --arg id "$SNAP_ID" '. + [$id]')
+  fi
+done
+```
+
+On AccessDenied for describe-snapshots: `SNAPSHOT_FINDINGS="[]"`
+
+### ec2_load_balancer (from elbv2 describe-load-balancers + elb describe-load-balancers, per region)
+
+```bash
+# ALB/NLB (v2)
+ELBv2_FINDINGS=$(echo "$ELBV2_LBS" | jq --arg region "$CURRENT_REGION" \
+  --argjson listeners "$ELBV2_LISTENERS" \
+  '[.LoadBalancers[] | . as $lb | {
+    resource_type: "ec2_load_balancer",
+    resource_id: .LoadBalancerName,
+    arn: .LoadBalancerArn,
+    region: $region,
+    type: (if .Type == "application" then "alb" elif .Type == "network" then "nlb" else .Type end),
+    scheme: (.Scheme // "internal"),
+    listeners: ([$listeners[] | select(.LoadBalancerArn == $lb.LoadBalancerArn)]),
+    findings: []
+  }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_load_balancer (v2) in $CURRENT_REGION"; STATUS="error"; }
+
+# Classic ELBs
+CLASSIC_FINDINGS=$(echo "$CLASSIC_LBS" | jq --arg region "$CURRENT_REGION" \
+  --arg account_id "$ACCOUNT_ID" \
+  '[.LoadBalancerDescriptions[] | {
+    resource_type: "ec2_load_balancer",
+    resource_id: .LoadBalancerName,
+    arn: ("arn:aws:elasticloadbalancing:" + $region + ":" + $account_id + ":loadbalancer/" + .LoadBalancerName),
+    region: $region,
+    type: "classic",
+    scheme: (.Scheme // "internal"),
+    listeners: [.ListenerDescriptions[] | .Listener | {Protocol: .Protocol, LoadBalancerPort: .LoadBalancerPort, InstancePort: .InstancePort}],
+    findings: []
+  }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_load_balancer (classic) in $CURRENT_REGION"; STATUS="error"; }
+```
+
+Per-region ELB listener collection:
+```bash
+ELBV2_LISTENERS="[]"
+for LB_ARN in $(echo "$ELBV2_LBS" | jq -r '.LoadBalancers[].LoadBalancerArn'); do
+  LSNRS=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --region "$CURRENT_REGION" --output json 2>&1) || continue
+  ELBV2_LISTENERS=$(echo "$ELBV2_LISTENERS" | jq --argjson new "$(echo "$LSNRS" | jq '.Listeners')" '. + $new')
+done
+```
+
+On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `CLASSIC_FINDINGS="[]"`
+
+### Regional Iteration
+
+```bash
+ALL_FINDINGS="[]"
+for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  INSTANCES=$(aws ec2 describe-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeInstances AccessDenied $CURRENT_REGION"); INSTANCES='{"Reservations":[]}'; }
+  SECURITY_GROUPS=$(aws ec2 describe-security-groups --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeSecurityGroups AccessDenied $CURRENT_REGION"); SECURITY_GROUPS='{"SecurityGroups":[]}'; }
+  VPCS=$(aws ec2 describe-vpcs --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeVpcs AccessDenied $CURRENT_REGION"); VPCS='{"Vpcs":[]}'; }
+  SNAPSHOTS=$(aws ec2 describe-snapshots --owner-ids self --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeSnapshots AccessDenied $CURRENT_REGION"); SNAPSHOTS='{"Snapshots":[]}'; }
+  ELBV2_LBS=$(aws elbv2 describe-load-balancers --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("elbv2:DescribeLoadBalancers AccessDenied $CURRENT_REGION"); ELBV2_LBS='{"LoadBalancers":[]}'; }
+  CLASSIC_LBS=$(aws elb describe-load-balancers --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("elb:DescribeLoadBalancers AccessDenied $CURRENT_REGION"); CLASSIC_LBS='{"LoadBalancerDescriptions":[]}'; }
+
+  # Run extraction templates above for each resource type
+  # Run public snapshot detection before ec2_ebs_snapshot extraction
+  # Collect ELBv2 listeners before ec2_load_balancer extraction
+
+  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq \
+    --argjson inst "$INSTANCE_FINDINGS" \
+    --argjson sg "$SG_FINDINGS" \
+    --argjson vpc "$VPC_FINDINGS" \
+    --argjson snap "$SNAPSHOT_FINDINGS" \
+    --argjson elbv2 "$ELBv2_FINDINGS" \
+    --argjson classic "$CLASSIC_FINDINGS" \
+    '. + $inst + $sg + $vpc + $snap + $elbv2 + $classic')
+
+  COMPLETED_REGIONS="$COMPLETED_REGIONS,$CURRENT_REGION"
+done
+```
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'unique_by(.arn) | sort_by(.region + ":" + .arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls per region (`ec2 describe-instances`, `ec2 describe-security-groups`, `ec2 describe-vpcs`, `ec2 describe-snapshots --owner-ids self`, `elbv2 describe-load-balancers`, `elb describe-load-balancers`), store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above for each resource type per region
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all 5 resource types across all regions, sorts by `region:arn` (regional service)
+5. **Write** -- Envelope jq writes to `$RUN_DIR/ec2.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/ec2.json`
+
 ## Output Contract
 
+**Write this file:** `$RUN_DIR/ec2.json`
 Write via Bash redirect (you do NOT have Write tool access):
 ```bash
 jq -n \
@@ -35,7 +228,7 @@ jq -n \
   }' > "$RUN_DIR/ec2.json"
 ```
 
-Append to agent log:
+**Append to agent log:**
 ```bash
 jq -n \
   --arg agent "scope-enum-ec2" \
@@ -46,11 +239,11 @@ jq -n \
   >> "$RUN_DIR/agent-log.jsonl"
 ```
 
-Return to orchestrator (minimal summary only):
+**Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
 STATUS: complete|partial|error
 FILE: $RUN_DIR/ec2.json
-METRICS: {instances: N, vpcs: N, security_groups: N, findings: N}
+METRICS: {instances: N, vpcs: N, security_groups: N, snapshots: N, load_balancers: N, findings: N}
 REGIONS_SCANNED: N/M (list all regions successfully scanned)
 REGIONS_WITH_FINDINGS: [us-east-1, us-west-2] (list only regions where resources were found, or "none")
 ERRORS: [list of AccessDenied or partial failures, or empty]
@@ -58,37 +251,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/ec2.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/ec2.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/ec2.json" ]; then
-  echo "[VALIDATION] ec2.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/ec2.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] ec2.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/ec2.json" 2>/dev/null || {
-  echo "[VALIDATION] ec2.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/ec2.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] ec2.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/ec2.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] ec2.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/ec2.json" > "$RUN_DIR/ec2.json.tmp" && mv "$RUN_DIR/ec2.json.tmp" "$RUN_DIR/ec2.json"
 fi
 ```
 
@@ -96,9 +266,12 @@ If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above
 Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
-- AccessDenied on specific API calls: log, continue with available data, set status "partial"
-- All API calls fail: set status "error", write empty findings array, include error field in JSON
+
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
+- All API calls fail: set status to "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["ec2:DescribeInstances AccessDenied us-east-1"]`)
 
 ## Module Constraints
 - Do NOT attempt SSM Session Manager connections — enumeration only

@@ -27,6 +27,104 @@ For each file in SERVICES_COMPLETED:
 3. If a file is missing or has status "error", log and continue with available data
 4. Do NOT glob $RUN_DIR/ — read only known filenames
 
+## Phase A: Deterministic Graph Extraction
+
+Run these jq commands VERBATIM before any model reasoning. Phase A produces identity nodes, service nodes, data store nodes, and factual edges. Output is deterministic — same enum data produces identical Phase A output on all platforms.
+
+### Unified Node Extractor
+
+```bash
+# ── Phase A: Deterministic Node Extraction ──
+# Read each module JSON with fallback for missing modules
+IAM_DATA=$(cat "$RUN_DIR/iam.json" 2>/dev/null) || IAM_DATA='{"findings":[]}'
+S3_DATA=$(cat "$RUN_DIR/s3.json" 2>/dev/null) || S3_DATA='{"findings":[]}'
+KMS_DATA=$(cat "$RUN_DIR/kms.json" 2>/dev/null) || KMS_DATA='{"findings":[]}'
+SECRETS_DATA=$(cat "$RUN_DIR/secrets.json" 2>/dev/null) || SECRETS_DATA='{"findings":[]}'
+RDS_DATA=$(cat "$RUN_DIR/rds.json" 2>/dev/null) || RDS_DATA='{"findings":[]}'
+
+# Identity nodes from iam.json (user, role, group)
+IAM_NODES=$(echo "$IAM_DATA" | jq '
+  [.findings[] |
+    if .resource_type == "iam_user" then
+      {id: ("user:" + .resource_id), label: .resource_id, type: "user", _source: "api"}
+    elif .resource_type == "iam_role" and (.is_service_linked | not) then
+      {id: ("role:" + .resource_id), label: .resource_id, type: "role", _source: "api"}
+    elif .resource_type == "iam_group" then
+      {id: ("group:" + .resource_id), label: .resource_id, type: "group", _source: "api"}
+    else empty
+    end
+  ]
+')
+
+# Service nodes from IAM role trust_relationships where trust_type == "service"
+SERVICE_NODES=$(echo "$IAM_DATA" | jq '
+  [.findings[] | select(.resource_type == "iam_role") |
+    .trust_relationships[]? | select(.trust_type == "service") |
+    {id: ("svc:" + .principal), label: .principal, type: "external", _source: "api"}
+  ] | unique_by(.id)
+')
+
+# Data store nodes from S3, KMS, Secrets, RDS
+DATA_NODES=$(echo "$S3_DATA" | jq '[.findings[] | {id: ("data:s3:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
+KMS_NODES=$(echo "$KMS_DATA" | jq '[.findings[] | {id: ("data:kms:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
+SECRETS_NODES=$(echo "$SECRETS_DATA" | jq '[.findings[] | {id: ("data:secrets:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
+RDS_NODES=$(echo "$RDS_DATA" | jq '[.findings[] | {id: ("data:rds:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
+
+# Merge all Phase A nodes and sort by id for determinism
+PHASE_A_NODES=$(echo "$IAM_NODES" | jq --argjson svc "$SERVICE_NODES" --argjson s3 "$DATA_NODES" --argjson kms "$KMS_NODES" --argjson sec "$SECRETS_NODES" --argjson rds "$RDS_NODES" \
+  '. + $svc + $s3 + $kms + $sec + $rds | unique_by(.id) | sort_by(.id)')
+```
+
+### Factual Edge Extractor
+
+```bash
+# ── Phase A: Factual Edge Extraction ──
+# Trust edges from IAM role trust_relationships
+TRUST_EDGES=$(echo "$IAM_DATA" | jq '
+  [.findings[] | select(.resource_type == "iam_role" and (.is_service_linked | not)) | . as $role |
+    .trust_relationships[]? |
+    {
+      source: (
+        if .trust_type == "service" then ("svc:" + .principal)
+        elif .trust_type == "wildcard" then "external:anonymous"
+        elif .trust_type == "cross-account" then ("external:" + .principal)
+        elif .trust_type == "same-account" then
+          (if (.principal | test(":user/")) then ("user:" + (.principal | split("/") | last))
+           elif (.principal | test(":role/")) then ("role:" + (.principal | split("/") | last))
+           else ("external:" + .principal) end)
+        elif .trust_type == "federated" then ("external:" + .principal)
+        else ("external:" + .principal)
+        end
+      ),
+      target: ("role:" + $role.resource_id),
+      edge_type: (if .trust_type == "service" then "service" else "trust" end),
+      trust_type: .trust_type,
+      severity: .risk,
+      label: "can_assume",
+      _source: "api"
+    }
+  ]
+')
+
+# Membership edges from IAM user groups
+MEMBERSHIP_EDGES=$(echo "$IAM_DATA" | jq '
+  [.findings[] | select(.resource_type == "iam_user") | . as $user |
+    .groups[]? |
+    {
+      source: ("user:" + $user.resource_id),
+      target: ("group:" + .),
+      edge_type: "membership",
+      label: "member_of",
+      _source: "api"
+    }
+  ]
+')
+
+# Merge all Phase A edges and sort for determinism
+PHASE_A_EDGES=$(echo "$TRUST_EDGES" | jq --argjson mem "$MEMBERSHIP_EDGES" \
+  '. + $mem | unique_by([.source, .target, .edge_type]) | sort_by([.source, .target, .edge_type])')
+```
+
 ## Output Contract
 
 **Write these files using Bash redirect (no Write tool):**
@@ -41,43 +139,46 @@ failure across all platforms.
 
 Before writing results.json, verify ALL of the following. If any check fails, go back and fix the issue before proceeding to write.
 
-1. **PRIV_ESC COVERAGE:** If attack_paths contains any entry with category "privilege_escalation",
-   then graph.edges MUST contain at least one edge with edge_type "priv_esc".
+1. **PRIV_ESC COVERAGE (Phase B):** If attack_paths contains any entry with category "privilege_escalation",
+   then PHASE_B_EDGES MUST contain at least one edge with edge_type "priv_esc" and _source "reasoning".
    If priv_esc edges = 0 and privilege_escalation paths > 0: STOP. Go back and add priv_esc edges
    connecting each affected principal to its escalation node(s) using the priv_esc edge template above.
 
-2. **CROSS-ACCOUNT COVERAGE:** If trust_relationships contains any entry with trust_type "cross-account",
-   then graph.edges MUST contain at least one edge with edge_type "cross_account" or
-   edge_type "trust" with trust_type "cross-account".
-   If missing: STOP. Go back and add trust/cross_account edges for each cross-account relationship.
+2. **CROSS-ACCOUNT COVERAGE (Phase A + B):** Verify PHASE_A_EDGES contains trust edges for all
+   cross-account trust_relationships from iam.json (these are jq-derived and deterministic).
+   Additional model-discovered cross-account relationships should be in PHASE_B_EDGES with
+   edge_type "cross_account" and _source "reasoning".
+   If Phase A trust edges are missing for cross-account entries: Phase A jq extraction failed — re-run.
+   If model discovers additional cross-account relationships: add to PHASE_B_EDGES.
 
-3. **DATA ACCESS COVERAGE:** If S3 buckets, secrets, KMS keys, or other data stores were found in enumeration,
-   then graph.edges MUST contain at least one edge with edge_type "data_access".
+3. **DATA ACCESS COVERAGE (Phase B):** If S3 buckets, secrets, KMS keys, or other data stores were found in enumeration,
+   then PHASE_B_EDGES MUST contain at least one edge with edge_type "data_access" and _source "reasoning".
    If missing: STOP. Go back and add data_access edges for each principal with data store access.
 
-4. **NODE-EDGE CONSISTENCY:** For EVERY escalation node (type "escalation") in graph.nodes,
-   there MUST be at least one incoming priv_esc edge with that node as target.
+4. **NODE-EDGE CONSISTENCY (Phase B):** For EVERY escalation node (type "escalation") in PHASE_B_NODES,
+   there MUST be at least one incoming priv_esc edge in PHASE_B_EDGES with that node as target.
    Any escalation node without an incoming edge = disconnected node = the exact Codex v1.1 failure.
    If found: STOP. Add the missing priv_esc edge(s) connecting principal(s) to the disconnected node.
 
-5. **NETWORK COVERAGE:** If EC2 enumeration found publicly exposed security groups or open ports,
-   then graph.edges MUST contain at least one edge with edge_type "network".
+5. **NETWORK COVERAGE (Phase B):** If EC2 enumeration found publicly exposed security groups or open ports,
+   then PHASE_B_EDGES MUST contain at least one edge with edge_type "network" and _source "reasoning".
    If missing and public exposure data exists: go back and add network edges from external:public.
 
 6. **SUMMARY COUNTS MATCH:** attack_paths_total in summary MUST equal the length of the attack_paths array.
    If mismatch: update summary.attack_paths_total to match the actual array length.
 
-7. **[HIGH PRIORITY — EVALUATE FIRST] IDENTITY NODE COMPLETENESS:** Compare graph.nodes against the IAM enumeration data:
-   - Count of user nodes MUST equal summary.total_users (every IAM user = a graph node).
-   - Count of role nodes MUST equal summary.total_roles (every IAM role, excluding service-linked = a graph node).
-   - If IAM groups exist, count of group nodes MUST match the number of groups enumerated.
-   - If user count is less than total_users: STOP. Go back and create user nodes for every IAM user.
-     Do NOT only graph users that appear in attack paths — the graph is an identity topology map.
-   - If role count is less than total_roles: STOP. Add the missing role nodes.
+7. **[HIGH PRIORITY — EVALUATE FIRST] IDENTITY NODE COMPLETENESS (Phase A):**
+   Verify PHASE_A_NODES contains the correct counts:
+   - Count of user nodes in PHASE_A_NODES MUST equal summary.total_users
+   - Count of role nodes in PHASE_A_NODES MUST equal summary.total_roles (excluding service-linked)
+   - Count of group nodes in PHASE_A_NODES MUST match IAM group count from iam.json
+   - If any count mismatches: Phase A jq extraction failed — re-run the Phase A jq commands.
+   - Phase A identity nodes are deterministic (jq-derived). If counts are wrong, the issue is
+     in the jq template or the input data, not model reasoning.
 
-8. **MEMBERSHIP EDGE COVERAGE:** If IAM groups exist and have members,
-   then graph.edges MUST contain membership edges connecting each user to their group(s).
-   If missing: STOP. Go back and add membership edges from iam.json group membership data.
+8. **MEMBERSHIP EDGE COVERAGE (Phase A):** Verify PHASE_A_EDGES contains membership edges
+   for every IAM user with non-empty groups[]. These edges are jq-derived, not model-generated.
+   If missing: Phase A edge extraction failed — re-run the Factual Edge Extractor.
 
 9. **EXPLOIT STEP SPECIFICITY:** Every attack path MUST include exploit_steps with real values:
    - Permission names must be the actual IAM action strings from enumeration (e.g., "iam:CreatePolicyVersion"
@@ -114,8 +215,9 @@ Before writing results.json, verify ALL of the following. If any check fails, go
     decision that left trust risk unchanged — App.jsx normalizeForDashboard() already calls
     .risk?.toLowerCase(), making agent output match removes the normalization mismatch at source.
 
-13. **EDGE DENSITY CHECK:** graph.edges MUST contain at least 1 edge per 3 attack_paths.
-    If len(attack_paths) > 0 and len(graph.edges) < ceil(len(attack_paths) / 3):
+13. **EDGE DENSITY CHECK:** The merged graph (PHASE_A_EDGES + PHASE_B_EDGES = ALL_EDGES) MUST contain
+    at least 1 edge per 3 attack_paths. Use the final EDGES_ARRAY (merged Phase A + Phase B) for this count.
+    If len(attack_paths) > 0 and len(EDGES_ARRAY) < ceil(len(attack_paths) / 3):
       STOP. For each privilege_escalation attack path that does not already have a
       corresponding priv_esc edge: derive an edge from the path data:
         source: first affected_resource principal (convert ARN to "role:Name" or "user:Name" format)
@@ -123,8 +225,9 @@ Before writing results.json, verify ALL of the following. If any check fails, go
         edge_type: "priv_esc"
         severity: "critical"
         label: "escalation_method"
-      Add all derived edges to EDGES_ARRAY and rebuild GRAPH_JSON before proceeding.
-    Re-check ratio. Only proceed if len(graph.edges) >= ceil(len(attack_paths) / 3).
+        _source: "reasoning"
+      Add all derived edges to PHASE_B_EDGES and rebuild EDGES_ARRAY/GRAPH_JSON before proceeding.
+    Re-check ratio. Only proceed if len(EDGES_ARRAY) >= ceil(len(attack_paths) / 3).
 
 Only proceed to write results.json AFTER ALL checks pass (rules 1-13).
 
@@ -218,44 +321,29 @@ SUMMARY_JSON=$(jq -n \
 # ──────────────────────────────────────────────────────────────────────
 # IDENTITY GRAPH CONSTRUCTION (MANDATORY)
 # ──────────────────────────────────────────────────────────────────────
-# The graph is an identity topology map of the AWS account, NOT just a
-# visualization of discovered attack paths. Build it in two phases:
+# Phase A nodes and edges are extracted above in "Phase A: Deterministic Graph Extraction".
+# PHASE_A_NODES and PHASE_A_EDGES are already populated with identity nodes,
+# service nodes, data store nodes, trust edges, and membership edges.
 #
-# Phase A — Identity nodes (from iam.json enumeration data):
-#   1. Create a "user" node for EVERY IAM user found in iam.json.
-#   2. Create a "role" node for EVERY IAM role found in iam.json
-#      (excluding service-linked roles already filtered by enum).
-#   3. Create a "group" node for EVERY IAM group found in iam.json.
-#   4. If iam.json has a "graph" field with pre-built nodes/edges,
-#      merge them — but still verify completeness against the raw data.
-#   5. If iam.json is empty or missing, fall back to direct enumeration:
-#      run `aws iam list-users`, `aws iam list-roles`, `aws iam list-groups`
-#      and create nodes from the results. Do NOT skip user/group nodes
-#      just because iam.json failed.
+# Phase B — Analysis nodes and edges (from attack path reasoning):
+#   Create "escalation" nodes for each privilege escalation method found.
+#   Create additional "external" nodes for cross-account principals, public access.
+#   Create priv_esc, data_access, network, cross_account edges from analysis.
+#   All Phase B nodes/edges carry _source: "reasoning".
 #
-# Phase B — Analysis nodes (from attack path reasoning):
-#   6. Create "escalation" nodes for each privilege escalation method found.
-#   7. Create "data" nodes for S3 buckets, secrets, KMS keys, etc.
-#   8. Create "external" nodes for cross-account principals, public access.
+# ── Phase B: Analytical Graph Construction ──
+# The model adds escalation nodes, additional data/external nodes, and reasoning edges
+# during attack path analysis. All Phase B nodes/edges carry _source: "reasoning".
+PHASE_B_NODES="[]"
+PHASE_B_EDGES="[]"
+# Append to these arrays as edges are discovered during reasoning.
+# To add a node: PHASE_B_NODES=$(echo "$PHASE_B_NODES" | jq --argjson n '[{...}]' '. + $n')
+# To add an edge: PHASE_B_EDGES=$(echo "$PHASE_B_EDGES" | jq --argjson e '[{...}]' '. + $e')
 #
-# Phase A nodes are AWS API facts. Phase B nodes are analysis outputs.
-# Both phases are required for a complete graph.
-# ──────────────────────────────────────────────────────────────────────
-#
-# Build edges from:
-#   - Trust policy analysis (trust edges — user/role -> role)
-#   - Group membership (membership edges — user -> group)
-#   - Privilege escalation paths (priv_esc edges — principal -> escalation)
-#   - Data access findings (data_access edges — principal -> data store)
-#   - Service integrations (service edges — resource -> resource)
-#
-# DEDUPLICATION (REQUIRED before building GRAPH_JSON):
-# Nodes are built in Phase A (identity) and Phase B (analysis). The merge step
-# (step 4: pre-built iam.json graph) and the completeness enforcement loop can
-# both re-add nodes that are already in NODES_ARRAY. Deduplicate by node id
-# (keep first occurrence) and edges by source+target+edge_type before assembly:
-NODES_ARRAY=$(echo "$NODES_ARRAY" | jq 'unique_by(.id)')
-EDGES_ARRAY=$(echo "$EDGES_ARRAY" | jq 'unique_by([.source, .target, .edge_type])')
+# After Phase B reasoning populates PHASE_B_NODES and PHASE_B_EDGES,
+# merge Phase A (deterministic) + Phase B (analytical):
+NODES_ARRAY=$(echo "$PHASE_A_NODES" | jq --argjson phase_b "$PHASE_B_NODES" '. + $phase_b | unique_by(.id)')
+EDGES_ARRAY=$(echo "$PHASE_A_EDGES" | jq --argjson phase_b "$PHASE_B_EDGES" '. + $phase_b | unique_by([.source, .target, .edge_type])')
 GRAPH_JSON=$(jq -n --argjson nodes "$NODES_ARRAY" --argjson edges "$EDGES_ARRAY" '{nodes: $nodes, edges: $edges}')
 ```
 
@@ -310,9 +398,9 @@ METRICS: {attack_paths: N, risk_score: CRITICAL|HIGH|MEDIUM|LOW, categories: N}
 ERRORS: [any issues encountered]
 ```
 
-## Edge Construction Templates
+## Edge Construction Templates (Phase B)
 
-Use these templates to construct graph edges. For each relationship discovered during analysis, copy the relevant template, replace $VARIABLE placeholders with actual values, and add the edge to EDGES_ARRAY.
+Use these templates to construct Phase B graph edges from model reasoning. For each relationship discovered during analysis, copy the relevant template, replace $VARIABLE placeholders with actual values, and add the edge to PHASE_B_EDGES. All Phase B edges carry `_source: "reasoning"` — these are model-dependent and variation across platforms is expected.
 
 **Node ID format reminder:** All node IDs use `type:shortname` format:
 - Users: `user:alice`
@@ -329,12 +417,14 @@ For each privilege escalation path found, create an edge connecting the principa
   "target": "esc:iam:$ESCALATION_METHOD",
   "edge_type": "priv_esc",
   "severity": "critical",
-  "label": "$ESCALATION_METHOD"
+  "label": "$ESCALATION_METHOD",
+  "_source": "reasoning"
 }
 ```
 
 ### cross_account edge (default severity: medium)
-For each cross-account trust relationship, create an edge from the external principal to the trusted role:
+# NOTE: Phase A already creates trust edges from iam.json trust_relationships. Use this template only for model-discovered cross-account relationships not present in Phase A edges.
+For each cross-account trust relationship discovered by model reasoning (not already in Phase A), create an edge from the external principal to the trusted role:
 ```json
 {
   "source": "$EXTERNAL_PRINCIPAL",
@@ -342,7 +432,8 @@ For each cross-account trust relationship, create an edge from the external prin
   "edge_type": "cross_account",
   "trust_type": "cross-account",
   "severity": "medium",
-  "label": "can_assume"
+  "label": "can_assume",
+  "_source": "reasoning"
 }
 ```
 
@@ -354,12 +445,14 @@ For EVERY principal with access to a data store (S3 bucket, secret, database), c
   "target": "$DATA_NODE_ID",
   "edge_type": "data_access",
   "severity": "high",
-  "label": "$ACCESS_ACTION"
+  "label": "$ACCESS_ACTION",
+  "_source": "reasoning"
 }
 ```
 
 ### trust edge — same-account (default severity: low)
-For each same-account trust relationship (role assumable by another principal in the same account):
+# NOTE: Same-account trust edges are created by Phase A jq. This template is for model-discovered trust relationships not in Phase A.
+For each same-account trust relationship discovered by model reasoning (not already in Phase A):
 ```json
 {
   "source": "$PRINCIPAL_NODE_ID",
@@ -367,18 +460,21 @@ For each same-account trust relationship (role assumable by another principal in
   "edge_type": "trust",
   "trust_type": "same-account",
   "severity": "low",
-  "label": "can_assume"
+  "label": "can_assume",
+  "_source": "reasoning"
 }
 ```
 
 ### membership edge (group membership)
-For each IAM user that belongs to an IAM group, create a membership edge. Groups inherit attached policies, so membership edges are critical for understanding effective permissions:
+# NOTE: Group membership edges are created by Phase A jq from user.groups[]. This template is for model-discovered memberships not in Phase A.
+For each IAM user membership discovered by model reasoning (not already in Phase A):
 ```json
 {
   "source": "user:$USER_NAME",
   "target": "group:$GROUP_NAME",
   "edge_type": "membership",
-  "label": "member_of"
+  "label": "member_of",
+  "_source": "reasoning"
 }
 ```
 
@@ -390,19 +486,22 @@ For each publicly exposed resource (public security groups, open ports), connect
   "target": "$RESOURCE_NODE_ID",
   "edge_type": "network",
   "severity": "high",
-  "label": "$EXPOSED_PORT_OR_PROTOCOL"
+  "label": "$EXPOSED_PORT_OR_PROTOCOL",
+  "_source": "reasoning"
 }
 ```
 
 ### service edge (default severity: medium)
-For service integrations (e.g., S3 trigger -> Lambda execution role):
+# NOTE: Service trust edges (from role trust policies) are created by Phase A jq. This template is for model-discovered service integrations (e.g., S3 trigger -> Lambda) not in Phase A.
+For service integrations discovered by model reasoning (not already in Phase A):
 ```json
 {
   "source": "$SOURCE_RESOURCE_ID",
   "target": "$TARGET_RESOURCE_ID",
   "edge_type": "service",
   "severity": "medium",
-  "label": "$INTEGRATION_TYPE"
+  "label": "$INTEGRATION_TYPE",
+  "_source": "reasoning"
 }
 ```
 

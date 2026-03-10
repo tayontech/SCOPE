@@ -371,7 +371,12 @@ function installSubagentsGemini(subagents, scope) {
     : path.join(os.homedir(), '.gemini', 'agents');
 
   fs.mkdirSync(agentsDir, { recursive: true });
-  const GEMINI_STRIP_KEYS = ['model', 'argument-hint', 'disable-model-invocation', 'allowed-tools', 'tools', 'color', 'compatibility', 'memory', 'context', 'agent', 'maxTurns'];
+  const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'allowed-tools', 'tools', 'color', 'compatibility', 'memory', 'context', 'agent', 'maxTurns'];
+  // Per-agent model routing: enum agents use flash, reasoning agents use pro.
+  const GEMINI_MODEL_MAP = {
+    haiku: 'gemini-2.5-flash',
+    sonnet: 'gemini-3.1-pro-preview',
+  };
   let count = 0;
 
   // Gemini defaults: max_turns=15 — too low for SCOPE agents.
@@ -404,6 +409,11 @@ function installSubagentsGemini(subagents, scope) {
       const config = GEMINI_AGENT_CONFIG[subagent.name];
       if (config) {
         frontmatter.max_turns = String(config.max_turns);
+      }
+      // Inject model based on SCOPE tier mapping
+      const scopeModel = SUBAGENT_MODEL_MAP[subagent.name];
+      if (scopeModel && GEMINI_MODEL_MAP[scopeModel]) {
+        frontmatter.model = GEMINI_MODEL_MAP[scopeModel];
       }
       const fm = rebuildFrontmatter(frontmatter, GEMINI_STRIP_KEYS);
       // Build tools as YAML array (rebuildFrontmatter only handles strings)
@@ -484,7 +494,7 @@ function installSubagentsCodex(subagents, scope) {
 
     // Determine model — gpt-5.3-codex for enum (haiku tier), gpt-5.4 for reasoning (sonnet tier)
     const scopeModel = SUBAGENT_MODEL_MAP[subagent.name] || 'haiku';
-    const codexModel = scopeModel === 'sonnet' ? 'gpt-5.4' : 'gpt-5.3-codex';
+    const codexModel = scopeModel === 'sonnet' ? 'gpt-5.4' : 'gpt-5.1-codex-mini';
     const reasoningEffort = 'medium';
 
     // Generate per-agent .toml config layer.
@@ -815,14 +825,17 @@ function installHooks(editor, scope) {
 
   const destDir = path.join(process.cwd(), path.dirname(settingsMap[editor].dest));
   const destFile = path.join(destDir, 'settings.json');
-  if (fs.existsSync(destFile)) {
-    console.log(`  Hook settings already exist: ${settingsMap[editor].dest} (skipped)`);
-    return;
-  }
+
+  // Read template, replace relative hook paths with absolute paths.
+  // Stop hooks fire from ~ (home dir), so relative paths fail.
+  const projectRoot = process.cwd();
+  let content = fs.readFileSync(srcSettings, 'utf8');
+  content = content.replace(/\.scope\/hooks\//g, path.join(projectRoot, '.scope', 'hooks') + '/');
 
   fs.mkdirSync(destDir, { recursive: true });
-  fs.copyFileSync(srcSettings, destFile);
-  console.log(`  Installed hook settings -> ${settingsMap[editor].dest}`);
+  fs.writeFileSync(destFile, content, 'utf8');
+  const action = fs.existsSync(destFile) ? 'Updated' : 'Installed';
+  console.log(`  ${action} hook settings -> ${settingsMap[editor].dest}`);
 }
 
 /**
