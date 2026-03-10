@@ -723,11 +723,19 @@ control artifacts already generated at ./defend/defend-{timestamp}/.]
 
 After findings.md is written (and Gate 4 was NOT skipped), export results.json.
 
-The attack-paths subagent already wrote `$RUN_DIR/results.json`. Export a copy to the dashboard:
+The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Check both locations:
 
 ```bash
 mkdir -p dashboard/public
-cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
+if [ -f "$RUN_DIR/results.json" ]; then
+  cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
+elif PIPELINE_RESULTS=$(find data/audit -name "results.json" -newer "$RUN_DIR/agent-log.jsonl" 2>/dev/null | head -1) && [ -n "$PIPELINE_RESULTS" ]; then
+  echo "[INFO] results.json found in pipeline output: $PIPELINE_RESULTS"
+  cp "$PIPELINE_RESULTS" "dashboard/public/$RUN_ID.json"
+  cp "$PIPELINE_RESULTS" "$RUN_DIR/results.json"
+else
+  echo "[ERROR] results.json not found in $RUN_DIR or data/audit/"
+fi
 ```
 
 Update `dashboard/public/index.json` — read existing, upsert this run (match on `run_id`), write back newest-first:
@@ -974,20 +982,22 @@ Also upsert into `./audit/index.json` (create with `{"runs": []}` if missing):
 
 After Gate 1 succeeds, load the owned-accounts list from `config/accounts.json`.
 
-1. Read `config/accounts.json`
-2. If found, extract `accounts` array, build set of owned account IDs (the `id` field)
-3. Add the caller's account ID to the set (always owned)
-4. If file missing or empty: set contains only caller account — no error, proceed
-
-Pass OWNED_ACCOUNTS to attack-paths subagent (via initial message or as part of initial context written to $RUN_DIR/context.json before dispatch) so it can classify cross-account trusts as internal vs external.
-
-Display at Gate 1:
+1. Read `config/accounts.json` and extract account count using jq:
+```bash
+if [ -f config/accounts.json ]; then
+  OWNED_ACCOUNTS=$(jq -r '[.accounts[].id] | . + ["'"$ACCOUNT_ID"'"] | unique' config/accounts.json)
+  OWNED_ACCOUNT_COUNT=$(echo "$OWNED_ACCOUNTS" | jq 'length')
+  OWNED_ACCOUNT_LIST=$(echo "$OWNED_ACCOUNTS" | jq -r '.[]')
+  echo "Owned accounts loaded: $OWNED_ACCOUNT_COUNT from config/accounts.json"
+  echo "$OWNED_ACCOUNTS" | jq -r '.[]' | while read id; do echo "  - $id"; done
+else
+  OWNED_ACCOUNTS=$(jq -n --arg id "$ACCOUNT_ID" '[$id]')
+  OWNED_ACCOUNT_COUNT=1
+  echo "Owned accounts: 1 (current session only — no config/accounts.json found)"
+fi
 ```
-Owned accounts loaded: [N] from config/accounts.json
-  - 123456789012 (production)
-  + [caller account ID] (current session)
-```
-If no config: `Owned accounts: 1 (current session only — no config/accounts.json found)`
+2. Do NOT count accounts manually — always use the jq output above
+3. Pass OWNED_ACCOUNTS to attack-paths subagent (via initial message or as part of initial context written to $RUN_DIR/context.json before dispatch) so it can classify cross-account trusts as internal vs external
 </account_context>
 
 <scp_config>
