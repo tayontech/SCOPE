@@ -12,6 +12,91 @@ You are SCOPE's STS/Organizations enumeration specialist. Dispatched by scope-au
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
 - Note: STS is a global service — ENABLED_REGIONS is not applicable and is ignored if received
 
+## Extraction Templates
+
+### sts_caller (from GetCallerIdentity)
+
+```bash
+CALLER_FINDINGS=$(echo "$STS_IDENTITY" | jq --arg account_id "$ACCOUNT_ID" '[
+  {
+    resource_type: "sts_caller",
+    resource_id: .Arn,
+    arn: .Arn,
+    region: "global",
+    caller_type: (
+      if (.Arn | test(":assumed-role/")) then "role"
+      elif (.Arn | test(":user/")) then "user"
+      elif (.Arn | test(":root")) then "root"
+      elif (.Arn | test(":federated-user/")) then "federated"
+      else "user"
+      end
+    ),
+    account_id: .Account,
+    user_id: .UserId,
+    findings: []
+  }
+]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for sts_caller"; STATUS="error"; }
+```
+
+### sts_org (from DescribeOrganization)
+
+```bash
+ORG_FINDINGS=$(echo "$ORG_DATA" | jq '[
+  {
+    resource_type: "sts_org",
+    resource_id: .Organization.Id,
+    arn: .Organization.Arn,
+    region: "global",
+    master_account: .Organization.MasterAccountId,
+    member_accounts: (
+      if $member_accounts_json then ($member_accounts_json | map(.Id)) else [] end
+    ),
+    findings: []
+  }
+]' --argjson member_accounts_json "${MEMBER_ACCOUNTS:-null}" 2>/dev/null) || { echo "[ERROR] jq extraction failed for sts_org"; STATUS="error"; }
+```
+
+On AccessDenied for DescribeOrganization: `ORG_FINDINGS="[]"`
+
+### sts_scp (from ListPolicies + DescribePolicy)
+
+```bash
+SCP_FINDINGS=$(echo "$SCP_POLICIES" | jq '[
+  .[] | {
+    resource_type: "sts_scp",
+    resource_id: .Name,
+    arn: .Arn,
+    region: "global",
+    policy_id: .Id,
+    targets: (.Targets // []),
+    deny_actions: (.DenyActions // []),
+    source: (.Source // "live"),
+    findings: []
+  }
+]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for sts_scp"; STATUS="error"; }
+```
+
+On AccessDenied for ListPolicies: `SCP_FINDINGS="[]"`
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "[]" | jq \
+  --argjson caller "$CALLER_FINDINGS" \
+  --argjson org "$ORG_FINDINGS" \
+  --argjson scp "$SCP_FINDINGS" \
+  '($caller + $org + $scp) | sort_by(.arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`sts get-caller-identity`, `organizations describe-organization`, `organizations list-policies`, `organizations describe-policy`), store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges resource type arrays, sorts by `arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/sts.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/sts.json`
+
 ## Output Contract
 
 Write via Bash redirect (you do NOT have Write tool access):
@@ -54,37 +139,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/sts.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/sts.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/sts.json" ]; then
-  echo "[VALIDATION] sts.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/sts.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] sts.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/sts.json" 2>/dev/null || {
-  echo "[VALIDATION] sts.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/sts.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] sts.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/sts.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] sts.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/sts.json" > "$RUN_DIR/sts.json.tmp" && mv "$RUN_DIR/sts.json.tmp" "$RUN_DIR/sts.json"
 fi
 ```
 
@@ -92,9 +154,11 @@ If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above
 Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
-- AccessDenied on specific API calls: log, continue with available data, set status "partial"
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data
 - All API calls fail: set status "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery — report jq stderr
+- List denied APIs in ERRORS field (e.g., `["organizations:DescribeOrganization AccessDenied"]`)
 
 ### Expected vs Unexpected AccessDenied
 - Organizations API (DescribeOrganization, ListAccounts, ListPolicies): AccessDenied is EXPECTED on non-management accounts. Log as INFO, do NOT set STATUS=partial.

@@ -277,8 +277,24 @@ On Claude Code: Use the Agent tool to dispatch each subagent defined in
 agents/subagents/scope-enum-{service}.md (installed to .claude/agents/).
 Dispatch ALL subagents concurrently in the same response — they run in parallel.
 
-On Gemini CLI: Delegate to enumeration subagents in .agents/agents/.
-Dispatch all concurrently using native subagent delegation.
+On Gemini CLI: Delegate to enumeration subagents in .gemini/agents/
+(e.g., scope-enum-iam, scope-enum-s3, etc.) using native subagent delegation.
+Each subagent MUST receive the ENABLED_REGIONS value in its dispatch message —
+subagents must parse this from the message and set it as a shell variable
+before enumeration. Do NOT fall back to a generalist agent — always use the
+named scope-enum-* agent files.
+
+**Wave-based dispatch (Gemini CLI only):** Do NOT dispatch all 12 subagents at once.
+The three heaviest agents run solo to guarantee full resources. Everything else runs
+concurrently in a final wave:
+
+  Wave 1: scope-enum-iam (solo — deepest per-entity API calls)
+  Wave 2 (after Wave 1 completes): scope-enum-ec2 (solo — 17 regions × 5 resource types)
+  Wave 3 (after Wave 2 completes): scope-enum-s3 (solo — per-bucket deep checks)
+  Wave 4 (after Wave 3 completes): scope-enum-sts, scope-enum-kms, scope-enum-secrets, scope-enum-lambda, scope-enum-rds, scope-enum-sns, scope-enum-sqs, scope-enum-apigateway, scope-enum-codebuild (all 9 concurrently)
+
+Wait for each wave to finish before dispatching the next wave.
+Collect return summaries from each wave as they complete.
 
 On Codex: Dispatch all enumeration subagents in parallel using the registered Codex agent
 roles from .codex/config.toml (e.g., scope-enum-iam, scope-enum-s3, etc.). With
@@ -415,9 +431,9 @@ Wait for operator approval. If operator says "skip", jump to findings.md generat
 </gate_3_enumeration_summary>
 
 <module_validation>
-## Module JSON Validation (Inline Post-Check)
+## Module JSON Validation (Node Script Post-Check)
 
-After all enumeration subagents complete and before presenting Gate 3, validate each module JSON file in $RUN_DIR/. This catches schema violations in module output that bypasses the Write tool hook (subagents write via Bash redirect).
+After all enumeration subagents complete and before presenting Gate 3, validate each module JSON file in $RUN_DIR/ using `bin/validate-enum-output.js`. This performs full per-service schema validation (envelope fields, per-resource required fields, trust entries, sort order) using a single source of truth.
 
 This check is NON-BLOCKING — log warnings, do not abort the run. Invalid module data degrades attack-paths quality but partial data is better than no data.
 
@@ -438,26 +454,23 @@ for MODULE_FILE in "$RUN_DIR"/*.json; do
   MODULE=$(jq -r '.module // empty' "$MODULE_FILE" 2>/dev/null)
   [ -z "$MODULE" ] && continue
 
-  # Validate status enum
-  STATUS=$(jq -r '.status // empty' "$MODULE_FILE" 2>/dev/null)
-  case "$STATUS" in
-    complete|partial|error) ;;
-    "") VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing required field 'status'") ;;
-    *) VALIDATION_WARNINGS+=("[WARN] $BASENAME: invalid status '$STATUS' (expected: complete|partial|error)") ;;
-  esac
+  # Run full schema validation via node script
+  if command -v node >/dev/null 2>&1; then
+    OUTPUT=$(node bin/validate-enum-output.js "$MODULE_FILE" 2>&1)
+    EXIT_CODE=$?
 
-  # Validate findings is an array
-  FINDINGS_TYPE=$(jq -r '.findings | type' "$MODULE_FILE" 2>/dev/null || echo "null")
-  if [ "$FINDINGS_TYPE" != "array" ]; then
-    VALIDATION_WARNINGS+=("[WARN] $BASENAME: findings is $FINDINGS_TYPE, expected array")
-  fi
-
-  # Validate required fields exist
-  for FIELD in account_id region timestamp; do
-    if [ "$(jq "has(\"$FIELD\")" "$MODULE_FILE" 2>/dev/null)" != "true" ]; then
-      VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing required field '$FIELD'")
+    if [ $EXIT_CODE -eq 1 ]; then
+      # Validation errors -- collect as warnings (non-blocking)
+      while IFS= read -r line; do
+        VALIDATION_WARNINGS+=("[WARN] $line")
+      done <<< "$OUTPUT"
+    elif [ $EXIT_CODE -eq 2 ]; then
+      VALIDATION_WARNINGS+=("[WARN] $BASENAME: validator could not process file")
     fi
-  done
+    # EXIT_CODE 0 = pass, no action needed
+  else
+    VALIDATION_WARNINGS+=("[WARN] node not available -- skipping schema validation for $BASENAME")
+  fi
 done
 
 # Display warnings at Gate 3 if any
@@ -710,11 +723,19 @@ control artifacts already generated at ./defend/defend-{timestamp}/.]
 
 After findings.md is written (and Gate 4 was NOT skipped), export results.json.
 
-The attack-paths subagent already wrote `$RUN_DIR/results.json`. Export a copy to the dashboard:
+The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Check both locations:
 
 ```bash
 mkdir -p dashboard/public
-cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
+if [ -f "$RUN_DIR/results.json" ]; then
+  cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
+elif PIPELINE_RESULTS=$(find data/audit -name "results.json" -newer "$RUN_DIR/agent-log.jsonl" 2>/dev/null | head -1) && [ -n "$PIPELINE_RESULTS" ]; then
+  echo "[INFO] results.json found in pipeline output: $PIPELINE_RESULTS"
+  cp "$PIPELINE_RESULTS" "dashboard/public/$RUN_ID.json"
+  cp "$PIPELINE_RESULTS" "$RUN_DIR/results.json"
+else
+  echo "[ERROR] results.json not found in $RUN_DIR or data/audit/"
+fi
 ```
 
 Update `dashboard/public/index.json` — read existing, upsert this run (match on `run_id`), write back newest-first:
@@ -961,20 +982,22 @@ Also upsert into `./audit/index.json` (create with `{"runs": []}` if missing):
 
 After Gate 1 succeeds, load the owned-accounts list from `config/accounts.json`.
 
-1. Read `config/accounts.json`
-2. If found, extract `accounts` array, build set of owned account IDs (the `id` field)
-3. Add the caller's account ID to the set (always owned)
-4. If file missing or empty: set contains only caller account — no error, proceed
-
-Pass OWNED_ACCOUNTS to attack-paths subagent (via initial message or as part of initial context written to $RUN_DIR/context.json before dispatch) so it can classify cross-account trusts as internal vs external.
-
-Display at Gate 1:
+1. Read `config/accounts.json` and extract account count using jq:
+```bash
+if [ -f config/accounts.json ]; then
+  OWNED_ACCOUNTS=$(jq -r '[.accounts[].id] | . + ["'"$ACCOUNT_ID"'"] | unique' config/accounts.json)
+  OWNED_ACCOUNT_COUNT=$(echo "$OWNED_ACCOUNTS" | jq 'length')
+  OWNED_ACCOUNT_LIST=$(echo "$OWNED_ACCOUNTS" | jq -r '.[]')
+  echo "Owned accounts loaded: $OWNED_ACCOUNT_COUNT from config/accounts.json"
+  echo "$OWNED_ACCOUNTS" | jq -r '.[]' | while read id; do echo "  - $id"; done
+else
+  OWNED_ACCOUNTS=$(jq -n --arg id "$ACCOUNT_ID" '[$id]')
+  OWNED_ACCOUNT_COUNT=1
+  echo "Owned accounts: 1 (current session only — no config/accounts.json found)"
+fi
 ```
-Owned accounts loaded: [N] from config/accounts.json
-  - 123456789012 (production)
-  + [caller account ID] (current session)
-```
-If no config: `Owned accounts: 1 (current session only — no config/accounts.json found)`
+2. Do NOT count accounts manually — always use the jq output above
+3. Pass OWNED_ACCOUNTS to attack-paths subagent (via initial message or as part of initial context written to $RUN_DIR/context.json before dispatch) so it can classify cross-account trusts as internal vs external
 </account_context>
 
 <scp_config>

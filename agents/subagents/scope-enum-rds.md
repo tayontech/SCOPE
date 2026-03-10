@@ -17,6 +17,82 @@ You are SCOPE's RDS enumeration specialist. You are dispatched by the scope-audi
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-rds: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Extraction Templates
+
+### rds_instance (from describe-db-instances, per region)
+
+```bash
+INSTANCE_FINDINGS=$(echo "$RDS_INSTANCES" | jq --arg region "$CURRENT_REGION" '[
+  .DBInstances[] | {
+    resource_type: "rds_instance",
+    resource_id: .DBInstanceIdentifier,
+    arn: .DBInstanceArn,
+    region: $region,
+    engine: .Engine,
+    publicly_accessible: .PubliclyAccessible,
+    storage_encrypted: .StorageEncrypted,
+    deletion_protection: (.DeletionProtection // false),
+    iam_auth_enabled: (.IAMDatabaseAuthenticationEnabled // false),
+    kms_key_id: (.KmsKeyId // ""),
+    vpc_security_groups: ([.VpcSecurityGroups[]?.VpcSecurityGroupId] // []),
+    findings: []
+  }
+]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for rds_instance in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for describe-db-instances: `INSTANCE_FINDINGS="[]"`
+
+### rds_snapshot (from describe-db-snapshots --snapshot-type manual, per region)
+
+```bash
+SNAPSHOT_FINDINGS=$(echo "$RDS_SNAPSHOTS" | jq --arg region "$CURRENT_REGION" '[
+  .DBSnapshots[] | {
+    resource_type: "rds_snapshot",
+    resource_id: .DBSnapshotIdentifier,
+    arn: .DBSnapshotArn,
+    region: $region,
+    encrypted: .Encrypted,
+    publicly_accessible: (
+      if .DBSnapshotAttributes then
+        (.DBSnapshotAttributes[] | select(.AttributeName == "restore") | .AttributeValues | contains(["all"])) // false
+      else false end
+    ),
+    findings: []
+  }
+]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for rds_snapshot in $CURRENT_REGION"; STATUS="error"; }
+```
+
+On AccessDenied for describe-db-snapshots: `SNAPSHOT_FINDINGS="[]"`
+
+### Regional Iteration
+
+```bash
+ALL_FINDINGS="[]"
+for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  # AWS CLI calls
+  RDS_INSTANCES=$(aws rds describe-db-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBInstances AccessDenied $CURRENT_REGION"); INSTANCE_FINDINGS="[]"; }
+  RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION"); SNAPSHOT_FINDINGS="[]"; }
+  # Run extraction templates above
+  # Accumulate
+  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson inst "$INSTANCE_FINDINGS" --argjson snap "$SNAPSHOT_FINDINGS" '. + $inst + $snap')
+done
+```
+
+### Combine + Sort
+
+```bash
+FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+```
+
+## Enumeration Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`rds describe-db-instances`, `rds describe-db-snapshots --snapshot-type manual`) per region, store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/rds.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/rds.json`
+
 ## Output Contract
 
 **Write this file:** `$RUN_DIR/rds.json`
@@ -62,37 +138,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation (MANDATORY)
 
-After writing `$RUN_DIR/rds.json`, verify the output before reporting completion.
-
-**Why this check exists:** The jq redirect that writes this file can produce a 0-byte file if
-`FINDINGS_JSON` is unset or invalid — jq exits non-zero, the redirect creates an empty file,
-and without this check the agent would report STATUS: complete with no data. Retrying the write
-without fixing FINDINGS_JSON produces the same empty result; the correct response is STATUS: error.
+After writing `$RUN_DIR/rds.json`, validate output against the per-service schema:
 
 ```bash
-# Step 1: Verify file exists and is non-empty
-if [ ! -s "$RUN_DIR/rds.json" ]; then
-  echo "[VALIDATION] rds.json failed: file is empty or missing (check FINDINGS_JSON variable)"
+node bin/validate-enum-output.js "$RUN_DIR/rds.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  echo "[VALIDATION] rds.json failed schema validation (exit $VALIDATION_EXIT)"
   STATUS="error"
-fi
-
-# Step 2: Verify valid JSON
-jq empty "$RUN_DIR/rds.json" 2>/dev/null || {
-  echo "[VALIDATION] rds.json failed: invalid JSON syntax"
-  STATUS="error"
-}
-
-# Step 3: Verify required envelope fields
-jq -e ".module and .account_id and .findings" "$RUN_DIR/rds.json" > /dev/null 2>/dev/null || {
-  echo "[VALIDATION] rds.json failed: missing required envelope fields (module, account_id, findings)"
-  STATUS="error"
-}
-
-# Step 4: Verify findings is an array (not an object)
-FINDINGS_TYPE=$(jq -r '.findings | type' "$RUN_DIR/rds.json" 2>/dev/null)
-if [ "$FINDINGS_TYPE" = "object" ]; then
-  echo "[VALIDATION] rds.json failed: findings is an object, must be an array — rebuild FINDINGS_JSON as [...] not {...}"
-  jq '.findings = [.findings | to_entries[] | .value]' "$RUN_DIR/rds.json" > "$RUN_DIR/rds.json.tmp" && mv "$RUN_DIR/rds.json.tmp" "$RUN_DIR/rds.json"
 fi
 ```
 
@@ -101,9 +154,11 @@ Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
-- AccessDenied on specific API calls: log the error, continue with available data, set status to "partial"
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
 - All API calls fail: set status to "error", write empty findings array, include error field in JSON
 - Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["rds:DescribeDBInstances AccessDenied us-east-1"]`)
 
 ## Module Constraints
 
