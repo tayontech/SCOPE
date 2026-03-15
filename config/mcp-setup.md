@@ -12,22 +12,23 @@ This guide walks you through connecting SCOPE's `scope-investigate` agent to you
 
 ## Prerequisites
 
-Before starting, confirm you have all three of the following:
+Before starting, confirm you have:
 
 1. **Splunk Cloud Platform 9.2–10.2** — admin role required to install apps from Splunkbase
-2. **Node.js v18 or later** — required by the `mcp-remote` stdio transport that connects Claude Code to the MCP server
+2. **Node.js v18 or later** — required by the `mcp-remote` stdio transport
 
    ```bash
    node --version
    # Expected: v18.x.x or higher
    ```
 
-3. **Claude Code v1.0.48 or later** — required for `${VAR}` environment variable expansion in `.mcp.json` at launch time
+3. **One of the following CLI tools:**
 
-   ```bash
-   claude --version
-   # Expected: 1.0.48 or higher
-   ```
+   | Platform | Minimum Version | MCP Config Location |
+   |----------|----------------|---------------------|
+   | Claude Code | v1.0.48+ | `.mcp.json` (project root) |
+   | Gemini CLI | Latest | `.gemini/settings.json` |
+   | Codex CLI | Latest | `.codex/config.toml` |
 
 ---
 
@@ -64,7 +65,7 @@ Before starting, confirm you have all three of the following:
 
 ## Step 4 — Configure Environment Variables
 
-Add the two variables to your shell profile (`.bashrc`, `.zshrc`, or equivalent):
+Add the two variables to your shell profile (`.zshrc`, `.bashrc`, or equivalent):
 
 ```bash
 export SPLUNK_URL="https://your-endpoint-from-step-3"
@@ -90,15 +91,17 @@ Both should print non-empty values before continuing.
 
 ## Step 5 — Configure SCOPE
 
-Copy the MCP configuration template to activate it:
+Pick the tab for your platform. Each platform reads MCP config from a different location and format.
+
+### Claude Code
+
+Copy the MCP configuration template:
 
 ```bash
 cp .mcp.example.json .mcp.json
 ```
 
-No edits are needed. The `.mcp.json` file reads `SPLUNK_URL` and `SPLUNK_TOKEN` from your shell environment at Claude Code startup — no credential values are stored in the file itself. As a defense-in-depth measure, `.mcp.json` is listed in `.gitignore` to prevent accidental credential commits.
-
-See `.mcp.example.json` for the full template:
+No edits needed. The `.mcp.json` file reads `SPLUNK_URL` and `SPLUNK_TOKEN` from your shell environment at startup. As a defense-in-depth measure, `.mcp.json` is listed in `.gitignore`.
 
 ```json
 {
@@ -117,12 +120,55 @@ See `.mcp.example.json` for the full template:
 }
 ```
 
+### Gemini CLI
+
+The MCP config goes in `.gemini/settings.json`. SCOPE includes a launcher script (`bin/splunk-mcp-start.sh`) that handles environment variable loading, PATH setup, validation, and debug logging.
+
+Add the `mcpServers` block at the top level of `.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "splunk-mcp-server": {
+      "command": "bash",
+      "args": ["bin/splunk-mcp-start.sh"],
+      "env": {
+        "SPLUNK_URL": "$SPLUNK_URL",
+        "SPLUNK_TOKEN": "$SPLUNK_TOKEN"
+      }
+    }
+  }
+}
+```
+
+> **Why the `env` block?** Gemini CLI automatically redacts environment variables matching patterns like `*TOKEN*`, `*SECRET*`, `*KEY*`. Without the explicit `env` block, `SPLUNK_TOKEN` gets stripped before reaching the MCP server. Variables declared in `env` bypass this redaction.
+
+> **Debug logging:** The launcher writes to `~/.scope/splunk-mcp.log` on every startup. If the connection fails, check that log for the exact error. It records env var state (token length only, never the value), node/npx paths, and any startup failures.
+
+### Codex CLI
+
+Codex reads MCP config from `.codex/config.toml`. Create the file if it doesn't exist:
+
+```toml
+[mcp_servers.splunk-mcp-server]
+command = "npx"
+args = ["-y", "mcp-remote"]
+startup_timeout_sec = 30
+tool_timeout_sec = 60
+
+[mcp_servers.splunk-mcp-server.env]
+SPLUNK_URL = "$SPLUNK_URL"
+SPLUNK_TOKEN = "$SPLUNK_TOKEN"
+```
+
+> **Note:** Codex uses TOML format, not JSON. The `bearer_token_env_var` field can be used for HTTP transport, but since the Splunk MCP server uses the `mcp-remote` stdio bridge, environment variables are passed via the `env` block.
+
 ---
 
 ## Step 6 — Verify the Connection
 
-1. Open a terminal in the SCOPE project directory (where `.mcp.json` is located)
-2. Start Claude Code: `claude`
+1. Open a terminal in the SCOPE project directory
+2. Start your CLI tool (`claude`, `gemini`, or `codex`)
 3. Run the investigate command: `/scope:investigate`
 4. Watch the startup output — the agent probes for Splunk MCP connectivity automatically
 
@@ -170,6 +216,24 @@ SCOPE's safety model requires that no MCP tool can execute AWS write operations.
 
 ## Troubleshooting
 
+### MCP Error -32000 (Transport Failure)
+
+**Cause:** The MCP server process starts but cannot reach the Splunk endpoint. Most common reasons:
+
+1. `SPLUNK_URL` is the Splunk Web URL instead of the MCP endpoint URL
+2. Environment variables are not exported in the shell that launched the CLI tool
+3. Firewall blocking the MCP endpoint port
+
+**Fix:** Verify the endpoint URL is from the MCP Server app's Connect screen (not your Splunk Web login URL). Test the connection manually:
+
+```bash
+npx -y mcp-remote "$SPLUNK_URL" --header "Authorization: Bearer $SPLUNK_TOKEN"
+```
+
+If this errors, the issue is between your machine and Splunk, not the CLI tool.
+
+---
+
 ### 401 Unauthorized
 
 **Cause:** Token was generated from Splunk Settings → Tokens instead of the MCP Server app.
@@ -209,6 +273,14 @@ npx --version
 claude --version
 # If below 1.0.48, update via your installation method
 ```
+
+---
+
+### Gemini CLI: Token Redacted / Empty Auth Header
+
+**Cause:** Gemini CLI's automatic environment sanitization strips variables matching `*TOKEN*` patterns before they reach the MCP server.
+
+**Fix:** Ensure the `env` block is present in your `.gemini/settings.json` MCP config. Variables explicitly declared in `env` bypass Gemini's redaction. See the Gemini CLI section in Step 5.
 
 ---
 
