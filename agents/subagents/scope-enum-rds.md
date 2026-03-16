@@ -69,6 +69,7 @@ On AccessDenied for describe-db-snapshots: `SNAPSHOT_FINDINGS="[]"`
 ```bash
 ALL_FINDINGS="[]"
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-rds] Scanning region: $CURRENT_REGION"
   # AWS CLI calls
   RDS_INSTANCES=$(aws rds describe-db-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBInstances AccessDenied $CURRENT_REGION"); INSTANCE_FINDINGS="[]"; }
   RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION"); SNAPSHOT_FINDINGS="[]"; }

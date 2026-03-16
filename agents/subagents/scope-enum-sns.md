@@ -118,8 +118,10 @@ On AccessDenied for list-topics or get-topic-attributes: `TOPIC_FINDINGS="[]"`
 ```bash
 ALL_FINDINGS="[]"
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-sns] Scanning region: $CURRENT_REGION"
   TOPICS=$(aws sns list-topics --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sns:ListTopics AccessDenied $CURRENT_REGION"); continue; }
   for TOPIC_ARN in $(echo "$TOPICS" | jq -r '.Topics[].TopicArn'); do
+    echo "[scope-enum-sns] Processing: $TOPIC_ARN"
     TOPIC_ATTRS=$(aws sns get-topic-attributes --topic-arn "$TOPIC_ARN" --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sns:GetTopicAttributes AccessDenied $TOPIC_ARN"); continue; }
     # Run sns_topic extraction template above
     ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$TOPIC_FINDINGS]" '. + $new')

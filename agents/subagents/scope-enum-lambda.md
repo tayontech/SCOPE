@@ -136,8 +136,10 @@ ENV_SECRET_NAMES_JSON=$(echo "$FUNC_CONFIG" | jq '[
 ALL_FINDINGS="[]"
 ERRORS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-lambda] Scanning region: $CURRENT_REGION"
   FUNCTIONS=$(aws lambda list-functions --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("lambda:ListFunctions AccessDenied $CURRENT_REGION"); continue; }
   for FUNC_ARN in $(echo "$FUNCTIONS" | jq -r '.Functions[].FunctionArn'); do
+    echo "[scope-enum-lambda] Processing: $FUNC_ARN"
     FUNC_CONFIG=$(echo "$FUNCTIONS" | jq --arg arn "$FUNC_ARN" '.Functions[] | select(.FunctionArn == $arn)')
     FUNC_NAME=$(echo "$FUNC_CONFIG" | jq -r '.FunctionName')
     FUNC_RUNTIME=$(echo "$FUNC_CONFIG" | jq -r '.Runtime // "unknown"')

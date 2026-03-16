@@ -136,8 +136,10 @@ On AccessDenied for list-grants: set `GRANTS_JSON="[]"`
 ALL_FINDINGS="[]"
 ERRORS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-kms] Scanning region: $CURRENT_REGION"
   KEYS=$(aws kms list-keys --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("kms:ListKeys AccessDenied $CURRENT_REGION"); continue; }
   for KEY_ARN in $(echo "$KEYS" | jq -r '.Keys[].KeyArn'); do
+    echo "[scope-enum-kms] Processing: $KEY_ARN"
     KEY_ID=$(echo "$KEY_ARN" | rev | cut -d'/' -f1 | rev)
     # Describe key — skip AWS-managed keys
     KEY_DESC=$(aws kms describe-key --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("kms:DescribeKey AccessDenied $KEY_ID"); continue; }
