@@ -108,6 +108,7 @@ USER_INLINE_POLICIES="[]"
 USER_LOGIN_PROFILE="[]"
 
 for USERNAME in $(echo "$IAM_USERS" | jq -r '.Users[].UserName'); do
+  echo "[scope-enum-iam] Processing: $USERNAME"
   # Access keys
   KEYS=$(aws iam list-access-keys --user-name "$USERNAME" --output json 2>&1) || { ERRORS+=("iam:ListAccessKeys AccessDenied $USERNAME"); continue; }
   USER_ACCESS_KEYS=$(echo "$USER_ACCESS_KEYS" | jq --argjson new "$(echo "$KEYS" | jq '[.AccessKeyMetadata[] | . + {UserName: "'"$USERNAME"'"}]')" '. + $new')
@@ -175,6 +176,7 @@ ROLE_ATTACHED_POLICIES="[]"
 ROLE_INLINE_POLICIES="[]"
 
 for ROLE_NAME in $(echo "$IAM_ROLES" | jq -r '.Roles[] | select(.RoleName | startswith("AWSServiceRole") | not) | .RoleName'); do
+  echo "[scope-enum-iam] Processing: $ROLE_NAME"
   # get-role returns decoded AssumeRolePolicyDocument (list-roles returns URL-encoded)
   ROLE=$(aws iam get-role --role-name "$ROLE_NAME" --output json 2>&1) || { ERRORS+=("iam:GetRole AccessDenied $ROLE_NAME"); continue; }
   ROLE_DETAIL=$(echo "$ROLE_DETAIL" | jq --argjson new "$(echo "$ROLE" | jq '.Role')" '. + [$new]')
@@ -218,6 +220,7 @@ GROUP_MEMBERS="[]"
 GROUP_ATTACHED_POLICIES="[]"
 
 for GROUP_NAME in $(echo "$IAM_GROUPS" | jq -r '.Groups[].GroupName'); do
+  echo "[scope-enum-iam] Processing: $GROUP_NAME"
   # Members
   MEMBERS=$(aws iam get-group --group-name "$GROUP_NAME" --output json 2>&1) || { ERRORS+=("iam:GetGroup AccessDenied $GROUP_NAME"); continue; }
   GROUP_MEMBERS=$(echo "$GROUP_MEMBERS" | jq --argjson new "$(echo "$MEMBERS" | jq '[.Users[] | {GroupName: "'"$GROUP_NAME"'", UserName: .UserName}]')" '. + $new')

@@ -109,6 +109,7 @@ Public snapshot detection — check createVolumePermission for "all" group:
 ```bash
 PUBLIC_SNAPSHOT_IDS="[]"
 for SNAP_ID in $(echo "$SNAPSHOTS" | jq -r '.Snapshots[].SnapshotId'); do
+  echo "[scope-enum-ec2] Processing: $SNAP_ID"
   PERMS=$(aws ec2 describe-snapshot-attribute --snapshot-id "$SNAP_ID" --attribute createVolumePermission --region "$CURRENT_REGION" --output json 2>&1) || continue
   IS_PUBLIC=$(echo "$PERMS" | jq '[.CreateVolumePermissions[]? | select(.Group == "all")] | length > 0')
   if [ "$IS_PUBLIC" = "true" ]; then
@@ -155,6 +156,7 @@ Per-region ELB listener collection:
 ```bash
 ELBV2_LISTENERS="[]"
 for LB_ARN in $(echo "$ELBV2_LBS" | jq -r '.LoadBalancers[].LoadBalancerArn'); do
+  echo "[scope-enum-ec2] Processing: $LB_ARN"
   LSNRS=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --region "$CURRENT_REGION" --output json 2>&1) || continue
   ELBV2_LISTENERS=$(echo "$ELBV2_LISTENERS" | jq --argjson new "$(echo "$LSNRS" | jq '.Listeners')" '. + $new')
 done
@@ -167,6 +169,7 @@ On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `C
 ```bash
 ALL_FINDINGS="[]"
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-ec2] Scanning region: $CURRENT_REGION"
   INSTANCES=$(aws ec2 describe-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeInstances AccessDenied $CURRENT_REGION"); INSTANCES='{"Reservations":[]}'; }
   SECURITY_GROUPS=$(aws ec2 describe-security-groups --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeSecurityGroups AccessDenied $CURRENT_REGION"); SECURITY_GROUPS='{"SecurityGroups":[]}'; }
   VPCS=$(aws ec2 describe-vpcs --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeVpcs AccessDenied $CURRENT_REGION"); VPCS='{"Vpcs":[]}'; }

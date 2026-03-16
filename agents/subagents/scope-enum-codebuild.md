@@ -48,6 +48,7 @@ On AccessDenied for list-projects or batch-get-projects: `PROJECT_FINDINGS="[]"`
 ```bash
 ALL_FINDINGS="[]"
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-codebuild] Scanning region: $CURRENT_REGION"
   PROJECT_LIST=$(aws codebuild list-projects --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("codebuild:ListProjects AccessDenied $CURRENT_REGION"); continue; }
   PROJECT_NAMES=$(echo "$PROJECT_LIST" | jq -r '.projects[]?' 2>/dev/null)
   if [ -n "$PROJECT_NAMES" ]; then

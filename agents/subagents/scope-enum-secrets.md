@@ -122,8 +122,10 @@ On AccessDenied for get-resource-policy or no resource policy: set `RESOURCE_POL
 ALL_FINDINGS="[]"
 ERRORS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-secrets] Scanning region: $CURRENT_REGION"
   SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("secretsmanager:ListSecrets AccessDenied $CURRENT_REGION"); continue; }
   for SECRET_ARN in $(echo "$SECRETS" | jq -r '.SecretList[].ARN'); do
+    echo "[scope-enum-secrets] Processing: $SECRET_ARN"
     SECRET_NAME=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .Name')
     ROTATION_ENABLED=$(echo "$SECRETS" | jq --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .RotationEnabled // false')
     LAST_ROTATED=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .LastRotatedDate // ""')

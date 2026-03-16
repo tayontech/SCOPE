@@ -15,6 +15,11 @@
   "experimental": {
     "enableAgents": true
   },
+  "tools": {
+    "shell": {
+      "inactivityTimeout": 1800000
+    }
+  },
   "hooks": {
     "BeforeTool": [
       {

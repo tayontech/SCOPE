@@ -154,9 +154,11 @@ HTTP and WebSocket APIs do not support resource policies -- `resource_policy_pri
 ALL_FINDINGS="[]"
 ERRORS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-apigateway] Scanning region: $CURRENT_REGION"
   # REST APIs (apigateway v1)
   REST_APIS=$(aws apigateway get-rest-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigateway:GetRestApis AccessDenied $CURRENT_REGION"); REST_APIS='{"items":[]}'; }
   for REST_API_ID in $(echo "$REST_APIS" | jq -r '.items[]?.id // empty'); do
+    echo "[scope-enum-apigateway] Processing: $REST_API_ID"
     REST_API_NAME=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .name')
     REST_API_POLICY=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .policy // "{}"')
     # URL-decode the policy if needed (REST API policies are URL-encoded)
@@ -181,6 +183,7 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   # HTTP and WebSocket APIs (apigatewayv2)
   V2_APIS=$(aws apigatewayv2 get-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigatewayv2:GetApis AccessDenied $CURRENT_REGION"); V2_APIS='{"Items":[]}'; }
   for V2_API_ID in $(echo "$V2_APIS" | jq -r '.Items[]?.ApiId // empty'); do
+    echo "[scope-enum-apigateway] Processing: $V2_API_ID"
     V2_API_NAME=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .Name')
     V2_PROTOCOL=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .ProtocolType')
     V2_API_TYPE=$(echo "$V2_PROTOCOL" | tr '[:upper:]' '[:lower:]')

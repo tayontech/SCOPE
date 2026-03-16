@@ -127,6 +127,7 @@ ALL_FINDINGS="[]"
 ERRORS=()
 BUCKETS=$(aws s3api list-buckets --output json 2>&1) || { ERRORS+=("s3api:ListBuckets AccessDenied"); STATUS="error"; }
 for BUCKET_NAME in $(echo "$BUCKETS" | jq -r '.Buckets[].Name'); do
+  echo "[scope-enum-s3] Processing: $BUCKET_NAME"
   # Get bucket region
   LOCATION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --output json 2>&1) || { ERRORS+=("s3api:GetBucketLocation AccessDenied $BUCKET_NAME"); continue; }
   BUCKET_REGION=$(echo "$LOCATION" | jq -r '.LocationConstraint // "us-east-1"')

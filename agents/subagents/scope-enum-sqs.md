@@ -119,8 +119,10 @@ On AccessDenied for list-queues or get-queue-attributes: `QUEUE_FINDINGS="[]"`
 ```bash
 ALL_FINDINGS="[]"
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  echo "[scope-enum-sqs] Scanning region: $CURRENT_REGION"
   QUEUES=$(aws sqs list-queues --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sqs:ListQueues AccessDenied $CURRENT_REGION"); continue; }
   for QUEUE_URL in $(echo "$QUEUES" | jq -r '.QueueUrls[]? // empty'); do
+    echo "[scope-enum-sqs] Processing: $QUEUE_URL"
     QUEUE_ATTRS=$(aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names All --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sqs:GetQueueAttributes AccessDenied $QUEUE_URL"); continue; }
     # Run sqs_queue extraction template above
     ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$QUEUE_FINDINGS]" '. + $new')
