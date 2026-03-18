@@ -749,13 +749,28 @@ function promptUser(question) {
 }
 
 function runInteractive() {
-  console.log('\nSCOPE Install Script');
-  console.log('Which editor(s) would you like to install to?');
-  console.log('  1) Claude Code');
-  console.log('  2) Gemini CLI');
-  console.log('  3) Codex');
-  console.log('  4) All three editors');
-  const choice = promptUser('\nEnter choice [1-4]: ');
+  const purple = '\x1b[35m';
+  const dim = '\x1b[2m';
+  const bold = '\x1b[1m';
+  const reset = '\x1b[0m';
+
+  console.log('');
+  console.log(purple + '   ___  ___ ___  ___ ___');
+  console.log('  / __|/ __/ _ \\| _ \\ __|');
+  console.log('  \\__ \\ (_| (_) |  _/ _|');
+  console.log('  |___/\\___\\___/|_| |___|' + reset);
+  console.log('');
+  console.log(dim + '  Security Cloud Ops Purple Engagement' + reset);
+  console.log(dim + '  AI agent suite for AWS purple team operations' + reset);
+  console.log('');
+  console.log(bold + '  Which runtime(s) would you like to install for?' + reset);
+  console.log('');
+  console.log(purple + '  1) Claude Code   ' + dim + '(.claude/)' + reset);
+  console.log(purple + '  2) Gemini CLI    ' + dim + '(.gemini/ + .agents/)' + reset);
+  console.log(purple + '  3) Codex         ' + dim + '(.codex/ + .agents/)' + reset);
+  console.log(purple + '  4) All' + reset);
+  console.log('');
+  const choice = promptUser(purple + '  Choice: ' + reset);
 
   let editors = [];
   if (choice === '1') editors = ['claude'];
@@ -763,13 +778,24 @@ function runInteractive() {
   else if (choice === '3') editors = ['codex'];
   else if (choice === '4') editors = ['claude', 'gemini', 'codex'];
   else {
-    console.error('Invalid choice. Run with --help for usage.');
+    console.error('Invalid choice. Enter 1-4.');
     process.exit(1);
   }
 
-  const scopeChoice = promptUser('Install globally (~/.<editor>/) or locally (./<editor>/)? [G/l]: ');
-  const scope = scopeChoice.toLowerCase() === 'l' ? 'local' : 'global';
+  console.log('');
+  console.log(bold + '  Install scope:' + reset);
+  console.log('');
+  console.log(purple + '  1) Local     ' + dim + '(./<editor>/ in project)' + reset);
+  console.log(purple + '  2) Global    ' + dim + '(~/.<editor>/ in home)' + reset);
+  console.log('');
+  const scopeChoice = promptUser(purple + '  Choice: ' + reset);
+  if (scopeChoice !== '1' && scopeChoice !== '2') {
+    console.error('Invalid choice. Enter 1 or 2.');
+    process.exit(1);
+  }
+  const scope = scopeChoice === '2' ? 'global' : 'local';
 
+  console.log('');
   return { editors, scope };
 }
 

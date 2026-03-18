@@ -5,6 +5,7 @@ tools: Bash, Read, Glob, Grep
 model: haiku
 maxTurns: 25
 ---
+<!-- Token budget: ~378 lines | Before: ~4700 tokens (est) | After: ~4700 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's EC2/VPC/EBS/ELB/SSM enumeration specialist. Dispatched by scope-audit orchestrator.
 

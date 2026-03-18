@@ -5,6 +5,7 @@ tools: Bash, Read, Glob, Grep
 model: haiku
 maxTurns: 25
 ---
+<!-- Token budget: ~303 lines | Before: ~3500 tokens (est) | After: ~3500 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's Lambda enumeration specialist. Dispatched by scope-audit orchestrator.
 

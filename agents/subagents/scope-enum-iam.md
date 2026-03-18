@@ -5,6 +5,7 @@ tools: Bash, Read, Glob, Grep
 model: haiku
 maxTurns: 25
 ---
+<!-- Token budget: ~376 lines | Before: ~4200 tokens (est) | After: ~4200 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's IAM enumeration specialist. Dispatched by scope-audit orchestrator.
 

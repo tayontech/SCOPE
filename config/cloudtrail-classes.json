@@ -1,0 +1,248 @@
+{
+  "version": "2026-03",
+  "verified": "AWS CloudTrail docs 2026-03",
+  "default_rule": "MGT",
+  "classes": {
+    "MGT": "Management Event — control plane, logged by all standard CloudTrail trails (always on)",
+    "DATA": "Data Event — data plane, only logged when explicitly enabled per resource type",
+    "NONE": "Not Logged — no CloudTrail integration"
+  },
+  "services": {
+    "IAM": [
+      {"action": "iam:CreateAccessKey", "class": "MGT"},
+      {"action": "iam:CreateLoginProfile", "class": "MGT"},
+      {"action": "iam:CreatePolicyVersion", "class": "MGT"},
+      {"action": "iam:CreateRole", "class": "MGT"},
+      {"action": "iam:CreateUser", "class": "MGT"},
+      {"action": "iam:AttachUserPolicy", "class": "MGT"},
+      {"action": "iam:AttachRolePolicy", "class": "MGT"},
+      {"action": "iam:AttachGroupPolicy", "class": "MGT"},
+      {"action": "iam:DeleteAccessKey", "class": "MGT"},
+      {"action": "iam:DetachUserPolicy", "class": "MGT"},
+      {"action": "iam:DetachRolePolicy", "class": "MGT"},
+      {"action": "iam:GetAccountAuthorizationDetails", "class": "MGT"},
+      {"action": "iam:GetPolicy", "class": "MGT"},
+      {"action": "iam:GetPolicyVersion", "class": "MGT"},
+      {"action": "iam:GetRole", "class": "MGT"},
+      {"action": "iam:GetRolePolicy", "class": "MGT"},
+      {"action": "iam:GetUser", "class": "MGT"},
+      {"action": "iam:GetUserPolicy", "class": "MGT"},
+      {"action": "iam:ListAttachedRolePolicies", "class": "MGT"},
+      {"action": "iam:ListAttachedUserPolicies", "class": "MGT"},
+      {"action": "iam:ListGroupsForUser", "class": "MGT"},
+      {"action": "iam:ListRolePolicies", "class": "MGT"},
+      {"action": "iam:ListUserPolicies", "class": "MGT"},
+      {"action": "iam:ListUsers", "class": "MGT"},
+      {"action": "iam:ListRoles", "class": "MGT"},
+      {"action": "iam:PutUserPolicy", "class": "MGT"},
+      {"action": "iam:PutRolePolicy", "class": "MGT"},
+      {"action": "iam:PutGroupPolicy", "class": "MGT"},
+      {"action": "iam:SetDefaultPolicyVersion", "class": "MGT"},
+      {"action": "iam:UpdateAssumeRolePolicy", "class": "MGT"},
+      {"action": "iam:UpdateLoginProfile", "class": "MGT"},
+      {"action": "iam:AddUserToGroup", "class": "MGT"},
+      {"action": "iam:RemoveUserFromGroup", "class": "MGT"},
+      {"action": "iam:CreateGroup", "class": "MGT"},
+      {"action": "iam:DeleteUser", "class": "MGT"},
+      {"action": "iam:DeleteRole", "class": "MGT"},
+      {"action": "iam:PassRole", "class": "MGT", "note": "logged as part of the calling action's event, not standalone"}
+    ],
+    "STS": [
+      {"action": "sts:AssumeRole", "class": "MGT"},
+      {"action": "sts:AssumeRoleWithSAML", "class": "MGT"},
+      {"action": "sts:AssumeRoleWithWebIdentity", "class": "MGT"},
+      {"action": "sts:GetCallerIdentity", "class": "MGT"},
+      {"action": "sts:GetFederationToken", "class": "MGT"},
+      {"action": "sts:GetSessionToken", "class": "MGT"}
+    ],
+    "EC2": [
+      {"action": "ec2:RunInstances", "class": "MGT"},
+      {"action": "ec2:TerminateInstances", "class": "MGT"},
+      {"action": "ec2:StartInstances", "class": "MGT"},
+      {"action": "ec2:StopInstances", "class": "MGT"},
+      {"action": "ec2:CreateLaunchTemplateVersion", "class": "MGT"},
+      {"action": "ec2:CreateSecurityGroup", "class": "MGT"},
+      {"action": "ec2:AuthorizeSecurityGroupIngress", "class": "MGT"},
+      {"action": "ec2:DescribeInstances", "class": "MGT"},
+      {"action": "ec2:DescribeSecurityGroups", "class": "MGT"},
+      {"action": "ec2:DescribeSubnets", "class": "MGT"},
+      {"action": "ec2:DescribeVpcs", "class": "MGT"},
+      {"action": "ec2:CreateSnapshot", "class": "MGT"},
+      {"action": "ec2:CopySnapshot", "class": "MGT"},
+      {"action": "ec2:ModifySnapshotAttribute", "class": "MGT"},
+      {"action": "ec2:CreateVolume", "class": "MGT"},
+      {"action": "ec2:CreateKeyPair", "class": "MGT"},
+      {"action": "ec2:ModifyInstanceAttribute", "class": "MGT"},
+      {"action": "ec2:CreateImage", "class": "MGT"},
+      {"action": "ec2:SendSSHPublicKey", "class": "MGT", "note": "EC2 Instance Connect"}
+    ],
+    "Lambda": [
+      {"action": "lambda:CreateFunction", "class": "MGT"},
+      {"action": "lambda:UpdateFunctionCode", "class": "MGT"},
+      {"action": "lambda:UpdateFunctionConfiguration", "class": "MGT"},
+      {"action": "lambda:AddPermission", "class": "MGT"},
+      {"action": "lambda:ListFunctions", "class": "MGT"},
+      {"action": "lambda:GetFunction", "class": "MGT"},
+      {"action": "lambda:DeleteFunction", "class": "MGT"},
+      {"action": "lambda:CreateEventSourceMapping", "class": "MGT"},
+      {"action": "lambda:GetPolicy", "class": "MGT"},
+      {"action": "lambda:Invoke", "class": "DATA"}
+    ],
+    "S3": [
+      {"action": "s3:ListBuckets", "class": "MGT"},
+      {"action": "s3:CreateBucket", "class": "MGT"},
+      {"action": "s3:DeleteBucket", "class": "MGT"},
+      {"action": "s3:PutBucketPolicy", "class": "MGT"},
+      {"action": "s3:GetBucketPolicy", "class": "MGT"},
+      {"action": "s3:GetBucketAcl", "class": "MGT"},
+      {"action": "s3:PutBucketAcl", "class": "MGT"},
+      {"action": "s3:PutBucketPublicAccessBlock", "class": "MGT"},
+      {"action": "s3:GetObject", "class": "DATA"},
+      {"action": "s3:PutObject", "class": "DATA"},
+      {"action": "s3:DeleteObject", "class": "DATA"},
+      {"action": "s3:CopyObject", "class": "DATA"},
+      {"action": "s3:SelectObjectContent", "class": "DATA"}
+    ],
+    "SecretsManager": [
+      {"action": "secretsmanager:GetSecretValue", "class": "MGT"},
+      {"action": "secretsmanager:ListSecrets", "class": "MGT"},
+      {"action": "secretsmanager:DescribeSecret", "class": "MGT"},
+      {"action": "secretsmanager:CreateSecret", "class": "MGT"},
+      {"action": "secretsmanager:PutSecretValue", "class": "MGT"}
+    ],
+    "KMS": [
+      {"action": "kms:CreateKey", "class": "MGT"},
+      {"action": "kms:CreateGrant", "class": "MGT"},
+      {"action": "kms:CreateAlias", "class": "MGT"},
+      {"action": "kms:DescribeKey", "class": "MGT"},
+      {"action": "kms:ListKeys", "class": "MGT"},
+      {"action": "kms:ListAliases", "class": "MGT"},
+      {"action": "kms:Encrypt", "class": "MGT"},
+      {"action": "kms:Decrypt", "class": "MGT"},
+      {"action": "kms:GenerateDataKey", "class": "MGT"},
+      {"action": "kms:EnableKey", "class": "MGT"},
+      {"action": "kms:DisableKey", "class": "MGT"},
+      {"action": "kms:ScheduleKeyDeletion", "class": "MGT"}
+    ],
+    "CloudFormation": [
+      {"action": "cloudformation:CreateStack", "class": "MGT"},
+      {"action": "cloudformation:UpdateStack", "class": "MGT"},
+      {"action": "cloudformation:DeleteStack", "class": "MGT"},
+      {"action": "cloudformation:ListStacks", "class": "MGT"},
+      {"action": "cloudformation:DescribeStacks", "class": "MGT"},
+      {"action": "cloudformation:CreateChangeSet", "class": "MGT"},
+      {"action": "cloudformation:ExecuteChangeSet", "class": "MGT"}
+    ],
+    "ECS": [
+      {"action": "ecs:RunTask", "class": "MGT"},
+      {"action": "ecs:CreateCluster", "class": "MGT"},
+      {"action": "ecs:RegisterTaskDefinition", "class": "MGT"},
+      {"action": "ecs:CreateService", "class": "MGT"},
+      {"action": "ecs:UpdateService", "class": "MGT"},
+      {"action": "ecs:DescribeTasks", "class": "MGT"},
+      {"action": "ecs:ExecuteCommand", "class": "MGT"},
+      {"action": "ecs:ListTasks", "class": "MGT"}
+    ],
+    "SSM": [
+      {"action": "ssm:SendCommand", "class": "MGT"},
+      {"action": "ssm:StartSession", "class": "MGT"},
+      {"action": "ssm:ListCommands", "class": "MGT"},
+      {"action": "ssm:DescribeInstanceInformation", "class": "MGT"},
+      {"action": "ssm:GetParameter", "class": "MGT"},
+      {"action": "ssm:PutParameter", "class": "MGT"},
+      {"action": "ssm:StartSessionDataChannel", "class": "DATA", "note": "via SSMMessages::ControlChannel"}
+    ],
+    "CodeBuild": [
+      {"action": "codebuild:CreateProject", "class": "MGT"},
+      {"action": "codebuild:StartBuild", "class": "MGT"},
+      {"action": "codebuild:BatchGetProjects", "class": "MGT"},
+      {"action": "codebuild:ListProjects", "class": "MGT"}
+    ],
+    "Glue": [
+      {"action": "glue:CreateJob", "class": "MGT"},
+      {"action": "glue:StartJobRun", "class": "MGT"},
+      {"action": "glue:GetJob", "class": "MGT"},
+      {"action": "glue:ListJobs", "class": "MGT"}
+    ],
+    "SageMaker": [
+      {"action": "sagemaker:CreateNotebookInstance", "class": "MGT"},
+      {"action": "sagemaker:CreateTrainingJob", "class": "MGT"},
+      {"action": "sagemaker:ListNotebookInstances", "class": "MGT"},
+      {"action": "sagemaker:InvokeEndpoint", "class": "DATA"}
+    ],
+    "Organizations": [
+      {"action": "organizations:ListPolicies", "class": "MGT"},
+      {"action": "organizations:DescribeOrganization", "class": "MGT"},
+      {"action": "organizations:ListAccounts", "class": "MGT"}
+    ],
+    "EventBridge": [
+      {"action": "eventbridge:PutRule", "class": "MGT"},
+      {"action": "eventbridge:PutTargets", "class": "MGT"},
+      {"action": "eventbridge:ListRules", "class": "MGT"},
+      {"action": "eventbridge:DescribeRule", "class": "MGT"},
+      {"action": "eventbridge:DeleteRule", "class": "MGT"}
+    ],
+    "SNS": [
+      {"action": "sns:CreateTopic", "class": "MGT"},
+      {"action": "sns:Subscribe", "class": "MGT"},
+      {"action": "sns:ListTopics", "class": "MGT"},
+      {"action": "sns:ListSubscriptions", "class": "MGT"},
+      {"action": "sns:Publish", "class": "DATA"},
+      {"action": "sns:PublishBatch", "class": "DATA"}
+    ],
+    "SQS": [
+      {"action": "sqs:CreateQueue", "class": "MGT"},
+      {"action": "sqs:ListQueues", "class": "MGT"},
+      {"action": "sqs:GetQueueAttributes", "class": "MGT"},
+      {"action": "sqs:SendMessage", "class": "DATA"},
+      {"action": "sqs:ReceiveMessage", "class": "DATA"},
+      {"action": "sqs:DeleteMessage", "class": "DATA"}
+    ],
+    "DynamoDB": [
+      {"action": "dynamodb:CreateTable", "class": "MGT"},
+      {"action": "dynamodb:DescribeTable", "class": "MGT"},
+      {"action": "dynamodb:ListTables", "class": "MGT"},
+      {"action": "dynamodb:UpdateTable", "class": "MGT"},
+      {"action": "dynamodb:GetItem", "class": "DATA"},
+      {"action": "dynamodb:PutItem", "class": "DATA"},
+      {"action": "dynamodb:DeleteItem", "class": "DATA"},
+      {"action": "dynamodb:Query", "class": "DATA"},
+      {"action": "dynamodb:Scan", "class": "DATA"}
+    ],
+    "RDS": [
+      {"action": "rds:CreateDBSnapshot", "class": "MGT"},
+      {"action": "rds:CopyDBSnapshot", "class": "MGT"},
+      {"action": "rds:ModifyDBSnapshotAttribute", "class": "MGT"},
+      {"action": "rds:DescribeDBInstances", "class": "MGT"},
+      {"action": "rds:DescribeDBSnapshots", "class": "MGT"},
+      {"action": "rds:RestoreDBInstanceFromDBSnapshot", "class": "MGT"}
+    ],
+    "Redshift": [
+      {"action": "redshift:GetClusterCredentials", "class": "MGT"},
+      {"action": "redshift:DescribeClusters", "class": "MGT"},
+      {"action": "redshift:CreateClusterSnapshot", "class": "MGT"},
+      {"action": "redshift:AuthorizeSnapshotAccess", "class": "MGT"}
+    ],
+    "EBS": [
+      {"action": "ebs:CreateSnapshot", "class": "MGT"},
+      {"action": "ebs:ModifySnapshotAttribute", "class": "MGT"},
+      {"action": "ebs:CopySnapshot", "class": "MGT"},
+      {"action": "ebs:GetSnapshotBlock", "class": "DATA"},
+      {"action": "ebs:PutSnapshotBlock", "class": "DATA"},
+      {"action": "ebs:ListChangedBlocks", "class": "DATA"}
+    ],
+    "StepFunctions": [
+      {"action": "stepfunctions:CreateStateMachine", "class": "MGT"},
+      {"action": "stepfunctions:StartExecution", "class": "MGT"},
+      {"action": "stepfunctions:ListStateMachines", "class": "MGT"},
+      {"action": "stepfunctions:StartExecutionData", "class": "DATA", "note": "via StepFunctions::StateMachine"}
+    ],
+    "Cognito": [
+      {"action": "cognito:CreateUserPool", "class": "MGT"},
+      {"action": "cognito:CreateIdentityPool", "class": "MGT"},
+      {"action": "cognito:ListUserPools", "class": "MGT"},
+      {"action": "cognito:GetId", "class": "DATA"},
+      {"action": "cognito:GetCredentialsForIdentity", "class": "DATA", "note": "via Cognito::IdentityPool"}
+    ]
+  }
+}

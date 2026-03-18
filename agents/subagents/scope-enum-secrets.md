@@ -5,6 +5,7 @@ tools: Bash, Read, Glob, Grep
 model: haiku
 maxTurns: 25
 ---
+<!-- Token budget: ~276 lines | Before: ~3200 tokens (est) | After: ~3200 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's Secrets Manager enumeration specialist. Dispatched by scope-audit orchestrator.
 

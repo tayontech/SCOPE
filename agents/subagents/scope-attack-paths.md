@@ -14,6 +14,17 @@ You are SCOPE's attack path reasoning engine. You ALWAYS run as a fresh-context 
 - MODE: posture (defensive framing — full account graph analysis)
 - ACCOUNT_ID: from Gate 1 credential check
 - SERVICES_COMPLETED: comma-separated list of services that wrote JSON successfully
+- OWNED_ACCOUNTS: JSON array of owned AWS account IDs (e.g. `["111122223333","444455556666"]`) — used to classify cross-account trusts as internal vs external
+
+If OWNED_ACCOUNTS is not provided in the initial message, read it from `$RUN_DIR/context.json`:
+```bash
+if [ -f "$RUN_DIR/context.json" ]; then
+  OWNED_ACCOUNTS=$(jq -r '.owned_accounts // ["'"$ACCOUNT_ID"'"]' "$RUN_DIR/context.json")
+else
+  OWNED_ACCOUNTS=$(jq -n --arg id "$ACCOUNT_ID" '[$id]')
+fi
+```
+Always include `$ACCOUNT_ID` in the owned-accounts set even if context.json is missing.
 
 ## Reading Enumeration Data
 
@@ -258,6 +269,8 @@ jq -n \
 
 2. `dashboard/public/$RUN_ID.json` — Copy for dashboard consumption:
 ```bash
+RUN_ID=$(basename "$RUN_DIR")
+mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 ```
 
@@ -288,7 +301,16 @@ SUMMARY_JSON=$(jq -n \
   count entries where the finding category is "policy" or extract from any metrics field. Do NOT leave as 0
   if iam.json contains policy data.
 - `total_trust_relationships`: count of trust relationship entries across all role trust policies
-- Other fields: derive from analysis results (attack_paths_total = len(attack_paths), risk_score from severity distribution, etc.)
+- `attack_paths_total`: count of all attack path entries in ATTACK_PATHS_JSON
+- `critical_priv_esc_risks`: count of attack paths where `severity == "critical"` AND `category == "privilege_escalation"`. Derive with jq after ATTACK_PATHS_JSON is finalized:
+  ```bash
+  CRITICAL_PRIV_ESC=$(echo "$ATTACK_PATHS_JSON" | jq '[.[] | select(.severity == "critical" and .category == "privilege_escalation")] | length')
+  ```
+  Never leave as 0 if critical privilege escalation paths exist.
+- `wildcard_trust_policies`: count of trust relationships where `is_wildcard == true`
+- `cross_account_trusts`: count of trust relationships where `trust_type == "cross-account"`
+- `risk_score`: highest severity across all attack paths (critical > high > medium > low)
+- Other fields: derive from analysis results
 ```
 
 **Build GRAPH_JSON** — the graph drives the D3 force-directed visualization. Node IDs use `type:name` format (NOT raw ARNs). All 6 node types are required when applicable. Edges connect nodes and MUST be populated — an empty edges array produces a broken visualization:
@@ -381,7 +403,8 @@ ATTACK_PATHS_JSON="[...]"  # populated from analysis — MUST be an array
 #     "trust_principal": "arn:aws:iam::999999999999:root",
 #     "trust_type": "cross-account|same-account|service|federated",
 #     "is_wildcard": false,
-#     "is_internal": true,
+#     "is_internal": true,   # true if trust_principal account ID is in OWNED_ACCOUNTS; false if external; null for service/federated trusts
+#     "account_name": null,  # human-readable name from config/accounts.json if available
 #     "has_external_id": false,
 #     "has_condition": false,
 #     "risk": "CRITICAL|HIGH|MEDIUM|LOW",

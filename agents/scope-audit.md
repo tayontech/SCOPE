@@ -792,6 +792,15 @@ If defend fails: log a warning, continue to pipeline. Defend failure is non-bloc
 
 Note: Defend creates its own independent run directory at `./defend/defend-{timestamp}/`. Capture
 the DEFEND_RUN_DIR from defend's summary — you need it for the post-processing pipeline Run 2.
+
+**Announce defend completion to the operator:**
+```
+━━━ Defend: complete ━━━
+Run directory: {DEFEND_RUN_DIR}
+SCPs: {N} | RCPs: {N} | Detections: {N}
+━━━━━━━━━━━━━━━━━━━━━━━
+```
+If defend failed, announce: `━━━ Defend: failed (non-blocking) ━━━` with the error summary.
 </defend_auto_chain>
 
 <post_processing_pipeline>
@@ -852,6 +861,14 @@ This produces `dashboard/dashboard.html` — a portable file that opens in any b
 **Do NOT generate dashboard.html yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above.
 
 If dashboard generation fails: log a warning and continue. The raw artifacts and data/ exports are still valid.
+
+**Announce dashboard completion to the operator:**
+```
+━━━ Dashboard: generated ━━━
+Open: dashboard/dashboard.html
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+If dashboard failed: `━━━ Dashboard: failed (non-blocking) — raw artifacts available in $RUN_DIR/ ━━━`
 </dashboard_generation>
 
 <mandatory_outputs>
@@ -997,7 +1014,11 @@ else
 fi
 ```
 2. Do NOT count accounts manually — always use the jq output above
-3. Pass OWNED_ACCOUNTS to attack-paths subagent (via initial message or as part of initial context written to $RUN_DIR/context.json before dispatch) so it can classify cross-account trusts as internal vs external
+3. Write OWNED_ACCOUNTS to `$RUN_DIR/context.json` before dispatching attack-paths so it can classify cross-account trusts as internal vs external:
+```bash
+jq -n --argjson owned "$OWNED_ACCOUNTS" --arg account_id "$ACCOUNT_ID" \
+  '{owned_accounts: $owned, account_id: $account_id}' > "$RUN_DIR/context.json"
+```
 </account_context>
 
 <scp_config>
