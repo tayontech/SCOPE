@@ -740,16 +740,22 @@ else
 fi
 ```
 
-Update `dashboard/public/index.json` — read existing, upsert this run (match on `run_id`), write back newest-first:
-```json
-{
-  "run_id": "$RUN_ID",
-  "date": "[timestamp]",
-  "source": "audit",
-  "target": "[target input]",
-  "risk": "[CRITICAL|HIGH|MEDIUM|LOW]",
-  "file": "$RUN_ID.json"
-}
+Update `dashboard/public/index.json` — upsert this run (match on `run_id`), newest-first:
+```bash
+RISK_SCORE=$(jq -r '.summary.risk_score // "unknown"' "$RUN_DIR/results.json" 2>/dev/null || echo "unknown")
+if [ -f dashboard/public/index.json ]; then
+  node -e "
+    const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
+    idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
+    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$TARGET_INPUT', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' });
+    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
+  "
+else
+  node -e "
+    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$TARGET_INPUT', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' }] };
+    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
+  "
+fi
 ```
 
 Also append to `./audit/INDEX.md` (create if missing) and upsert into `./audit/index.json`.

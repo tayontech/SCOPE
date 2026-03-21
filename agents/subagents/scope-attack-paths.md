@@ -274,7 +274,24 @@ mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 ```
 
-3. Update `dashboard/public/index.json` — Upsert this run into the runs array.
+3. Update `dashboard/public/index.json` — Upsert this run into the runs array:
+```bash
+RUN_ID=$(basename "$RUN_DIR")
+RISK_SCORE=$(jq -r '.summary.risk_score // "unknown"' "$RUN_DIR/results.json")
+if [ -f dashboard/public/index.json ]; then
+  node -e "
+    const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
+    idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
+    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' });
+    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
+  "
+else
+  node -e "
+    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' }] };
+    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
+  "
+fi
+```
 
 **Build SUMMARY_JSON dynamically** — compute `services_analyzed` from SERVICES_COMPLETED count (never hardcode). All fields below are **required** — the dashboard and schema validation depend on these exact field names:
 ```bash
