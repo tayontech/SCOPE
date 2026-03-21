@@ -118,6 +118,15 @@ SCOPE runs on three AI coding platforms with the same agent definitions:
 | **Gemini CLI** | Full support | Hooks via settings templates |
 | **Codex CLI** | Supported | Safety enforced via AGENTS.md (no hook support) |
 
+### Model Routing
+
+`install.js` assigns platform-specific models during install:
+
+| Agent Type | Claude Code | Gemini CLI | Codex |
+|------------|-------------|------------|-------|
+| Enum subagents (12) | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
+| Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+
 ## Documentation
 
 | | |

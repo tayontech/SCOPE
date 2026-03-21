@@ -16,16 +16,21 @@ agents/scope-investigate.md SOC alert investigation (slash command, memory: loca
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
 
 ```
-agents/subagents/scope-enum-iam.md      IAM enumeration (model: haiku)
-agents/subagents/scope-enum-sts.md      STS/identity enumeration (model: haiku)
-agents/subagents/scope-enum-s3.md       S3 enumeration (model: haiku)
-agents/subagents/scope-enum-kms.md      KMS enumeration (model: haiku)
-agents/subagents/scope-enum-secrets.md  Secrets Manager enumeration (model: haiku)
-agents/subagents/scope-enum-lambda.md   Lambda enumeration (model: haiku)
-agents/subagents/scope-enum-ec2.md      EC2/VPC/EBS/ELB enumeration (model: haiku)
-agents/subagents/scope-attack-paths.md  Attack path reasoning from per-module JSON (model: sonnet)
-agents/subagents/scope-verify.md        Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
-agents/subagents/scope-pipeline.md      Post-processing middleware — data normalization then evidence indexing (read inline)
+agents/subagents/scope-enum-iam.md         IAM enumeration (model: haiku)
+agents/subagents/scope-enum-sts.md         STS/identity enumeration (model: haiku)
+agents/subagents/scope-enum-s3.md          S3 enumeration (model: haiku)
+agents/subagents/scope-enum-kms.md         KMS enumeration (model: haiku)
+agents/subagents/scope-enum-secrets.md     Secrets Manager enumeration (model: haiku)
+agents/subagents/scope-enum-lambda.md      Lambda enumeration (model: haiku)
+agents/subagents/scope-enum-ec2.md         EC2/VPC/EBS/ELB/SSM enumeration (model: haiku)
+agents/subagents/scope-enum-rds.md         RDS enumeration (model: haiku)
+agents/subagents/scope-enum-sns.md         SNS enumeration (model: haiku)
+agents/subagents/scope-enum-sqs.md         SQS enumeration (model: haiku)
+agents/subagents/scope-enum-apigateway.md  API Gateway enumeration (model: haiku)
+agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration (model: haiku)
+agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON (model: sonnet)
+agents/subagents/scope-verify.md           Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
+agents/subagents/scope-pipeline.md         Post-processing middleware — data normalization then evidence indexing (read inline)
 ```
 
 > **WARNING -- Session Model Override:**
@@ -137,8 +142,9 @@ scope-investigate is standalone — does not read audit/exploit/defend output. A
 |------|---------|
 | `config/accounts.json` | Owned AWS account IDs — distinguishes internal vs external cross-account trusts |
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
+| `config/cloudtrail-classes.json` | CloudTrail event classification — used by exploit for stealth-ordered playbooks |
 
-All config files are optional and gitignored.
+All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.
 
 ## Memory Hygiene
 

@@ -374,7 +374,7 @@ function installSubagentsGemini(subagents, scope) {
   const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'allowed-tools', 'tools', 'color', 'compatibility', 'memory', 'context', 'agent', 'maxTurns'];
   // Per-agent model routing: enum agents use flash, reasoning agents use pro.
   const GEMINI_MODEL_MAP = {
-    haiku: 'gemini-2.5-flash',
+    haiku: 'gemini-3.1-flash-lite-preview',
     sonnet: 'gemini-3.1-pro-preview',
   };
   let count = 0;
@@ -494,7 +494,7 @@ function installSubagentsCodex(subagents, scope) {
 
     // Determine model — gpt-5.3-codex for enum (haiku tier), gpt-5.4 for reasoning (sonnet tier)
     const scopeModel = SUBAGENT_MODEL_MAP[subagent.name] || 'haiku';
-    const codexModel = scopeModel === 'sonnet' ? 'gpt-5.4' : 'gpt-5.1-codex-mini';
+    const codexModel = scopeModel === 'sonnet' ? 'gpt-5.4' : 'gpt-5.4-mini';
     const reasoningEffort = 'medium';
 
     // Generate per-agent .toml config layer.
