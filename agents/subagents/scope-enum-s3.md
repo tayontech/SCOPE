@@ -2,7 +2,7 @@
 name: scope-enum-s3
 description: S3 enumeration subagent — bucket discovery, policy/ACL analysis, public access detection, and service integration edge mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/s3.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 <!-- Token budget: ~302 lines | Before: ~3500 tokens (est) | After: ~3500 tokens (est) | Phase 33 2026-03-18 -->

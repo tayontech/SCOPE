@@ -2,7 +2,7 @@
 name: scope-enum-codebuild
 description: "CodeBuild enumeration subagent — project discovery, service role analysis, source credential inventory, and environment variable secret pattern detection. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/codebuild.json. CRITICAL: Never outputs environment variable values."
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 

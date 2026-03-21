@@ -2,7 +2,7 @@
 name: scope-enum-iam
 description: IAM enumeration subagent — principal discovery, permission resolution, trust chain analysis, and privilege escalation path mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/iam.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 <!-- Token budget: ~376 lines | Before: ~4200 tokens (est) | After: ~4200 tokens (est) | Phase 33 2026-03-18 -->

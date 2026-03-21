@@ -2,7 +2,7 @@
 name: scope-enum-rds
 description: RDS enumeration subagent — database instance discovery, public snapshot detection, IAM authentication analysis, and encryption posture. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/rds.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 

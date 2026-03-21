@@ -2,7 +2,7 @@
 name: scope-enum-kms
 description: KMS enumeration subagent — customer-managed key discovery, key policy and grant analysis, encryption dependency mapping, and grant abuse chain detection. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/kms.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 <!-- Token budget: ~304 lines | Before: ~3400 tokens (est) | After: ~3400 tokens (est) | Phase 33 2026-03-18 -->

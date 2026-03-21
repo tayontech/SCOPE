@@ -2,7 +2,7 @@
 name: scope-enum-ec2
 description: EC2/VPC/EBS/ELB/SSM enumeration subagent — instance discovery, IMDSv1 detection, security group analysis, EBS snapshot sharing, user data credential exposure, and SSM lateral movement paths. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/ec2.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 <!-- Token budget: ~378 lines | Before: ~4700 tokens (est) | After: ~4700 tokens (est) | Phase 33 2026-03-18 -->

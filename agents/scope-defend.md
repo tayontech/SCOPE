@@ -4,7 +4,7 @@ description: Defensive controls generation — reads audit output and generates 
 compatibility: Orchestrator-spawned (receives AUDIT_RUN_DIR in initial message) or operator-invoked (scans all audit runs if no run-dir provided). AWS Organizations context optional but enhances OU-aware recommendations.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: green
-model: sonnet
+model: claude-sonnet-4-6
 ---
 
 <invocation_modes>
