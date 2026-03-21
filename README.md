@@ -118,14 +118,32 @@ SCOPE runs on three AI coding platforms with the same agent definitions:
 | **Gemini CLI** | Full support | Hooks via settings templates |
 | **Codex CLI** | Supported | Safety enforced via AGENTS.md (no hook support) |
 
+### Agent Architecture
+
+SCOPE has two types of agents:
+
+**Skills** — run in your session, inherit your model:
+- `scope-audit` — orchestrator, dispatches subagents
+- `scope-exploit` — standalone red team playbook generator
+- `scope-investigate` — standalone SOC investigation assistant
+
+**Subagents** — dispatched with their own pinned model:
+- 12 enum agents — lightweight enumeration
+- `scope-attack-paths` — security reasoning over combined findings
+- `scope-defend` — defensive controls generation
+
+When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Exploit and investigate always use whatever model your session is running.
+
 ### Model Routing
 
-`install.js` assigns platform-specific models during install:
+`install.js` assigns platform-specific models to subagents during install:
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
 | Enum subagents (12) | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
 | Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+
+Skills (audit, exploit, investigate) are not in this table — they inherit your session model.
 
 ## Documentation
 
