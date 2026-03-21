@@ -144,6 +144,16 @@ function normalizeForDashboard(json, indexSource) {
         (t) => t.is_wildcard
       ).length;
     }
+
+    // Fallback: if trust_relationships reports 0 wildcards, count attack paths about wildcard trusts
+    if ((s.wildcard_trust_policies ?? 0) === 0 && Array.isArray(data.attack_paths)) {
+      const wildcardPaths = data.attack_paths.filter((p) =>
+        (p.name || "").toLowerCase().includes("wildcard") ||
+        (p.description || "").toLowerCase().includes("wildcard") ||
+        (p.category || "") === "trust_misconfiguration"
+      );
+      if (wildcardPaths.length > 0) s.wildcard_trust_policies = wildcardPaths.length;
+    }
   }
 
   // Exploit-specific normalization

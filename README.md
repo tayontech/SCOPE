@@ -25,8 +25,8 @@ The orchestrator dispatches parallel enumeration agents across AWS services, fee
 |-------|-------------|
 | **Audit** | 12 parallel agents enumerate IAM, S3, Lambda, EC2, KMS, Secrets Manager, STS, RDS, API Gateway, SNS, SQS, CodeBuild |
 | **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
-| **Defend** | Generates SCPs, resource control policies, SPL detections, and prioritized remediation, mapped to what was found |
-| **Exploit** | Produces ready-to-execute playbooks for specific principals (red team use) |
+| **Defend** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
+| **Exploit** | Produces stealth-ordered playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
 | **Investigate** | Guides SOC analysts through CloudTrail-based alert triage in Splunk |
 
 ## Quick Start
@@ -49,9 +49,14 @@ export AWS_PROFILE=your-profile
 # Generate exploit playbooks for a principal
 /scope:exploit arn:aws:iam::123456789012:role/target-role
 
+# Self-target mode (discovers caller identity automatically)
+/scope:exploit
+
 # Investigate a SOC alert
 /scope:investigate
 ```
+
+The installer presents an interactive selector — pick your runtime (Claude Code, Gemini, Codex, or all) and install scope (local project or global).
 
 > **Requirements:** AWS CLI configured with read-only credentials. Node.js for tooling. Claude Code, Gemini CLI, or Codex CLI as the runtime.
 
@@ -61,11 +66,20 @@ export AWS_PROFILE=your-profile
 agents/               Core agents: audit orchestrator, defend, exploit, investigate
 agents/subagents/     12 enumeration agents, attack path reasoning, verification, data pipeline
 dashboard/            React + D3 interactive dashboard (self-contained HTML output)
+config/               Runtime reference data (cloudtrail-classes.json) + optional account config
 .scope/hooks/         Lifecycle hooks: safety guard, SPL lint, schema validation
 .scope/schemas/       JSON Schema definitions for structured output
 bin/                  Tooling: installer, report generator
-config/               Optional account config and pre-loaded SCPs
 ```
+
+### Exploit Intelligence
+
+The exploit agent uses creative reasoning to discover abuse paths — not just a static checklist. It analyzes a principal's actual permissions and reasons about what attack chains are possible, using known escalation families as a floor, not a ceiling.
+
+- **Permission auto-discovery** — self-target mode discovers caller identity, reads own policies, falls back to targeted probes
+- **Stealth-aware ordering** — CloudTrail classification tags each step as management event, data event, or not logged; playbooks present quiet moves first
+- **Creative reasoning** — LLM reasons about unconventional service chain abuse beyond the standard catalogue
+- **PassRole attack surface** — maps composable role-passing chains across 10+ AWS services
 
 ### Safety by Default
 
@@ -82,7 +96,17 @@ SCOPE agents are **read-only**. A lifecycle hook blocks every destructive AWS AP
 
 Agents produce structured JSON that feeds into an interactive React + D3 dashboard. One command generates a self-contained HTML file. No server required.
 
-The dashboard visualizes trust relationships, attack paths, privilege escalation chains, and defensive control mappings across your entire AWS account.
+```bash
+cd dashboard && npm run dashboard
+open dashboard/dashboard.html
+```
+
+The dashboard visualizes:
+- Trust relationships with internal/external classification based on owned account IDs
+- Attack paths with severity, MITRE ATT&CK mappings, and exploitability ratings
+- Privilege escalation chains and lateral movement graphs
+- Defensive controls: SCPs, RCPs, and SPL detections with atomic/composite badges
+- KPI cards: critical priv esc count, wildcard trusts, cross-account trusts
 
 ## Multi-Platform
 

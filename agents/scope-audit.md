@@ -723,9 +723,11 @@ control artifacts already generated at ./defend/defend-{timestamp}/.]
 
 After findings.md is written (and Gate 4 was NOT skipped), export results.json.
 
-The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Check both locations:
+The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Before copying, clean stale dashboard data so the dashboard always shows the current run:
 
 ```bash
+# Clean previous run data — dashboard only shows one run per phase anyway
+rm -f dashboard/public/audit-*.json dashboard/public/defend-*.json dashboard/public/index.json 2>/dev/null
 mkdir -p dashboard/public
 if [ -f "$RUN_DIR/results.json" ]; then
   cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
