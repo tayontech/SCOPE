@@ -4,7 +4,7 @@ description: Defensive controls generation — reads audit output and generates 
 compatibility: Orchestrator-spawned (receives AUDIT_RUN_DIR in initial message) or operator-invoked (scans all audit runs if no run-dir provided). AWS Organizations context optional but enhances OU-aware recommendations.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: green
-model: sonnet
+model: claude-sonnet-4-6
 ---
 
 <invocation_modes>
@@ -1837,7 +1837,9 @@ Compact JSON example:
 
 ### Final Operator Report
 
-After writing all files, display a completion summary:
+**IMPORTANT:** Do NOT display this report until AFTER the `<results_export>` section below has completed. The execution order is: write markdown artifacts → run results_export → display this report.
+
+After ALL steps complete — including results_export and pipeline — display a completion summary:
 ```
 ---
 REMEDIATION COMPLETE
@@ -1848,6 +1850,9 @@ Artifacts written:
   ./defend/[run_id]/technical-remediation.md
   ./defend/[run_id]/policies/scp-[name].json  ([count] SCPs)
   ./defend/[run_id]/policies/rcp-[name].json  ([count] RCPs)
+  ./defend/[run_id]/results.json
+  dashboard/public/[run_id].json
+  Dashboard updated: dashboard/public/index.json
 
 Quick Wins to deploy first:
   1. [Top quick win action]
@@ -1858,12 +1863,21 @@ Review executive-summary.md for leadership briefing.
 Review technical-remediation.md for deployment-ready SCP/RCP JSON and impact analysis.
 ---
 ```
+
+**Self-check before displaying the report:**
+```bash
+test -f "$RUN_DIR/results.json" && echo "results.json: OK" || echo "ERROR: results.json missing — run results_export first"
+test -f "dashboard/public/$RUN_ID.json" && echo "dashboard export: OK" || echo "ERROR: dashboard export missing"
+test -f "$RUN_DIR/executive-summary.md" && echo "executive-summary: OK" || echo "ERROR: executive-summary missing"
+test -f "$RUN_DIR/technical-remediation.md" && echo "technical-remediation: OK" || echo "ERROR: technical-remediation missing"
+```
+If any file is missing, go back and create it before displaying the report.
 </output_format>
 
 <results_export>
-## Results Export — Dashboard Integration
+## Results Export — Dashboard Integration (MANDATORY — runs BEFORE Final Operator Report)
 
-After writing executive-summary.md and technical-remediation.md, export structured results for the SCOPE dashboard.
+After writing executive-summary.md and technical-remediation.md, export structured results for the SCOPE dashboard. This step MUST complete before displaying the Final Operator Report.
 
 ### CRITICAL: Array-First Construction Discipline
 # No count field is ever set from a narrative estimate or placeholder.

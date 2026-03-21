@@ -2,9 +2,10 @@
 name: scope-enum-secrets
 description: Secrets Manager enumeration subagent — secret discovery, resource policy analysis, rotation gap detection, and KMS dependency mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/secrets.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
+<!-- Token budget: ~276 lines | Before: ~3200 tokens (est) | After: ~3200 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's Secrets Manager enumeration specialist. Dispatched by scope-audit orchestrator.
 

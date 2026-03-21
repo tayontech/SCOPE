@@ -15,7 +15,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 - `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
 
 **Enumeration subagents** (dispatched in parallel by scope-audit, model: haiku):
-- `scope-enum-iam`, `scope-enum-sts`, `scope-enum-s3`, `scope-enum-kms`, `scope-enum-secrets`, `scope-enum-lambda`, `scope-enum-ec2`
+- `scope-enum-iam`, `scope-enum-sts`, `scope-enum-s3`, `scope-enum-kms`, `scope-enum-secrets`, `scope-enum-lambda`, `scope-enum-ec2`, `scope-enum-rds`, `scope-enum-sns`, `scope-enum-sqs`, `scope-enum-apigateway`, `scope-enum-codebuild`
 
 **Analysis subagent** (dispatched as fresh-context by scope-audit, model: inherit):
 - `scope-attack-paths` — Reads per-module JSON from disk, performs cross-service attack path analysis
@@ -41,17 +41,15 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │                                   │
     │                               │  Parallel subagent dispatch:      │
     │                               │  ┌──────────────────────────┐    │
-    │                               │  │ scope-enum-iam  (haiku)  │    │
-    │                               │  │ scope-enum-sts  (haiku)  │    │
-    │                               │  │ scope-enum-s3   (haiku)  │    │
-    │                               │  │ scope-enum-kms  (haiku)  │    │
-    │                               │  │ scope-enum-secrets(haiku)│    │
-    │                               │  │ scope-enum-lambda(haiku) │    │
-    │                               │  │ scope-enum-ec2  (haiku)  │    │
+    │                               │  │ 12 enum subagents (haiku)│    │
+    │                               │  │ iam, sts, s3, kms,       │    │
+    │                               │  │ secrets, lambda, ec2,    │    │
+    │                               │  │ rds, sns, sqs,           │    │
+    │                               │  │ apigateway, codebuild    │    │
     │                               │  └──────────────────────────┘    │
     │                               │       │ writes $RUN_DIR/*.json    │
     │                               │       ▼                           │
-    │                               │  scope-attack-paths (inherit)     │
+    │                               │  scope-attack-paths (sonnet)      │
     │                               │  (fresh-context, reads from disk) │
     │                               │       │                           │
     │                               │  Gate 3: results                  │
@@ -169,7 +167,7 @@ Verification results are in-memory — scope-verify returns corrections to the c
                    ┌───────────────────────────────────┐
                    │           scope-audit              │
                    │  (orchestrator — dispatches        │
-                   │   7 enum subagents + attack-paths) │
+                   │   12 enum subagents + attack-paths) │
                    └──────────┬────────────────────────┘
                               │ writes ./audit/
                               │
@@ -219,7 +217,7 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 7 enum subagents + attack-paths + defend |
+| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 12 enum subagents + attack-paths + defend |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **investigate** | `/scope:investigate` | Splunk MCP, `./investigate/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./investigate/context.json` | scope-verify (standalone — no post-processing pipeline) |

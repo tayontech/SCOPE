@@ -324,11 +324,11 @@ case "$SOURCE" in
 
   exploit)
     check_field "target_arn" "principal ARN analyzed"
-    check_field "risk_score" "CRITICAL|HIGH|MEDIUM|LOW"
-    check_field "escalation_paths" "array of escalation paths"
+    check_field "summary" "exploit summary object"
+    check_field "attack_paths" "array of attack paths"
 
-    # escalation_paths items must have rank, name, steps
-    check_array_item_fields "escalation_paths" "rank,name,steps" "escalation path entries"
+    # attack_paths items must have name, steps
+    check_array_item_fields "attack_paths" "name,steps" "attack path entries"
     ;;
 
   *)

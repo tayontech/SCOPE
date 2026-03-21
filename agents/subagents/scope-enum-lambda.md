@@ -2,9 +2,10 @@
 name: scope-enum-lambda
 description: Lambda enumeration subagent — function discovery, execution role assessment, resource policy analysis, layer injection detection, and event source mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/lambda.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
+<!-- Token budget: ~303 lines | Before: ~3500 tokens (est) | After: ~3500 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's Lambda enumeration specialist. Dispatched by scope-audit orchestrator.
 

@@ -2,7 +2,7 @@
 name: scope-enum-sns
 description: SNS enumeration subagent — topic discovery, resource policy analysis, and cross-account subscription mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/sns.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 

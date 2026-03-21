@@ -2,7 +2,7 @@
 name: scope-enum-apigateway
 description: API Gateway enumeration subagent — REST API, HTTP API, and WebSocket API discovery with authorizer gap analysis and Lambda integration mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/apigateway.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 

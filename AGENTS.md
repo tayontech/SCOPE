@@ -1,3 +1,4 @@
+<!-- Token budget: ~198 lines | Before: ~3000 tokens (est) | After: ~3000 tokens (est) | Phase 33 2026-03-18 -->
 # SCOPE -- Cross-Platform Agent Suite
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) -- AI agent set for purple team security operations against AWS accounts: resource audit -> exploit playbook generation -> defensive controls with SCPs and SPL detections -> SOC alert investigation.
@@ -16,17 +17,29 @@ agents/scope-investigate.md SOC alert investigation
 **Subagents** (`agents/subagents/` -- dispatched by orchestrator or read inline):
 
 ```
-agents/subagents/scope-enum-iam.md      IAM enumeration (model: haiku)
-agents/subagents/scope-enum-sts.md      STS/identity enumeration (model: haiku)
-agents/subagents/scope-enum-s3.md       S3 enumeration (model: haiku)
-agents/subagents/scope-enum-kms.md      KMS enumeration (model: haiku)
-agents/subagents/scope-enum-secrets.md  Secrets Manager enumeration (model: haiku)
-agents/subagents/scope-enum-lambda.md   Lambda enumeration (model: haiku)
-agents/subagents/scope-enum-ec2.md      EC2/VPC/EBS/ELB enumeration (model: haiku)
-agents/subagents/scope-attack-paths.md  Attack path reasoning from per-module JSON (model: inherit)
-agents/subagents/scope-verify.md        Unified verification -- claim ledger, AWS API validation, SPL checks (read inline)
-agents/subagents/scope-pipeline.md      Post-processing middleware -- data normalization then evidence indexing (read inline)
+agents/subagents/scope-enum-iam.md         IAM enumeration
+agents/subagents/scope-enum-sts.md         STS/identity enumeration
+agents/subagents/scope-enum-s3.md          S3 enumeration
+agents/subagents/scope-enum-kms.md         KMS enumeration
+agents/subagents/scope-enum-secrets.md     Secrets Manager enumeration
+agents/subagents/scope-enum-lambda.md      Lambda enumeration
+agents/subagents/scope-enum-ec2.md         EC2/VPC/EBS/ELB/SSM enumeration
+agents/subagents/scope-enum-rds.md         RDS enumeration
+agents/subagents/scope-enum-sns.md         SNS enumeration
+agents/subagents/scope-enum-sqs.md         SQS enumeration
+agents/subagents/scope-enum-apigateway.md  API Gateway enumeration
+agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration
+agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON
+agents/subagents/scope-verify.md           Unified verification -- claim ledger, AWS API validation, SPL checks (read inline)
+agents/subagents/scope-pipeline.md         Post-processing middleware -- data normalization then evidence indexing (read inline)
 ```
+
+**Model routing per platform** -- `install.js` assigns models during install:
+
+| Agent Type | Claude Code | Gemini CLI | Codex |
+|------------|-------------|------------|-------|
+| Enum subagents | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
+| Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 ## Architecture
 
@@ -194,5 +207,6 @@ scope-investigate is standalone -- does not read audit/exploit/defend output. Al
 |------|---------|
 | `config/accounts.json` | Owned AWS account IDs -- distinguishes internal vs external cross-account trusts |
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
+| `config/cloudtrail-classes.json` | CloudTrail event classification -- used by exploit for stealth-ordered playbooks |
 
-All config files are optional and gitignored.
+All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.

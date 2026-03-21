@@ -2,7 +2,7 @@
 name: scope-enum-sqs
 description: SQS enumeration subagent — queue discovery, resource policy analysis, encryption posture, and event source mapping detection. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/sqs.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 

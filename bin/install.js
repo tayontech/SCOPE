@@ -185,22 +185,27 @@ const TOP_LEVEL_SUBAGENTS = new Set([
 //   Explicit sonnet pin prevents session-model inheritance (e.g., --model haiku)
 //   from silently degrading security-critical reasoning to an under-powered model.
 // scope-verify and scope-pipeline are NOT deployed as subagents — they are read inline.
-const SUBAGENT_MODEL_MAP = {
-  'scope-enum-iam': 'haiku',
-  'scope-enum-sts': 'haiku',
-  'scope-enum-s3': 'haiku',
-  'scope-enum-kms': 'haiku',
-  'scope-enum-secrets': 'haiku',
-  'scope-enum-lambda': 'haiku',
-  'scope-enum-ec2': 'haiku',
-  'scope-enum-rds': 'haiku',
-  'scope-enum-sns': 'haiku',
-  'scope-enum-sqs': 'haiku',
-  'scope-enum-apigateway': 'haiku',
-  'scope-enum-codebuild': 'haiku',
-  'scope-attack-paths': 'sonnet',
-  'scope-defend': 'sonnet',
+const SUBAGENT_MODELS = {
+  claude: {
+    enum: 'claude-haiku-4-5',
+    reasoning: 'claude-sonnet-4-6',
+  },
+  gemini: {
+    enum: 'gemini-3.1-flash-lite-preview',
+    reasoning: 'gemini-3.1-pro-preview',
+  },
+  codex: {
+    enum: 'gpt-5.4-mini',
+    reasoning: 'gpt-5.4',
+  },
 };
+
+const REASONING_AGENTS = new Set(['scope-attack-paths', 'scope-defend']);
+
+function getModelForAgent(agentName, editor) {
+  const tier = REASONING_AGENTS.has(agentName) ? 'reasoning' : 'enum';
+  return SUBAGENT_MODELS[editor]?.[tier] || SUBAGENT_MODELS.claude[tier];
+}
 
 /**
  * Discover installable agent .md files from the agents/ source directory.
@@ -324,7 +329,7 @@ function pruneStaleSubagentFiles(agentsDir, installedNames) {
 /**
  * Claude Code subagent deployment.
  * Deploys flat .md files to .claude/agents/ (local) or ~/.claude/agents/ (global).
- * Injects the model field from SUBAGENT_MODEL_MAP into frontmatter.
+ * Injects the platform-specific model into frontmatter.
  */
 function installSubagentsClaude(subagents, scope) {
   const agentsDir = scope === 'local'
@@ -340,10 +345,7 @@ function installSubagentsClaude(subagents, scope) {
 
     if (parsed) {
       const { frontmatter, body } = parsed;
-      const model = SUBAGENT_MODEL_MAP[subagent.name];
-      if (model) {
-        frontmatter.model = model;
-      }
+      frontmatter.model = getModelForAgent(subagent.name, 'claude');
       const fm = rebuildFrontmatter(frontmatter, []);
       content = `---\n${fm}\n---\n\n${body}`;
     }
@@ -372,11 +374,7 @@ function installSubagentsGemini(subagents, scope) {
 
   fs.mkdirSync(agentsDir, { recursive: true });
   const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'allowed-tools', 'tools', 'color', 'compatibility', 'memory', 'context', 'agent', 'maxTurns'];
-  // Per-agent model routing: enum agents use flash, reasoning agents use pro.
-  const GEMINI_MODEL_MAP = {
-    haiku: 'gemini-2.5-flash',
-    sonnet: 'gemini-3.1-pro-preview',
-  };
+  // Model routing handled by getModelForAgent('name', 'gemini')
   let count = 0;
 
   // Gemini defaults: max_turns=15 — too low for SCOPE agents.
@@ -410,11 +408,8 @@ function installSubagentsGemini(subagents, scope) {
       if (config) {
         frontmatter.max_turns = String(config.max_turns);
       }
-      // Inject model based on SCOPE tier mapping
-      const scopeModel = SUBAGENT_MODEL_MAP[subagent.name];
-      if (scopeModel && GEMINI_MODEL_MAP[scopeModel]) {
-        frontmatter.model = GEMINI_MODEL_MAP[scopeModel];
-      }
+      // Inject platform-specific model
+      frontmatter.model = getModelForAgent(subagent.name, 'gemini');
       const fm = rebuildFrontmatter(frontmatter, GEMINI_STRIP_KEYS);
       // Build tools as YAML array (rebuildFrontmatter only handles strings)
       let toolsYaml = '';
@@ -492,9 +487,7 @@ function installSubagentsCodex(subagents, scope) {
     console.log(`  Installing subagent ${subagent.name} -> ${displayMd}`);
     count++;
 
-    // Determine model — gpt-5.3-codex for enum (haiku tier), gpt-5.4 for reasoning (sonnet tier)
-    const scopeModel = SUBAGENT_MODEL_MAP[subagent.name] || 'haiku';
-    const codexModel = scopeModel === 'sonnet' ? 'gpt-5.4' : 'gpt-5.1-codex-mini';
+    const codexModel = getModelForAgent(subagent.name, 'codex');
     const reasoningEffort = 'medium';
 
     // Generate per-agent .toml config layer.
@@ -749,13 +742,28 @@ function promptUser(question) {
 }
 
 function runInteractive() {
-  console.log('\nSCOPE Install Script');
-  console.log('Which editor(s) would you like to install to?');
-  console.log('  1) Claude Code');
-  console.log('  2) Gemini CLI');
-  console.log('  3) Codex');
-  console.log('  4) All three editors');
-  const choice = promptUser('\nEnter choice [1-4]: ');
+  const purple = '\x1b[35m';
+  const dim = '\x1b[2m';
+  const bold = '\x1b[1m';
+  const reset = '\x1b[0m';
+
+  console.log('');
+  console.log(purple + '   ___  ___ ___  ___ ___');
+  console.log('  / __|/ __/ _ \\| _ \\ __|');
+  console.log('  \\__ \\ (_| (_) |  _/ _|');
+  console.log('  |___/\\___\\___/|_| |___|' + reset);
+  console.log('');
+  console.log(dim + '  Security Cloud Ops Purple Engagement' + reset);
+  console.log(dim + '  AI agent suite for AWS purple team operations' + reset);
+  console.log('');
+  console.log(bold + '  Which runtime(s) would you like to install for?' + reset);
+  console.log('');
+  console.log(purple + '  1) Claude Code   ' + dim + '(.claude/)' + reset);
+  console.log(purple + '  2) Gemini CLI    ' + dim + '(.gemini/ + .agents/)' + reset);
+  console.log(purple + '  3) Codex         ' + dim + '(.codex/ + .agents/)' + reset);
+  console.log(purple + '  4) All' + reset);
+  console.log('');
+  const choice = promptUser(purple + '  Choice: ' + reset);
 
   let editors = [];
   if (choice === '1') editors = ['claude'];
@@ -763,13 +771,24 @@ function runInteractive() {
   else if (choice === '3') editors = ['codex'];
   else if (choice === '4') editors = ['claude', 'gemini', 'codex'];
   else {
-    console.error('Invalid choice. Run with --help for usage.');
+    console.error('Invalid choice. Enter 1-4.');
     process.exit(1);
   }
 
-  const scopeChoice = promptUser('Install globally (~/.<editor>/) or locally (./<editor>/)? [G/l]: ');
-  const scope = scopeChoice.toLowerCase() === 'l' ? 'local' : 'global';
+  console.log('');
+  console.log(bold + '  Install scope:' + reset);
+  console.log('');
+  console.log(purple + '  1) Local     ' + dim + '(./<editor>/ in project)' + reset);
+  console.log(purple + '  2) Global    ' + dim + '(~/.<editor>/ in home)' + reset);
+  console.log('');
+  const scopeChoice = promptUser(purple + '  Choice: ' + reset);
+  if (scopeChoice !== '1' && scopeChoice !== '2') {
+    console.error('Invalid choice. Enter 1 or 2.');
+    process.exit(1);
+  }
+  const scope = scopeChoice === '2' ? 'global' : 'local';
 
+  console.log('');
   return { editors, scope };
 }
 
