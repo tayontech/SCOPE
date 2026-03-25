@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The IAM agent issues `get-account-authorization-details` with `--filter User Role Group LocalManagedPolicy` and the raw response is piped via stdin to jq (never passed as `--argjson`). Note: `--no-paginate` is NOT used — AWS CLI v2 auto-paginates by default; adding `--no-paginate` would silently truncate results.
   3. `trust_relationships` is non-empty for cross-account roles in the output — AssumeRolePolicyDocument decoded correctly
   4. Diffing `iam.json` before and after migration against the same account shows no field regressions — all previously populated fields remain populated
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 01-01-PLAN.md — Foundation: create shared validator and test AssumeRolePolicyDocument encoding
@@ -47,7 +47,13 @@ Plans:
   2. EC2 public snapshot detection uses `describe-snapshots --restorable-by-user-ids all` instead of a per-snapshot `describe-snapshot-attribute` loop
   3. An audit document exists for all 12 agents recording current API call count vs. optimized call count, with changes applied or change rationale where no optimization is possible
   4. Lambda and Secrets agents iterate the list response once in jq — no inner `select()` re-scans over the same array
-**Plans**: TBD
+**Plans:** 2/4 plans executed
+
+Plans:
+- [ ] 02-01-PLAN.md — Audit document for all 12 agents + RDS snapshot correctness fix
+- [ ] 02-02-PLAN.md — EC2 snapshot bulk filter + ELBv2 listener loop + region O(n^2) fix
+- [ ] 02-03-PLAN.md — Secrets and Lambda inner select() elimination + O(n^2) fix
+- [ ] 02-04-PLAN.md — O(n^2) elimination in S3, KMS, SNS, SQS, API Gateway
 
 ### Phase 3: Regional Optimization and Compatibility Validation
 **Goal**: Regional enumeration agents run region iteration in parallel where possible, and all agents modified across phases 1 and 2 produce output that conforms to existing JSON schemas and passes automated validation
@@ -66,6 +72,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. IAM Bulk Migration | 3/3 | Complete | 2026-03-25 |
-| 2. Agent Correctness and Performance Pass | 0/TBD | Not started | - |
+| 1. IAM Bulk Migration | 3/3 | Complete    | 2026-03-25 |
+| 2. Agent Correctness and Performance Pass | 2/4 | In Progress|  |
 | 3. Regional Optimization and Compatibility Validation | 0/TBD | Not started | - |

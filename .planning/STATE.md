@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Enumeration Efficiency
-status: planning
-stopped_at: Completed 01-iam-bulk-migration 01-03-PLAN.md
-last_updated: "2026-03-25T00:00:00.000Z"
+status: completed
+stopped_at: Completed 02-03-PLAN.md (Secrets and Lambda O(N^2) elimination)
+last_updated: "2026-03-25T18:07:02.399Z"
 last_activity: 2026-03-25 — Completed 01-03-PLAN.md (IAM agent runtime verification, human-approved)
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 7
+  completed_plans: 5
   percent: 100
 ---
 
@@ -53,6 +53,8 @@ Progress: [██████████] 100% (Phase 1)
 | Phase 01-iam-bulk-migration P01 | 5 | 2 tasks | 2 files |
 | Phase 01-iam-bulk-migration P02 | 4 | 2 tasks | 2 files |
 | Phase 01-iam-bulk-migration P03 | ~10min | 2 tasks | 1 file |
+| Phase 02-agent-correctness-and-performance-pass P03 | 74s | 2 tasks | 2 files |
+| Phase 02-agent-correctness-and-performance-pass P02 | 2min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -68,6 +70,10 @@ Recent decisions affecting current work:
 - [Phase 01-iam-bulk-migration]: GAAD GroupDetailList omits member lists — retain per-group get-group calls for member enumeration; per-user PasswordLastUsed requires separate list-users call (not per-user loop)
 - [Phase 01-iam-bulk-migration]: Fallback path STATUS semantics: STATUS=complete when all data collected via fallback; STATUS=partial only when specific resource type list call returns AccessDenied — path choice does not affect completeness
 - [Phase 01-iam-bulk-migration P03]: Human verification confirmed GAAD migration correct — 139 findings on account 427909037973, all credential/enrichment fields populated, no regressions
+- [Phase 02-agent-correctness-and-performance-pass]: Single-pass jq -c piping eliminates O(N^2) select() re-scans in Secrets (5x/secret) and Lambda (6x/function) agents
+- [Phase 02-agent-correctness-and-performance-pass]: Temp-file append (.jsonl per region) + jq -s merge replaces argjson accumulation in Secrets and Lambda agents
+- [Phase 02-agent-correctness-and-performance-pass]: Both --owner-ids self AND --restorable-by-user-ids all required for bulk EC2 snapshot public detection — omitting --owner-ids self returns millions of AWS-wide public snapshots
+- [Phase 02-agent-correctness-and-performance-pass]: Temp-file JSONL pattern (append with jq -c, merge with jq -s 'add // []') applied to both ELBv2 listener and region findings accumulation in EC2 agent — pattern applicable across all enum agents
 
 ### Pending Todos
 
@@ -79,6 +85,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T00:00:00.000Z
-Stopped at: Completed 01-iam-bulk-migration 01-03-PLAN.md
+Last session: 2026-03-25T18:06:48.928Z
+Stopped at: Completed 02-03-PLAN.md (Secrets and Lambda O(N^2) elimination)
 Resume file: None

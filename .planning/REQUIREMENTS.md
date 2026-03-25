@@ -20,8 +20,8 @@
 ### Performance Patterns
 
 - [x] **PERF-01**: All agents pipe large JSON via stdin instead of `--argjson` to avoid ARG_MAX limits
-- [ ] **PERF-02**: All agents replace O(n^2) incremental jq array building with temp-file append + final `jq -s` merge
-- [ ] **PERF-03**: Secrets and Lambda agents eliminate inner `select()` re-scans by iterating list response once in jq
+- [x] **PERF-02**: All agents replace O(n^2) incremental jq array building with temp-file append + final `jq -s` merge
+- [x] **PERF-03**: Secrets and Lambda agents eliminate inner `select()` re-scans by iterating list response once in jq
 - [ ] **PERF-04**: Regional agents parallelize region iteration where possible (background subshells with `wait`)
 
 ### Agent Fixes
@@ -65,8 +65,8 @@
 | PAGE-01 | Phase 1 | Complete |
 | PAGE-02 | Phase 1 | Complete |
 | PERF-01 | Phase 1 | Complete |
-| PERF-02 | Phase 2 | Pending |
-| PERF-03 | Phase 2 | Pending |
+| PERF-02 | Phase 2 | Complete |
+| PERF-03 | Phase 2 | Complete |
 | PERF-04 | Phase 3 | Pending |
 | AFIX-01 | Phase 2 | Pending |
 | AFIX-02 | Phase 2 | Pending |
