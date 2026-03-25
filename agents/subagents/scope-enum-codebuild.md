@@ -47,16 +47,43 @@ On AccessDenied for list-projects or batch-get-projects: `PROJECT_FINDINGS="[]"`
 
 ```bash
 ALL_FINDINGS="[]"
+ERRORS=()
+# Cleanup temp files for rerun safety
+rm -f "$RUN_DIR/raw/codebuild_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/codebuild_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  echo "[scope-enum-codebuild] Scanning region: $CURRENT_REGION"
-  PROJECT_LIST=$(aws codebuild list-projects --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("codebuild:ListProjects AccessDenied $CURRENT_REGION"); continue; }
-  PROJECT_NAMES=$(echo "$PROJECT_LIST" | jq -r '.projects[]?' 2>/dev/null)
-  if [ -n "$PROJECT_NAMES" ]; then
-    PROJECTS_DATA=$(aws codebuild batch-get-projects --names $PROJECT_NAMES --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("codebuild:BatchGetProjects AccessDenied $CURRENT_REGION"); continue; }
-    # Run codebuild_project extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "$PROJECT_FINDINGS" '. + $new')
+  (
+    REGION_STATUS="complete"
+    PROJECT_LIST=$(aws codebuild list-projects --region "$CURRENT_REGION" --output json 2>&1) || { echo "codebuild:ListProjects AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/codebuild_errors.txt"; echo "error" > "$RUN_DIR/raw/codebuild_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    PROJECT_NAMES=$(echo "$PROJECT_LIST" | jq -r '.projects[]?' 2>/dev/null)
+    if [ -n "$PROJECT_NAMES" ]; then
+      PROJECTS_DATA=$(aws codebuild batch-get-projects --names $PROJECT_NAMES --region "$CURRENT_REGION" --output json 2>&1) || { echo "codebuild:BatchGetProjects AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/codebuild_errors.txt"; echo "partial" > "$RUN_DIR/raw/codebuild_region_status_${CURRENT_REGION}.txt"; exit 0; }
+      # Run codebuild_project extraction template above
+      # Append each finding as a JSONL line (temp-file append pattern — no O(n^2) accumulation)
+      echo "$PROJECT_FINDINGS" | jq -c '.[]' >> "$RUN_DIR/raw/codebuild_findings_${CURRENT_REGION}.jsonl"
+    fi
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/codebuild_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
   fi
 done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/codebuild_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
+done
+# Merge all per-region finding files (O(n) — single pass after loops)
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/codebuild_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
