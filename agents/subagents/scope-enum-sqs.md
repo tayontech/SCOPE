@@ -118,15 +118,38 @@ On AccessDenied for list-queues or get-queue-attributes: `QUEUE_FINDINGS="[]"`
 
 ```bash
 ALL_FINDINGS="[]"
+ERRORS=()
 # Cleanup temp files for rerun safety
 rm -f "$RUN_DIR/raw/sqs_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/sqs_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  QUEUES=$(aws sqs list-queues --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sqs:ListQueues AccessDenied $CURRENT_REGION"); continue; }
-  for QUEUE_URL in $(echo "$QUEUES" | jq -r '.QueueUrls[]? // empty'); do
-    QUEUE_ATTRS=$(aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names All --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sqs:GetQueueAttributes AccessDenied $QUEUE_URL"); continue; }
-    # Run sqs_queue extraction template above, then append to temp file
-    echo "$QUEUE_FINDINGS" >> "$RUN_DIR/raw/sqs_findings_${CURRENT_REGION}.jsonl"
-  done
+  (
+    REGION_STATUS="complete"
+    QUEUES=$(aws sqs list-queues --region "$CURRENT_REGION" --output json 2>&1) || { echo "sqs:ListQueues AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/sqs_errors.txt"; echo "error" > "$RUN_DIR/raw/sqs_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    for QUEUE_URL in $(echo "$QUEUES" | jq -r '.QueueUrls[]? // empty'); do
+      QUEUE_ATTRS=$(aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names All --region "$CURRENT_REGION" --output json 2>&1) || { echo "sqs:GetQueueAttributes AccessDenied $QUEUE_URL" >> "$RUN_DIR/raw/sqs_errors.txt"; REGION_STATUS="partial"; continue; }
+      # Run sqs_queue extraction template above, then append to temp file
+      echo "$QUEUE_FINDINGS" >> "$RUN_DIR/raw/sqs_findings_${CURRENT_REGION}.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/sqs_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
+done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/sqs_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge all per-queue findings across all regions (O(n) — single pass after loops)
 ALL_FINDINGS=$(cat "$RUN_DIR/raw/sqs_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")

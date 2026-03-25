@@ -117,15 +117,38 @@ On AccessDenied for list-topics or get-topic-attributes: `TOPIC_FINDINGS="[]"`
 
 ```bash
 ALL_FINDINGS="[]"
+ERRORS=()
 # Cleanup temp files for rerun safety
 rm -f "$RUN_DIR/raw/sns_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/sns_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  TOPICS=$(aws sns list-topics --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sns:ListTopics AccessDenied $CURRENT_REGION"); continue; }
-  for TOPIC_ARN in $(echo "$TOPICS" | jq -r '.Topics[].TopicArn'); do
-    TOPIC_ATTRS=$(aws sns get-topic-attributes --topic-arn "$TOPIC_ARN" --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sns:GetTopicAttributes AccessDenied $TOPIC_ARN"); continue; }
-    # Run sns_topic extraction template above, then append to temp file
-    echo "$TOPIC_FINDINGS" >> "$RUN_DIR/raw/sns_findings_${CURRENT_REGION}.jsonl"
-  done
+  (
+    REGION_STATUS="complete"
+    TOPICS=$(aws sns list-topics --region "$CURRENT_REGION" --output json 2>&1) || { echo "sns:ListTopics AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/sns_errors.txt"; echo "error" > "$RUN_DIR/raw/sns_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    for TOPIC_ARN in $(echo "$TOPICS" | jq -r '.Topics[].TopicArn'); do
+      TOPIC_ATTRS=$(aws sns get-topic-attributes --topic-arn "$TOPIC_ARN" --region "$CURRENT_REGION" --output json 2>&1) || { echo "sns:GetTopicAttributes AccessDenied $TOPIC_ARN" >> "$RUN_DIR/raw/sns_errors.txt"; REGION_STATUS="partial"; continue; }
+      # Run sns_topic extraction template above, then append to temp file
+      echo "$TOPIC_FINDINGS" >> "$RUN_DIR/raw/sns_findings_${CURRENT_REGION}.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/sns_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
+done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/sns_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge all per-topic findings across all regions (O(n) — single pass after loops)
 ALL_FINDINGS=$(cat "$RUN_DIR/raw/sns_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
