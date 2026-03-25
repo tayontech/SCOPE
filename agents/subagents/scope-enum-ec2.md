@@ -105,16 +105,18 @@ SNAPSHOT_FINDINGS=$(echo "$SNAPSHOTS" | jq --arg region "$CURRENT_REGION" \
   }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_ebs_snapshot in $CURRENT_REGION"; STATUS="error"; }
 ```
 
-Public snapshot detection — check createVolumePermission for "all" group:
+Public snapshot detection — single bulk API call (restorable-by-user-ids all returns only this account's public snapshots):
 ```bash
-PUBLIC_SNAPSHOT_IDS="[]"
-for SNAP_ID in $(echo "$SNAPSHOTS" | jq -r '.Snapshots[].SnapshotId'); do
-  PERMS=$(aws ec2 describe-snapshot-attribute --snapshot-id "$SNAP_ID" --attribute createVolumePermission --region "$CURRENT_REGION" --output json 2>&1) || continue
-  IS_PUBLIC=$(echo "$PERMS" | jq '[.CreateVolumePermissions[]? | select(.Group == "all")] | length > 0')
-  if [ "$IS_PUBLIC" = "true" ]; then
-    PUBLIC_SNAPSHOT_IDS=$(echo "$PUBLIC_SNAPSHOT_IDS" | jq --arg id "$SNAP_ID" '. + [$id]')
-  fi
-done
+# Single API call: --owner-ids self limits to this account's snapshots; --restorable-by-user-ids all
+# returns only those that are publicly restorable. Both flags are required — omitting --owner-ids self
+# would return ALL public snapshots across AWS (millions of results).
+PUBLIC_SNAPS=$(aws ec2 describe-snapshots \
+  --owner-ids self \
+  --restorable-by-user-ids all \
+  --region "$CURRENT_REGION" \
+  --output json 2>&1) || PUBLIC_SNAPS='{"Snapshots":[]}'
+
+PUBLIC_SNAPSHOT_IDS=$(echo "$PUBLIC_SNAPS" | jq '[.Snapshots[].SnapshotId]')
 ```
 
 On AccessDenied for describe-snapshots: `SNAPSHOT_FINDINGS="[]"`

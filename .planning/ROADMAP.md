@@ -16,7 +16,7 @@ Three phases that systematically reduce API call overhead across all 12 enumerat
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: IAM Bulk Migration** - Replace per-resource IAM loops with `get-account-authorization-details` bulk API while retaining credential-state calls
+- [x] **Phase 1: IAM Bulk Migration** - Replace per-resource IAM loops with `get-account-authorization-details` bulk API while retaining credential-state calls
 - [ ] **Phase 2: Agent Correctness and Performance Pass** - Audit all 12 agents, fix RDS/EC2 snapshot correctness bugs, apply O(n^2) elimination and inner-scan patterns
 - [ ] **Phase 3: Regional Optimization and Compatibility Validation** - Parallelize regional agents, validate all modified agents against output schemas
 
@@ -31,12 +31,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The IAM agent issues `get-account-authorization-details` with `--filter User Role Group LocalManagedPolicy` and the raw response is piped via stdin to jq (never passed as `--argjson`). Note: `--no-paginate` is NOT used — AWS CLI v2 auto-paginates by default; adding `--no-paginate` would silently truncate results.
   3. `trust_relationships` is non-empty for cross-account roles in the output — AssumeRolePolicyDocument decoded correctly
   4. Diffing `iam.json` before and after migration against the same account shows no field regressions — all previously populated fields remain populated
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
-- [ ] 01-01-PLAN.md — Foundation: create shared validator and test AssumeRolePolicyDocument encoding
-- [ ] 01-02-PLAN.md — Core migration: rewrite IAM agent with GAAD primary path and fallback
-- [ ] 01-03-PLAN.md — Verification: automated checks and human verification against real AWS account
+- [x] 01-01-PLAN.md — Foundation: create shared validator and test AssumeRolePolicyDocument encoding
+- [x] 01-02-PLAN.md — Core migration: rewrite IAM agent with GAAD primary path and fallback
+- [x] 01-03-PLAN.md — Verification: automated checks and human verification against real AWS account
 
 ### Phase 2: Agent Correctness and Performance Pass
 **Goal**: All 12 enumeration agents are audited against their current API call patterns, correctness bugs in RDS and EC2 snapshot public-access checks are fixed, and O(n^2) jq array building and redundant inner scans are eliminated across Secrets and Lambda agents
@@ -66,6 +66,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. IAM Bulk Migration | 2/3 | In Progress|  |
+| 1. IAM Bulk Migration | 3/3 | Complete | 2026-03-25 |
 | 2. Agent Correctness and Performance Pass | 0/TBD | Not started | - |
 | 3. Regional Optimization and Compatibility Validation | 0/TBD | Not started | - |
