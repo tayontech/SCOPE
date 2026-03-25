@@ -106,17 +106,18 @@ SNAPSHOT_FINDINGS=$(echo "$SNAPSHOTS" | jq --arg region "$CURRENT_REGION" \
   }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_ebs_snapshot in $CURRENT_REGION"; STATUS="error"; }
 ```
 
-Public snapshot detection — check createVolumePermission for "all" group:
+Public snapshot detection — single bulk API call (restorable-by-user-ids all returns only this account's public snapshots):
 ```bash
-PUBLIC_SNAPSHOT_IDS="[]"
-for SNAP_ID in $(echo "$SNAPSHOTS" | jq -r '.Snapshots[].SnapshotId'); do
-  echo "[scope-enum-ec2] Processing: $SNAP_ID"
-  PERMS=$(aws ec2 describe-snapshot-attribute --snapshot-id "$SNAP_ID" --attribute createVolumePermission --region "$CURRENT_REGION" --output json 2>&1) || continue
-  IS_PUBLIC=$(echo "$PERMS" | jq '[.CreateVolumePermissions[]? | select(.Group == "all")] | length > 0')
-  if [ "$IS_PUBLIC" = "true" ]; then
-    PUBLIC_SNAPSHOT_IDS=$(echo "$PUBLIC_SNAPSHOT_IDS" | jq --arg id "$SNAP_ID" '. + [$id]')
-  fi
-done
+# Single API call: --owner-ids self limits to this account's snapshots; --restorable-by-user-ids all
+# returns only those that are publicly restorable. Both flags are required — omitting --owner-ids self
+# would return ALL public snapshots across AWS (millions of results).
+PUBLIC_SNAPS=$(aws ec2 describe-snapshots \
+  --owner-ids self \
+  --restorable-by-user-ids all \
+  --region "$CURRENT_REGION" \
+  --output json 2>&1) || PUBLIC_SNAPS='{"Snapshots":[]}'
+
+PUBLIC_SNAPSHOT_IDS=$(echo "$PUBLIC_SNAPS" | jq '[.Snapshots[].SnapshotId]')
 ```
 
 On AccessDenied for describe-snapshots: `SNAPSHOT_FINDINGS="[]"`
@@ -153,14 +154,19 @@ CLASSIC_FINDINGS=$(echo "$CLASSIC_LBS" | jq --arg region "$CURRENT_REGION" \
   }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_load_balancer (classic) in $CURRENT_REGION"; STATUS="error"; }
 ```
 
-Per-region ELB listener collection:
+Per-region ELB listener collection (temp-file append — O(n) instead of O(n^2) jq reparsing):
 ```bash
-ELBV2_LISTENERS="[]"
+# Clean up for reruns before the LB loop
+rm -f "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl"
+
 for LB_ARN in $(echo "$ELBV2_LBS" | jq -r '.LoadBalancers[].LoadBalancerArn'); do
   echo "[scope-enum-ec2] Processing: $LB_ARN"
   LSNRS=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --region "$CURRENT_REGION" --output json 2>&1) || continue
-  ELBV2_LISTENERS=$(echo "$ELBV2_LISTENERS" | jq --argjson new "$(echo "$LSNRS" | jq '.Listeners')" '. + $new')
+  echo "$LSNRS" | jq -c '.Listeners[]' >> "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl" 2>/dev/null
 done
+
+# Merge after loop: jq -s '.' reads all JSONL lines into an array
+ELBV2_LISTENERS=$(jq -s '.' "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl" 2>/dev/null || echo "[]")
 ```
 
 On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `CLASSIC_FINDINGS="[]"`
@@ -168,31 +174,67 @@ On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `C
 ### Regional Iteration
 
 ```bash
-ALL_FINDINGS="[]"
+# Clean up temp findings files and status files for reruns before the region loop
+rm -f "$RUN_DIR/raw/ec2_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/ec2_region_status_"*.txt
+rm -f "$RUN_DIR/raw/ec2_errors.txt"
+
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
+
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  echo "[scope-enum-ec2] Scanning region: $CURRENT_REGION"
-  INSTANCES=$(aws ec2 describe-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeInstances AccessDenied $CURRENT_REGION"); INSTANCES='{"Reservations":[]}'; }
-  SECURITY_GROUPS=$(aws ec2 describe-security-groups --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeSecurityGroups AccessDenied $CURRENT_REGION"); SECURITY_GROUPS='{"SecurityGroups":[]}'; }
-  VPCS=$(aws ec2 describe-vpcs --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeVpcs AccessDenied $CURRENT_REGION"); VPCS='{"Vpcs":[]}'; }
-  SNAPSHOTS=$(aws ec2 describe-snapshots --owner-ids self --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeSnapshots AccessDenied $CURRENT_REGION"); SNAPSHOTS='{"Snapshots":[]}'; }
-  ELBV2_LBS=$(aws elbv2 describe-load-balancers --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("elbv2:DescribeLoadBalancers AccessDenied $CURRENT_REGION"); ELBV2_LBS='{"LoadBalancers":[]}'; }
-  CLASSIC_LBS=$(aws elb describe-load-balancers --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("elb:DescribeLoadBalancers AccessDenied $CURRENT_REGION"); CLASSIC_LBS='{"LoadBalancerDescriptions":[]}'; }
+  (
+    REGION_STATUS="complete"
 
-  # Run extraction templates above for each resource type
-  # Run public snapshot detection before ec2_ebs_snapshot extraction
-  # Collect ELBv2 listeners before ec2_load_balancer extraction
+    INSTANCES=$(aws ec2 describe-instances --region "$CURRENT_REGION" --output json 2>&1) || { echo "ec2:DescribeInstances AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/ec2_errors.txt"; INSTANCES='{"Reservations":[]}'; REGION_STATUS="partial"; }
+    SECURITY_GROUPS=$(aws ec2 describe-security-groups --region "$CURRENT_REGION" --output json 2>&1) || { echo "ec2:DescribeSecurityGroups AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/ec2_errors.txt"; SECURITY_GROUPS='{"SecurityGroups":[]}'; REGION_STATUS="partial"; }
+    VPCS=$(aws ec2 describe-vpcs --region "$CURRENT_REGION" --output json 2>&1) || { echo "ec2:DescribeVpcs AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/ec2_errors.txt"; VPCS='{"Vpcs":[]}'; REGION_STATUS="partial"; }
+    SNAPSHOTS=$(aws ec2 describe-snapshots --owner-ids self --region "$CURRENT_REGION" --output json 2>&1) || { echo "ec2:DescribeSnapshots AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/ec2_errors.txt"; SNAPSHOTS='{"Snapshots":[]}'; REGION_STATUS="partial"; }
+    ELBV2_LBS=$(aws elbv2 describe-load-balancers --region "$CURRENT_REGION" --output json 2>&1) || { echo "elbv2:DescribeLoadBalancers AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/ec2_errors.txt"; ELBV2_LBS='{"LoadBalancers":[]}'; REGION_STATUS="partial"; }
+    CLASSIC_LBS=$(aws elb describe-load-balancers --region "$CURRENT_REGION" --output json 2>&1) || { echo "elb:DescribeLoadBalancers AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/ec2_errors.txt"; CLASSIC_LBS='{"LoadBalancerDescriptions":[]}'; REGION_STATUS="partial"; }
 
-  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq \
-    --argjson inst "$INSTANCE_FINDINGS" \
-    --argjson sg "$SG_FINDINGS" \
-    --argjson vpc "$VPC_FINDINGS" \
-    --argjson snap "$SNAPSHOT_FINDINGS" \
-    --argjson elbv2 "$ELBv2_FINDINGS" \
-    --argjson classic "$CLASSIC_FINDINGS" \
-    '. + $inst + $sg + $vpc + $snap + $elbv2 + $classic')
+    # Run extraction templates above for each resource type
+    # Run public snapshot detection before ec2_ebs_snapshot extraction
+    # Collect ELBv2 listeners before ec2_load_balancer extraction
 
-  COMPLETED_REGIONS="$COMPLETED_REGIONS,$CURRENT_REGION"
+    # Append all resource type findings for this region to per-region temp file (no shared file writes across parallel subshells)
+    for TYPE_FINDINGS in "$INSTANCE_FINDINGS" "$SG_FINDINGS" "$VPC_FINDINGS" "$SNAPSHOT_FINDINGS" "$ELBv2_FINDINGS" "$CLASSIC_FINDINGS"; do
+      echo "$TYPE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/ec2_findings_${CURRENT_REGION}.jsonl" 2>/dev/null
+    done
+
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/ec2_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
 done
+
+# Wait for all remaining background region jobs
+wait
+
+# Collect per-region status to derive aggregate STATUS and ERRORS; reconstruct COMPLETED_REGIONS from status files
+STATUS="complete"
+COMPLETED_REGIONS=""
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/ec2_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" = "complete" ] || [ "$RS" = "partial" ]; then
+    COMPLETED_REGIONS="$COMPLETED_REGIONS,$REGION"
+  fi
+  if [ "$RS" != "complete" ]; then
+    STATUS="partial"
+    ERRORS+=("ec2: region $REGION status: $RS")
+  fi
+done
+[ -f "$RUN_DIR/raw/ec2_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/ec2_errors.txt"
+
+# Merge all per-region findings files after all background jobs complete
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/ec2_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
@@ -295,13 +337,20 @@ Do NOT report STATUS: complete if any validation step fails.
   Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
 
 ### Intermediate Write (Timeout Resilience)
-After completing EACH region's enumeration, append that region's findings to FINDINGS_JSON immediately. If the agent is interrupted (timeout, turn limit), findings from completed regions are preserved.
+After completing EACH region's enumeration, append that region's findings to the per-region temp file immediately. If the agent is interrupted (timeout, turn limit), findings from completed regions are preserved in their region-specific files.
 
-Track completed regions:
+Track completed regions via status files (shell variables cannot propagate from background subshells):
 ```bash
+# Each background subshell writes its status to a file:
+echo "$REGION_STATUS" > "$RUN_DIR/raw/ec2_region_status_${CURRENT_REGION}.txt"
+# After wait, reconstruct COMPLETED_REGIONS by scanning which status files exist:
 COMPLETED_REGIONS=""
-# After each region completes:
-COMPLETED_REGIONS="$COMPLETED_REGIONS,$CURRENT_REGION"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/ec2_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" = "complete" ] || [ "$RS" = "partial" ]; then
+    COMPLETED_REGIONS="$COMPLETED_REGIONS,$REGION"
+  fi
+done
 ```
 
 If writing the final ec2.json and not all ENABLED_REGIONS are in COMPLETED_REGIONS, set STATUS to "partial" and include:
