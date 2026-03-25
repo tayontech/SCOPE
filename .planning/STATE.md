@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Enumeration Efficiency
 status: completed
-stopped_at: Completed 03-01-PLAN.md (EC2 and RDS agent parallelization)
-last_updated: "2026-03-25T20:45:23.061Z"
+stopped_at: "Checkpoint 03-03 Task 2: awaiting human verification of full audit pipeline"
+last_updated: "2026-03-25T20:50:12.405Z"
 last_activity: 2026-03-25 — Completed 01-03-PLAN.md (IAM agent runtime verification, human-approved)
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 10
   percent: 100
 ---
 
@@ -58,6 +58,8 @@ Progress: [██████████] 100% (Phase 1)
 | Phase 02-agent-correctness-and-performance-pass P04 | 2min | 2 tasks | 5 files |
 | Phase 02-agent-correctness-and-performance-pass P01 | ~8min | 2 tasks | 2 files |
 | Phase 03-regional-optimization-and-compatibility-validation P01 | 2min | 2 tasks | 2 files |
+| Phase 03-regional-optimization-and-compatibility-validation P02 | 3min | 2 tasks | 7 files |
+| Phase 03-regional-optimization-and-compatibility-validation P03 | 2min | 1 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -84,6 +86,10 @@ Recent decisions affecting current work:
 - [Phase 03-regional-optimization-and-compatibility-validation]: COMPLETED_REGIONS tracking replaced with per-region status file scanning — shell variable mutation from background subshells is silently ignored
 - [Phase 03-regional-optimization-and-compatibility-validation]: Per-region JSONL temp files (ec2_findings_${CURRENT_REGION}.jsonl, rds_instance/snapshot_findings_${CURRENT_REGION}.jsonl) eliminate concurrent write conflicts in parallelized region loops
 - [Phase 03-regional-optimization-and-compatibility-validation]: No wait -n — plain wait used throughout for bash 3.2 compatibility on macOS; errors propagated via text files in RUN_DIR/raw/
+- [Phase 03-regional-optimization-and-compatibility-validation]: Lambda/Secrets inner pipe-subshell loops preserved as-is — they write to per-region temp files, compatible with outer background subshell without restructuring
+- [Phase 03-regional-optimization-and-compatibility-validation]: CodeBuild O(n^2) argjson accumulation replaced with jsonl append + post-loop jq -s merge — same PERF-02 pattern established in Phase 02 for Secrets and Lambda
+- [Phase 03-regional-optimization-and-compatibility-validation]: All 12 agents validated against existing live audit data (12/12 pass) — no fixes required after Plans 01 and 02
+- [Phase 03-regional-optimization-and-compatibility-validation]: Downstream compatibility confirmed: attack-paths reads .findings[] via known filenames; dashboard reads attack-paths results.json, not per-module JSONs
 
 ### Pending Todos
 
@@ -95,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T20:45:23.060Z
-Stopped at: Completed 03-01-PLAN.md (EC2 and RDS agent parallelization)
+Last session: 2026-03-25T20:50:12.403Z
+Stopped at: Checkpoint 03-03 Task 2: awaiting human verification of full audit pipeline
 Resume file: None

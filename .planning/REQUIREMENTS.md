@@ -35,8 +35,8 @@
 
 ### Output Compatibility
 
-- [ ] **COMPAT-01**: All modified agents produce output conforming to existing JSON schemas — no downstream breakage
-- [ ] **COMPAT-02**: All modified agents pass `bin/validate-enum-output.js` validation after changes
+- [x] **COMPAT-01**: All modified agents produce output conforming to existing JSON schemas — no downstream breakage
+- [x] **COMPAT-02**: All modified agents pass `bin/validate-enum-output.js` validation after changes
 
 ## Future Requirements
 
@@ -71,8 +71,8 @@
 | AFIX-01 | Phase 2 | Complete |
 | AFIX-02 | Phase 2 | Complete |
 | EAUD-01 | Phase 2 | Complete |
-| COMPAT-01 | Phase 3 | Pending |
-| COMPAT-02 | Phase 3 | Pending |
+| COMPAT-01 | Phase 3 | Complete |
+| COMPAT-02 | Phase 3 | Complete |
 
 **Coverage:**
 - v1.7 requirements: 15 total
