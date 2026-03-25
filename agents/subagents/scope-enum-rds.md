@@ -82,25 +82,60 @@ On AccessDenied for describe-db-snapshots: `SNAPSHOT_FINDINGS="[]"`
 
 ```bash
 # Remove temp files from any previous run in this RUN_DIR to avoid stale data
-rm -f "$RUN_DIR/raw/rds_instance_findings.jsonl" "$RUN_DIR/raw/rds_snapshot_findings.jsonl"
+rm -f "$RUN_DIR/raw/rds_instance_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/rds_region_status_"*.txt
+rm -f "$RUN_DIR/raw/rds_errors.txt"
+
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  # AWS CLI calls
-  RDS_INSTANCES=$(aws rds describe-db-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBInstances AccessDenied $CURRENT_REGION"); INSTANCE_FINDINGS="[]"; }
-  RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION"); SNAPSHOT_FINDINGS="[]"; }
-  # Run extraction templates above
-  # Append findings to temp files (O(n) — avoids re-reading growing array)
-  echo "$INSTANCE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_instance_findings.jsonl"
-  echo "$SNAPSHOT_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_snapshot_findings.jsonl"
+  (
+    REGION_STATUS="complete"
+
+    # AWS CLI calls
+    RDS_INSTANCES=$(aws rds describe-db-instances --region "$CURRENT_REGION" --output json 2>&1) || { echo "rds:DescribeDBInstances AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/rds_errors.txt"; INSTANCE_FINDINGS="[]"; REGION_STATUS="partial"; }
+    RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { echo "rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/rds_errors.txt"; SNAPSHOT_FINDINGS="[]"; REGION_STATUS="partial"; }
+    # Run extraction templates above (per-snapshot describe-db-snapshot-attributes inner loop runs correctly inside this subshell)
+    # Append findings to per-region temp files (no shared file writes across parallel subshells)
+    echo "$INSTANCE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_instance_findings_${CURRENT_REGION}.jsonl" 2>/dev/null
+    echo "$SNAPSHOT_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_snapshot_findings_${CURRENT_REGION}.jsonl" 2>/dev/null
+
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/rds_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
 done
+
+# Wait for all remaining background region jobs
+wait
+
+# Collect per-region status to derive aggregate STATUS and ERRORS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/rds_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then
+    STATUS="partial"
+    ERRORS+=("rds: region $REGION status: $RS")
+  fi
+done
+[ -f "$RUN_DIR/raw/rds_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/rds_errors.txt"
 ```
 
 ### Combine + Sort
 
 ```bash
-# Merge temp files into arrays (jq -s 'add // []' handles empty files safely)
-INSTANCE_MERGED=$(jq -s 'add // []' "$RUN_DIR/raw/rds_instance_findings.jsonl" 2>/dev/null || echo "[]")
-SNAPSHOT_MERGED=$(jq -s 'add // []' "$RUN_DIR/raw/rds_snapshot_findings.jsonl" 2>/dev/null || echo "[]")
+# Merge per-region temp files into arrays after all background jobs complete (cat glob + jq -s 'add // []' handles empty/missing files safely)
+INSTANCE_MERGED=$(cat "$RUN_DIR/raw/rds_instance_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+SNAPSHOT_MERGED=$(cat "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 FINDINGS_JSON=$(jq -n --argjson inst "$INSTANCE_MERGED" --argjson snap "$SNAPSHOT_MERGED" '$inst + $snap | sort_by(.region + ":" + .arn)')
 ```
 
