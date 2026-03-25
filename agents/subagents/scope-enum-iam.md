@@ -332,7 +332,6 @@ jq -s 'add | sort_by(.arn)' \
   "$RUN_DIR/raw/iam_roles.json" \
   "$RUN_DIR/raw/iam_groups.json" \
   "$RUN_DIR/raw/iam_policies.json" > "$RUN_DIR/raw/iam_all_findings.json"
-FINDINGS_JSON=$(cat "$RUN_DIR/raw/iam_all_findings.json")
 ```
 
 ### Fallback Path (Per-Resource Loops — on GAAD AccessDenied)
@@ -638,7 +637,6 @@ jq -s 'add | sort_by(.arn)' \
   "$RUN_DIR/raw/iam_roles.json" \
   "$RUN_DIR/raw/iam_groups.json" \
   "$RUN_DIR/raw/iam_policies.json" > "$RUN_DIR/raw/iam_all_findings.json"
-FINDINGS_JSON=$(cat "$RUN_DIR/raw/iam_all_findings.json")
 
 # STATUS remains "complete" if all data was collected — fallback path is a fully valid execution path
 # STATUS is set to "partial" above only when specific resource list calls returned AccessDenied
@@ -665,15 +663,15 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "global" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
-  --argjson findings "$FINDINGS_JSON" \
+  --arg status "$STATUS" \
+  --slurpfile findings "$RUN_DIR/raw/iam_all_findings.json" \
   '{
     module: $module,
     account_id: $account_id,
     region: $region,
     timestamp: $ts,
     status: $status,
-    findings: $findings
+    findings: $findings[0]
   }' > "$RUN_DIR/iam.json"
 ```
 
