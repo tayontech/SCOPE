@@ -123,36 +123,58 @@ ALL_FINDINGS="[]"
 ERRORS=()
 # PERF-02: clean up per-region finding files for rerun safety
 rm -f "$RUN_DIR/raw/secrets_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/secrets_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("secretsmanager:ListSecrets AccessDenied $CURRENT_REGION"); continue; }
-  # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
-  SECRETS_FILE="$RUN_DIR/raw/secrets_list_${CURRENT_REGION}.json"
-  echo "$SECRETS" > "$SECRETS_FILE"
-  jq -c '.SecretList[]' "$SECRETS_FILE" | while IFS= read -r SECRET_OBJ; do
-    SECRET_ARN=$(echo "$SECRET_OBJ" | jq -r '.ARN')
-    SECRET_NAME=$(echo "$SECRET_OBJ" | jq -r '.Name')
-    ROTATION_ENABLED=$(echo "$SECRET_OBJ" | jq '.RotationEnabled // false')
-    LAST_ROTATED=$(echo "$SECRET_OBJ" | jq -r '.LastRotatedDate // ""')
-    LAST_ACCESSED=$(echo "$SECRET_OBJ" | jq -r '.LastAccessedDate // ""')
-    KMS_KEY_ID=$(echo "$SECRET_OBJ" | jq -r '.KmsKeyId // ""')
+  (
+    REGION_STATUS="complete"
+    SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { echo "secretsmanager:ListSecrets AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/secrets_errors.txt"; echo "error" > "$RUN_DIR/raw/secrets_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
+    SECRETS_FILE="$RUN_DIR/raw/secrets_list_${CURRENT_REGION}.json"
+    echo "$SECRETS" > "$SECRETS_FILE"
+    jq -c '.SecretList[]' "$SECRETS_FILE" | while IFS= read -r SECRET_OBJ; do
+      SECRET_ARN=$(echo "$SECRET_OBJ" | jq -r '.ARN')
+      SECRET_NAME=$(echo "$SECRET_OBJ" | jq -r '.Name')
+      ROTATION_ENABLED=$(echo "$SECRET_OBJ" | jq '.RotationEnabled // false')
+      LAST_ROTATED=$(echo "$SECRET_OBJ" | jq -r '.LastRotatedDate // ""')
+      LAST_ACCESSED=$(echo "$SECRET_OBJ" | jq -r '.LastAccessedDate // ""')
+      KMS_KEY_ID=$(echo "$SECRET_OBJ" | jq -r '.KmsKeyId // ""')
 
-    # Get resource policy
-    RESOURCE_POLICY_RAW=$(aws secretsmanager get-resource-policy --secret-id "$SECRET_ARN" --region "$CURRENT_REGION" --output json 2>&1)
-    if [ $? -eq 0 ]; then
-      RESOURCE_POLICY_RAW=$(echo "$RESOURCE_POLICY_RAW" | jq -r '.ResourcePolicy // "{}"')
-    else
-      RESOURCE_POLICY_RAW="{}"
-      ERRORS+=("secretsmanager:GetResourcePolicy AccessDenied $SECRET_ARN")
-    fi
+      # Get resource policy
+      RESOURCE_POLICY_RAW=$(aws secretsmanager get-resource-policy --secret-id "$SECRET_ARN" --region "$CURRENT_REGION" --output json 2>&1)
+      if [ $? -eq 0 ]; then
+        RESOURCE_POLICY_RAW=$(echo "$RESOURCE_POLICY_RAW" | jq -r '.ResourcePolicy // "{}"')
+      else
+        RESOURCE_POLICY_RAW="{}"
+        echo "secretsmanager:GetResourcePolicy AccessDenied $SECRET_ARN" >> "$RUN_DIR/raw/secrets_errors.txt"
+        REGION_STATUS="partial"
+      fi
 
-    # Run secrets_secret extraction template above
-    # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
-    echo "$SECRET_FINDINGS" >> "$RUN_DIR/raw/secrets_findings_${CURRENT_REGION}.jsonl"
-  done
+      # Run secrets_secret extraction template above
+      # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
+      echo "$SECRET_FINDINGS" >> "$RUN_DIR/raw/secrets_findings_${CURRENT_REGION}.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/secrets_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
+done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/secrets_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # PERF-02: merge all region finding files into ALL_FINDINGS
-cat "$RUN_DIR/raw/secrets_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' > /tmp/secrets_merged.json 2>/dev/null
-ALL_FINDINGS=$(cat /tmp/secrets_merged.json 2>/dev/null || echo "[]")
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/secrets_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

@@ -156,53 +156,75 @@ ERRORS=()
 # Cleanup temp files for rerun safety
 rm -f "$RUN_DIR/raw/apigw_rest_findings_"*.jsonl
 rm -f "$RUN_DIR/raw/apigw_v2_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/apigw_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  # REST APIs (apigateway v1)
-  REST_APIS=$(aws apigateway get-rest-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigateway:GetRestApis AccessDenied $CURRENT_REGION"); REST_APIS='{"items":[]}'; }
-  for REST_API_ID in $(echo "$REST_APIS" | jq -r '.items[]?.id // empty'); do
-    REST_API_NAME=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .name')
-    REST_API_POLICY=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .policy // "{}"')
-    # URL-decode the policy if needed (REST API policies are URL-encoded)
-    REST_API_POLICY=$(printf '%b' "${REST_API_POLICY//%/\\x}" 2>/dev/null || echo "$REST_API_POLICY")
+  (
+    REGION_STATUS="complete"
+    # REST APIs (apigateway v1)
+    REST_APIS=$(aws apigateway get-rest-apis --region "$CURRENT_REGION" --output json 2>&1) || { echo "apigateway:GetRestApis AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/apigw_errors.txt"; REST_APIS='{"items":[]}'; REGION_STATUS="partial"; }
+    for REST_API_ID in $(echo "$REST_APIS" | jq -r '.items[]?.id // empty'); do
+      REST_API_NAME=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .name')
+      REST_API_POLICY=$(echo "$REST_APIS" | jq -r --arg id "$REST_API_ID" '.items[] | select(.id == $id) | .policy // "{}"')
+      # URL-decode the policy if needed (REST API policies are URL-encoded)
+      REST_API_POLICY=$(printf '%b' "${REST_API_POLICY//%/\\x}" 2>/dev/null || echo "$REST_API_POLICY")
 
-    # Get authorizers
-    AUTHORIZERS=$(aws apigateway get-authorizers --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    REST_HAS_AUTHORIZER=$(echo "$AUTHORIZERS" | jq '(.items // []) | length > 0' 2>/dev/null || echo "false")
+      # Get authorizers
+      AUTHORIZERS=$(aws apigateway get-authorizers --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      REST_HAS_AUTHORIZER=$(echo "$AUTHORIZERS" | jq '(.items // []) | length > 0' 2>/dev/null || echo "false")
 
-    # Get stages
-    STAGES=$(aws apigateway get-stages --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    REST_STAGES_JSON=$(echo "$STAGES" | jq '[.item[]?.stageName // empty]' 2>/dev/null || echo "[]")
+      # Get stages
+      STAGES=$(aws apigateway get-stages --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      REST_STAGES_JSON=$(echo "$STAGES" | jq '[.item[]?.stageName // empty]' 2>/dev/null || echo "[]")
 
-    # Get Lambda integrations (check resources for LAMBDA/AWS_PROXY integration type)
-    RESOURCES=$(aws apigateway get-resources --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    REST_LAMBDA_INTEGRATIONS_JSON=$(echo "$RESOURCES" | jq '[.items[]?.resourceMethods // {} | to_entries[]? | .value.methodIntegration // {} | select(.type == "AWS_PROXY" or .type == "LAMBDA") | .uri // empty | capture("functions/(?<name>[^/]+)/") | .name] | unique' 2>/dev/null || echo "[]")
+      # Get Lambda integrations (check resources for LAMBDA/AWS_PROXY integration type)
+      RESOURCES=$(aws apigateway get-resources --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      REST_LAMBDA_INTEGRATIONS_JSON=$(echo "$RESOURCES" | jq '[.items[]?.resourceMethods // {} | to_entries[]? | .value.methodIntegration // {} | select(.type == "AWS_PROXY" or .type == "LAMBDA") | .uri // empty | capture("functions/(?<name>[^/]+)/") | .name] | unique' 2>/dev/null || echo "[]")
 
-    # Run REST API extraction template above, then append to temp file
-    echo "$REST_API_FINDINGS" >> "$RUN_DIR/raw/apigw_rest_findings_${CURRENT_REGION}.jsonl"
-  done
+      # Run REST API extraction template above, then append to temp file
+      echo "$REST_API_FINDINGS" >> "$RUN_DIR/raw/apigw_rest_findings_${CURRENT_REGION}.jsonl"
+    done
 
-  # HTTP and WebSocket APIs (apigatewayv2)
-  V2_APIS=$(aws apigatewayv2 get-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigatewayv2:GetApis AccessDenied $CURRENT_REGION"); V2_APIS='{"Items":[]}'; }
-  for V2_API_ID in $(echo "$V2_APIS" | jq -r '.Items[]?.ApiId // empty'); do
-    V2_API_NAME=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .Name')
-    V2_PROTOCOL=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .ProtocolType')
-    V2_API_TYPE=$(echo "$V2_PROTOCOL" | tr '[:upper:]' '[:lower:]')
+    # HTTP and WebSocket APIs (apigatewayv2)
+    V2_APIS=$(aws apigatewayv2 get-apis --region "$CURRENT_REGION" --output json 2>&1) || { echo "apigatewayv2:GetApis AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/apigw_errors.txt"; V2_APIS='{"Items":[]}'; REGION_STATUS="partial"; }
+    for V2_API_ID in $(echo "$V2_APIS" | jq -r '.Items[]?.ApiId // empty'); do
+      V2_API_NAME=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .Name')
+      V2_PROTOCOL=$(echo "$V2_APIS" | jq -r --arg id "$V2_API_ID" '.Items[] | select(.ApiId == $id) | .ProtocolType')
+      V2_API_TYPE=$(echo "$V2_PROTOCOL" | tr '[:upper:]' '[:lower:]')
 
-    # Get authorizers
-    V2_AUTHORIZERS=$(aws apigatewayv2 get-authorizers --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    V2_HAS_AUTHORIZER=$(echo "$V2_AUTHORIZERS" | jq '(.Items // []) | length > 0' 2>/dev/null || echo "false")
+      # Get authorizers
+      V2_AUTHORIZERS=$(aws apigatewayv2 get-authorizers --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      V2_HAS_AUTHORIZER=$(echo "$V2_AUTHORIZERS" | jq '(.Items // []) | length > 0' 2>/dev/null || echo "false")
 
-    # Get stages
-    V2_STAGES_RAW=$(aws apigatewayv2 get-stages --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    V2_STAGES_JSON=$(echo "$V2_STAGES_RAW" | jq '[.Items[]?.StageName // empty]' 2>/dev/null || echo "[]")
+      # Get stages
+      V2_STAGES_RAW=$(aws apigatewayv2 get-stages --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      V2_STAGES_JSON=$(echo "$V2_STAGES_RAW" | jq '[.Items[]?.StageName // empty]' 2>/dev/null || echo "[]")
 
-    # Get Lambda integrations
-    V2_INTEGRATIONS=$(aws apigatewayv2 get-integrations --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    V2_LAMBDA_INTEGRATIONS_JSON=$(echo "$V2_INTEGRATIONS" | jq '[.Items[]? | select(.IntegrationType == "AWS_PROXY") | .IntegrationUri // empty | capture("functions/(?<name>[^/]+)") | .name] | unique' 2>/dev/null || echo "[]")
+      # Get Lambda integrations
+      V2_INTEGRATIONS=$(aws apigatewayv2 get-integrations --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      V2_LAMBDA_INTEGRATIONS_JSON=$(echo "$V2_INTEGRATIONS" | jq '[.Items[]? | select(.IntegrationType == "AWS_PROXY") | .IntegrationUri // empty | capture("functions/(?<name>[^/]+)") | .name] | unique' 2>/dev/null || echo "[]")
 
-    # Run HTTP/WebSocket API extraction template above, then append to temp file
-    echo "$V2_API_FINDINGS" >> "$RUN_DIR/raw/apigw_v2_findings_${CURRENT_REGION}.jsonl"
-  done
+      # Run HTTP/WebSocket API extraction template above, then append to temp file
+      echo "$V2_API_FINDINGS" >> "$RUN_DIR/raw/apigw_v2_findings_${CURRENT_REGION}.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/apigw_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
+done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/apigw_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge REST and v2 findings separately, then combine (O(n) — single pass after loops)
 REST_FINDINGS=$(cat "$RUN_DIR/raw/apigw_rest_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")

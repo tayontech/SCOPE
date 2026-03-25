@@ -137,42 +137,63 @@ ALL_FINDINGS="[]"
 ERRORS=()
 # PERF-02: clean up per-region finding files for rerun safety
 rm -f "$RUN_DIR/raw/lambda_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/lambda_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  FUNCTIONS=$(aws lambda list-functions --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("lambda:ListFunctions AccessDenied $CURRENT_REGION"); continue; }
-  # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
-  FUNCTIONS_FILE="$RUN_DIR/raw/lambda_list_${CURRENT_REGION}.json"
-  echo "$FUNCTIONS" > "$FUNCTIONS_FILE"
-  jq -c '.Functions[]' "$FUNCTIONS_FILE" | while IFS= read -r FUNC_JSON; do
-    FUNC_ARN=$(echo "$FUNC_JSON" | jq -r '.FunctionArn')
-    FUNC_NAME=$(echo "$FUNC_JSON" | jq -r '.FunctionName')
-    FUNC_RUNTIME=$(echo "$FUNC_JSON" | jq -r '.Runtime // "unknown"')
-    FUNC_ROLE=$(echo "$FUNC_JSON" | jq -r '.Role')
-    FUNC_LAST_MODIFIED=$(echo "$FUNC_JSON" | jq -r '.LastModified // ""')
-    FUNC_LAYERS_JSON=$(echo "$FUNC_JSON" | jq '[.Layers[]?.Arn // empty]' 2>/dev/null || echo "[]")
+  (
+    REGION_STATUS="complete"
+    FUNCTIONS=$(aws lambda list-functions --region "$CURRENT_REGION" --output json 2>&1) || { echo "lambda:ListFunctions AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/lambda_errors.txt"; echo "error" > "$RUN_DIR/raw/lambda_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
+    FUNCTIONS_FILE="$RUN_DIR/raw/lambda_list_${CURRENT_REGION}.json"
+    echo "$FUNCTIONS" > "$FUNCTIONS_FILE"
+    jq -c '.Functions[]' "$FUNCTIONS_FILE" | while IFS= read -r FUNC_JSON; do
+      FUNC_ARN=$(echo "$FUNC_JSON" | jq -r '.FunctionArn')
+      FUNC_NAME=$(echo "$FUNC_JSON" | jq -r '.FunctionName')
+      FUNC_RUNTIME=$(echo "$FUNC_JSON" | jq -r '.Runtime // "unknown"')
+      FUNC_ROLE=$(echo "$FUNC_JSON" | jq -r '.Role')
+      FUNC_LAST_MODIFIED=$(echo "$FUNC_JSON" | jq -r '.LastModified // ""')
+      FUNC_LAYERS_JSON=$(echo "$FUNC_JSON" | jq '[.Layers[]?.Arn // empty]' 2>/dev/null || echo "[]")
 
-    # Detect secret-pattern env var names
-    # (uses ENV_SECRET_NAMES_JSON extraction template above)
+      # Detect secret-pattern env var names
+      # (uses ENV_SECRET_NAMES_JSON extraction template above)
 
-    # Get function URL config
-    FUNC_URL=$(aws lambda get-function-url-config --function-name "$FUNC_NAME" --region "$CURRENT_REGION" --output json 2>&1)
-    if [ $? -eq 0 ]; then HAS_FUNCTION_URL=true; else HAS_FUNCTION_URL=false; fi
+      # Get function URL config
+      FUNC_URL=$(aws lambda get-function-url-config --function-name "$FUNC_NAME" --region "$CURRENT_REGION" --output json 2>&1)
+      if [ $? -eq 0 ]; then HAS_FUNCTION_URL=true; else HAS_FUNCTION_URL=false; fi
 
-    # Get resource-based policy
-    FUNC_POLICY_RAW=$(aws lambda get-policy --function-name "$FUNC_NAME" --region "$CURRENT_REGION" --output json 2>&1)
-    if [ $? -eq 0 ]; then
-      FUNC_POLICY_RAW=$(echo "$FUNC_POLICY_RAW" | jq -r '.Policy // "{}"')
-    else
-      FUNC_POLICY_RAW="{}"
-    fi
+      # Get resource-based policy
+      FUNC_POLICY_RAW=$(aws lambda get-policy --function-name "$FUNC_NAME" --region "$CURRENT_REGION" --output json 2>&1)
+      if [ $? -eq 0 ]; then
+        FUNC_POLICY_RAW=$(echo "$FUNC_POLICY_RAW" | jq -r '.Policy // "{}"')
+      else
+        FUNC_POLICY_RAW="{}"
+      fi
 
-    # Run lambda_function extraction template above
-    # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
-    echo "$FUNC_FINDINGS" >> "$RUN_DIR/raw/lambda_findings_${CURRENT_REGION}.jsonl"
-  done
+      # Run lambda_function extraction template above
+      # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
+      echo "$FUNC_FINDINGS" >> "$RUN_DIR/raw/lambda_findings_${CURRENT_REGION}.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/lambda_region_status_${CURRENT_REGION}.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
+done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/lambda_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # PERF-02: merge all region finding files into ALL_FINDINGS
-cat "$RUN_DIR/raw/lambda_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' > /tmp/lambda_merged.json 2>/dev/null
-ALL_FINDINGS=$(cat /tmp/lambda_merged.json 2>/dev/null || echo "[]")
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/lambda_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

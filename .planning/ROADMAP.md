@@ -63,7 +63,12 @@ Plans:
   1. Regional agents (EC2, Lambda, RDS, API Gateway, KMS, SNS, SQS) iterate over AWS regions using background subshells and `wait` — region results collected and merged rather than processed sequentially
   2. Running `bin/validate-enum-output.js` against all modified agents produces zero validation failures
   3. The attack-paths agent and dashboard consume all modified agent outputs without field errors — no downstream breakage from the optimization changes
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Parallelize EC2 and RDS agents (temp-file migration + background subshells)
+- [ ] 03-02-PLAN.md — Parallelize KMS, SNS, SQS, Lambda, Secrets, API Gateway, CodeBuild agents
+- [ ] 03-03-PLAN.md — Full 12-agent validation sweep and human verification
 
 ## Progress
 
@@ -73,5 +78,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. IAM Bulk Migration | 3/3 | Complete    | 2026-03-25 |
-| 2. Agent Correctness and Performance Pass | 4/4 | Complete   | 2026-03-25 |
-| 3. Regional Optimization and Compatibility Validation | 0/TBD | Not started | - |
+| 2. Agent Correctness and Performance Pass | 4/4 | Complete    | 2026-03-25 |
+| 3. Regional Optimization and Compatibility Validation | 0/3 | Not started | - |
