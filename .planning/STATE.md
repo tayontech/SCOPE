@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Enumeration Efficiency
 status: completed
-stopped_at: Completed 02-02-PLAN.md (EC2 snapshot detection + O(n^2) accumulation fixes)
-last_updated: "2026-03-25T18:07:06.447Z"
+stopped_at: Completed 02-04-PLAN.md (S3/KMS/SNS/SQS/APIGateway O(n^2) accumulation fix)
+last_updated: "2026-03-25T18:08:03.595Z"
 last_activity: 2026-03-25 — Completed 01-03-PLAN.md (IAM agent runtime verification, human-approved)
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 100
 ---
 
@@ -55,6 +55,7 @@ Progress: [██████████] 100% (Phase 1)
 | Phase 01-iam-bulk-migration P03 | ~10min | 2 tasks | 1 file |
 | Phase 02-agent-correctness-and-performance-pass P03 | 74s | 2 tasks | 2 files |
 | Phase 02-agent-correctness-and-performance-pass P02 | 2min | 2 tasks | 1 files |
+| Phase 02-agent-correctness-and-performance-pass P04 | 2min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 02-agent-correctness-and-performance-pass]: Temp-file append (.jsonl per region) + jq -s merge replaces argjson accumulation in Secrets and Lambda agents
 - [Phase 02-agent-correctness-and-performance-pass]: Both --owner-ids self AND --restorable-by-user-ids all required for bulk EC2 snapshot public detection — omitting --owner-ids self returns millions of AWS-wide public snapshots
 - [Phase 02-agent-correctness-and-performance-pass]: Temp-file JSONL pattern (append with jq -c, merge with jq -s 'add // []') applied to both ELBv2 listener and region findings accumulation in EC2 agent — pattern applicable across all enum agents
+- [Phase 02-agent-correctness-and-performance-pass]: API Gateway two-loop design: REST and v2 findings written to separate .jsonl file sets, merged independently, then combined post-loop
+- [Phase 02-agent-correctness-and-performance-pass]: S3 global service: single s3_findings.jsonl (no region suffix) with direct jq -s rather than cat glob
 
 ### Pending Todos
 
@@ -85,6 +88,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T18:07:06.446Z
-Stopped at: Completed 02-02-PLAN.md (EC2 snapshot detection + O(n^2) accumulation fixes)
+Last session: 2026-03-25T18:08:03.594Z
+Stopped at: Completed 02-04-PLAN.md (S3/KMS/SNS/SQS/APIGateway O(n^2) accumulation fix)
 Resume file: None
