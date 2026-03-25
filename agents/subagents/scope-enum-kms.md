@@ -135,6 +135,8 @@ On AccessDenied for list-grants: set `GRANTS_JSON="[]"`
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# Cleanup temp files for rerun safety
+rm -f "$RUN_DIR/raw/kms_findings_"*.jsonl
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   KEYS=$(aws kms list-keys --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("kms:ListKeys AccessDenied $CURRENT_REGION"); continue; }
   for KEY_ARN in $(echo "$KEYS" | jq -r '.Keys[].KeyArn'); do
@@ -162,10 +164,12 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
       :
     fi
 
-    # Run kms_key extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$KEY_FINDINGS]" '. + $new')
+    # Run kms_key extraction template above, then append to temp file
+    echo "$KEY_FINDINGS" >> "$RUN_DIR/raw/kms_findings_${CURRENT_REGION}.jsonl"
   done
 done
+# Merge all per-key findings across all regions (O(n) — single pass after loops)
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/kms_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

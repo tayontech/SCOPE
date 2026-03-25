@@ -125,6 +125,8 @@ On AccessDenied for get-public-access-block: set `PUBLIC_ACCESS_BLOCK_JSON='{"bl
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# Cleanup temp file for rerun safety
+rm -f "$RUN_DIR/raw/s3_findings.jsonl"
 BUCKETS=$(aws s3api list-buckets --output json 2>&1) || { ERRORS+=("s3api:ListBuckets AccessDenied"); STATUS="error"; }
 for BUCKET_NAME in $(echo "$BUCKETS" | jq -r '.Buckets[].Name'); do
   # Get bucket region
@@ -165,9 +167,11 @@ for BUCKET_NAME in $(echo "$BUCKETS" | jq -r '.Buckets[].Name'); do
   ACL=$(aws s3api get-bucket-acl --bucket "$BUCKET_NAME" --output json 2>&1)
   ACL_GRANTS_JSON=$(echo "$ACL" | jq '[.Grants[]? | {grantee: (.Grantee.URI // .Grantee.ID // .Grantee.DisplayName // "unknown"), permission: .Permission}]' 2>/dev/null || echo "[]")
 
-  # Run s3_bucket extraction template above
-  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$BUCKET_FINDINGS]" '. + $new')
+  # Run s3_bucket extraction template above, then append to temp file
+  echo "$BUCKET_FINDINGS" >> "$RUN_DIR/raw/s3_findings.jsonl"
 done
+# Merge all per-bucket findings (O(n) — single pass after loop)
+ALL_FINDINGS=$(jq -s 'add // []' "$RUN_DIR/raw/s3_findings.jsonl" 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
