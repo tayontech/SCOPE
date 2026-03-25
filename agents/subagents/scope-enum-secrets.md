@@ -121,14 +121,20 @@ On AccessDenied for get-resource-policy or no resource policy: set `RESOURCE_POL
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# PERF-02: clean up per-region finding files for rerun safety
+rm -f "$RUN_DIR/raw/secrets_findings_"*.jsonl
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("secretsmanager:ListSecrets AccessDenied $CURRENT_REGION"); continue; }
-  for SECRET_ARN in $(echo "$SECRETS" | jq -r '.SecretList[].ARN'); do
-    SECRET_NAME=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .Name')
-    ROTATION_ENABLED=$(echo "$SECRETS" | jq --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .RotationEnabled // false')
-    LAST_ROTATED=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .LastRotatedDate // ""')
-    LAST_ACCESSED=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .LastAccessedDate // ""')
-    KMS_KEY_ID=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .KmsKeyId // ""')
+  # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
+  SECRETS_FILE="$RUN_DIR/raw/secrets_list_${CURRENT_REGION}.json"
+  echo "$SECRETS" > "$SECRETS_FILE"
+  jq -c '.SecretList[]' "$SECRETS_FILE" | while IFS= read -r SECRET_OBJ; do
+    SECRET_ARN=$(echo "$SECRET_OBJ" | jq -r '.ARN')
+    SECRET_NAME=$(echo "$SECRET_OBJ" | jq -r '.Name')
+    ROTATION_ENABLED=$(echo "$SECRET_OBJ" | jq '.RotationEnabled // false')
+    LAST_ROTATED=$(echo "$SECRET_OBJ" | jq -r '.LastRotatedDate // ""')
+    LAST_ACCESSED=$(echo "$SECRET_OBJ" | jq -r '.LastAccessedDate // ""')
+    KMS_KEY_ID=$(echo "$SECRET_OBJ" | jq -r '.KmsKeyId // ""')
 
     # Get resource policy
     RESOURCE_POLICY_RAW=$(aws secretsmanager get-resource-policy --secret-id "$SECRET_ARN" --region "$CURRENT_REGION" --output json 2>&1)
@@ -140,9 +146,13 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
     fi
 
     # Run secrets_secret extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$SECRET_FINDINGS]" '. + $new')
+    # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
+    echo "$SECRET_FINDINGS" >> "$RUN_DIR/raw/secrets_findings_${CURRENT_REGION}.jsonl"
   done
 done
+# PERF-02: merge all region finding files into ALL_FINDINGS
+cat "$RUN_DIR/raw/secrets_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' > /tmp/secrets_merged.json 2>/dev/null
+ALL_FINDINGS=$(cat /tmp/secrets_merged.json 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
