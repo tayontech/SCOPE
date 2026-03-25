@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Enumeration Efficiency
 status: completed
-stopped_at: Completed 02-04-PLAN.md (S3/KMS/SNS/SQS/APIGateway O(n^2) accumulation fix)
-last_updated: "2026-03-25T18:08:03.595Z"
-last_activity: 2026-03-25 — Completed 01-03-PLAN.md (IAM agent runtime verification, human-approved)
+stopped_at: Completed 02-01-PLAN.md (EAUD-01 agent audit + AFIX-01 RDS snapshot public-access fix)
+last_updated: "2026-03-25T18:12:00Z"
+last_activity: 2026-03-25 — Completed 02-01-PLAN.md (EAUD-01 agent audit + AFIX-01 RDS snapshot public-access fix)
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 100
 ---
 
@@ -56,6 +56,7 @@ Progress: [██████████] 100% (Phase 1)
 | Phase 02-agent-correctness-and-performance-pass P03 | 74s | 2 tasks | 2 files |
 | Phase 02-agent-correctness-and-performance-pass P02 | 2min | 2 tasks | 1 files |
 | Phase 02-agent-correctness-and-performance-pass P04 | 2min | 2 tasks | 5 files |
+| Phase 02-agent-correctness-and-performance-pass P01 | ~8min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 02-agent-correctness-and-performance-pass]: Temp-file JSONL pattern (append with jq -c, merge with jq -s 'add // []') applied to both ELBv2 listener and region findings accumulation in EC2 agent — pattern applicable across all enum agents
 - [Phase 02-agent-correctness-and-performance-pass]: API Gateway two-loop design: REST and v2 findings written to separate .jsonl file sets, merged independently, then combined post-loop
 - [Phase 02-agent-correctness-and-performance-pass]: S3 global service: single s3_findings.jsonl (no region suffix) with direct jq -s rather than cat glob
+- [Phase 02-agent-correctness-and-performance-pass P01]: Use per-snapshot describe-db-snapshot-attributes for RDS — no bulk equivalent like EC2's --restorable-by-user-ids; per-snapshot call is explicit and correct
+- [Phase 02-agent-correctness-and-performance-pass P01]: AUDIT.md is .planning/ artifact (gitignored) — permanent EAUD-01 baseline for phase, not shipped to repo
 
 ### Pending Todos
 
@@ -88,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T18:08:03.594Z
-Stopped at: Completed 02-04-PLAN.md (S3/KMS/SNS/SQS/APIGateway O(n^2) accumulation fix)
+Last session: 2026-03-25T18:12:00Z
+Stopped at: Completed 02-01-PLAN.md (EAUD-01 agent audit + AFIX-01 RDS snapshot public-access fix)
 Resume file: None

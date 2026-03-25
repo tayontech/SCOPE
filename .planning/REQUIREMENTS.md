@@ -26,12 +26,12 @@
 
 ### Agent Fixes
 
-- [ ] **AFIX-01**: RDS agent fixes silent false for `publicly_accessible` on snapshots by adding `describe-db-snapshot-attributes` call
-- [ ] **AFIX-02**: EC2 agent replaces per-snapshot `describe-snapshot-attribute` loop with `describe-snapshots --restorable-by-user-ids all` filter
+- [x] **AFIX-01**: RDS agent fixes silent false for `publicly_accessible` on snapshots by adding `describe-db-snapshot-attributes` call
+- [x] **AFIX-02**: EC2 agent replaces per-snapshot `describe-snapshot-attribute` loop with `describe-snapshots --restorable-by-user-ids all` filter
 
 ### Enumeration Efficiency Audit
 
-- [ ] **EAUD-01**: All 12 enumeration agents audited — each agent's API call pattern documented with current call count vs optimized
+- [x] **EAUD-01**: All 12 enumeration agents audited — each agent's API call pattern documented with current call count vs optimized
 
 ### Output Compatibility
 
@@ -68,9 +68,9 @@
 | PERF-02 | Phase 2 | Complete |
 | PERF-03 | Phase 2 | Complete |
 | PERF-04 | Phase 3 | Pending |
-| AFIX-01 | Phase 2 | Pending |
-| AFIX-02 | Phase 2 | Pending |
-| EAUD-01 | Phase 2 | Pending |
+| AFIX-01 | Phase 2 | Complete |
+| AFIX-02 | Phase 2 | Complete |
+| EAUD-01 | Phase 2 | Complete |
 | COMPAT-01 | Phase 3 | Pending |
 | COMPAT-02 | Phase 3 | Pending |
 
