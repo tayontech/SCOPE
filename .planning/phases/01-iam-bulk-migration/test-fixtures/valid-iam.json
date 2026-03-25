@@ -1,0 +1,151 @@
+{
+  "module": "iam",
+  "account_id": "123456789012",
+  "region": "global",
+  "timestamp": "2026-03-25T16:00:00Z",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "iam_user",
+      "resource_id": "alice",
+      "arn": "arn:aws:iam::123456789012:user/alice",
+      "region": "global",
+      "created": "2023-01-15T10:00:00Z",
+      "password_last_used": "2026-03-20T08:30:00Z",
+      "groups": ["developers"],
+      "attached_policies": ["arn:aws:iam::123456789012:policy/DevPolicy"],
+      "inline_policies": [
+        {
+          "name": "AliceS3Access",
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": ["s3:GetObject"],
+                "Resource": "arn:aws:s3:::alice-bucket/*"
+              }
+            ]
+          }
+        }
+      ],
+      "has_mfa": true,
+      "has_console_access": true,
+      "access_keys": [
+        {
+          "key_id": "AKIAIOSFODNN7EXAMPLE",
+          "status": "Active",
+          "created": "2025-06-01T00:00:00Z"
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "CrossAccountAuditRole",
+      "arn": "arn:aws:iam::123456789012:role/CrossAccountAuditRole",
+      "region": "global",
+      "trust_relationships": [
+        {
+          "principal": "arn:aws:iam::987654321098:root",
+          "trust_type": "cross-account",
+          "is_wildcard": false,
+          "has_external_id": true,
+          "has_mfa_condition": false,
+          "risk": "medium"
+        }
+      ],
+      "is_service_linked": false,
+      "permission_boundary": null,
+      "role_last_used": {
+        "last_used_date": "2026-03-24T14:22:00Z",
+        "region": "us-east-1"
+      },
+      "inline_policies": [
+        {
+          "name": "ReadOnlyInline",
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": ["iam:ListUsers", "iam:GetUser"],
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ],
+      "attached_policy_documents": [
+        {
+          "policy_arn": "arn:aws:iam::123456789012:policy/AuditPolicy",
+          "version_id": "v2",
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": ["cloudtrail:LookupEvents"],
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_group",
+      "resource_id": "developers",
+      "arn": "arn:aws:iam::123456789012:group/developers",
+      "region": "global",
+      "members": ["alice", "bob"],
+      "attached_policies": ["arn:aws:iam::123456789012:policy/DevPolicy"],
+      "inline_policies": [
+        {
+          "name": "DevInlinePolicy",
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": ["ec2:DescribeInstances"],
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_policy",
+      "resource_id": "DevPolicy",
+      "arn": "arn:aws:iam::123456789012:policy/DevPolicy",
+      "region": "global",
+      "is_aws_managed": false,
+      "attached_to": ["attached"],
+      "attached_policy_documents": [
+        {
+          "policy_arn": "arn:aws:iam::123456789012:policy/DevPolicy",
+          "version_id": "v1",
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "ec2:DescribeInstances"
+                ],
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ],
+      "findings": []
+    }
+  ]
+}
