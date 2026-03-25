@@ -117,14 +117,18 @@ On AccessDenied for list-topics or get-topic-attributes: `TOPIC_FINDINGS="[]"`
 
 ```bash
 ALL_FINDINGS="[]"
+# Cleanup temp files for rerun safety
+rm -f "$RUN_DIR/raw/sns_findings_"*.jsonl
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   TOPICS=$(aws sns list-topics --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sns:ListTopics AccessDenied $CURRENT_REGION"); continue; }
   for TOPIC_ARN in $(echo "$TOPICS" | jq -r '.Topics[].TopicArn'); do
     TOPIC_ATTRS=$(aws sns get-topic-attributes --topic-arn "$TOPIC_ARN" --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("sns:GetTopicAttributes AccessDenied $TOPIC_ARN"); continue; }
-    # Run sns_topic extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$TOPIC_FINDINGS]" '. + $new')
+    # Run sns_topic extraction template above, then append to temp file
+    echo "$TOPIC_FINDINGS" >> "$RUN_DIR/raw/sns_findings_${CURRENT_REGION}.jsonl"
   done
 done
+# Merge all per-topic findings across all regions (O(n) — single pass after loops)
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/sns_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

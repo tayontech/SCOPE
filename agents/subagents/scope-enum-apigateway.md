@@ -153,6 +153,9 @@ HTTP and WebSocket APIs do not support resource policies -- `resource_policy_pri
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# Cleanup temp files for rerun safety
+rm -f "$RUN_DIR/raw/apigw_rest_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/apigw_v2_findings_"*.jsonl
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   # REST APIs (apigateway v1)
   REST_APIS=$(aws apigateway get-rest-apis --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("apigateway:GetRestApis AccessDenied $CURRENT_REGION"); REST_APIS='{"items":[]}'; }
@@ -174,8 +177,8 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
     RESOURCES=$(aws apigateway get-resources --rest-api-id "$REST_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
     REST_LAMBDA_INTEGRATIONS_JSON=$(echo "$RESOURCES" | jq '[.items[]?.resourceMethods // {} | to_entries[]? | .value.methodIntegration // {} | select(.type == "AWS_PROXY" or .type == "LAMBDA") | .uri // empty | capture("functions/(?<name>[^/]+)/") | .name] | unique' 2>/dev/null || echo "[]")
 
-    # Run REST API extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$REST_API_FINDINGS]" '. + $new')
+    # Run REST API extraction template above, then append to temp file
+    echo "$REST_API_FINDINGS" >> "$RUN_DIR/raw/apigw_rest_findings_${CURRENT_REGION}.jsonl"
   done
 
   # HTTP and WebSocket APIs (apigatewayv2)
@@ -197,10 +200,14 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
     V2_INTEGRATIONS=$(aws apigatewayv2 get-integrations --api-id "$V2_API_ID" --region "$CURRENT_REGION" --output json 2>&1)
     V2_LAMBDA_INTEGRATIONS_JSON=$(echo "$V2_INTEGRATIONS" | jq '[.Items[]? | select(.IntegrationType == "AWS_PROXY") | .IntegrationUri // empty | capture("functions/(?<name>[^/]+)") | .name] | unique' 2>/dev/null || echo "[]")
 
-    # Run HTTP/WebSocket API extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$V2_API_FINDINGS]" '. + $new')
+    # Run HTTP/WebSocket API extraction template above, then append to temp file
+    echo "$V2_API_FINDINGS" >> "$RUN_DIR/raw/apigw_v2_findings_${CURRENT_REGION}.jsonl"
   done
 done
+# Merge REST and v2 findings separately, then combine (O(n) — single pass after loops)
+REST_FINDINGS=$(cat "$RUN_DIR/raw/apigw_rest_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+V2_FINDINGS=$(cat "$RUN_DIR/raw/apigw_v2_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+ALL_FINDINGS=$(echo "$REST_FINDINGS $V2_FINDINGS" | jq -s 'add // []')
 ```
 
 ### Combine + Sort
