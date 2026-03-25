@@ -135,15 +135,20 @@ ENV_SECRET_NAMES_JSON=$(echo "$FUNC_CONFIG" | jq '[
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# PERF-02: clean up per-region finding files for rerun safety
+rm -f "$RUN_DIR/raw/lambda_findings_"*.jsonl
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   FUNCTIONS=$(aws lambda list-functions --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("lambda:ListFunctions AccessDenied $CURRENT_REGION"); continue; }
-  for FUNC_ARN in $(echo "$FUNCTIONS" | jq -r '.Functions[].FunctionArn'); do
-    FUNC_CONFIG=$(echo "$FUNCTIONS" | jq --arg arn "$FUNC_ARN" '.Functions[] | select(.FunctionArn == $arn)')
-    FUNC_NAME=$(echo "$FUNC_CONFIG" | jq -r '.FunctionName')
-    FUNC_RUNTIME=$(echo "$FUNC_CONFIG" | jq -r '.Runtime // "unknown"')
-    FUNC_ROLE=$(echo "$FUNC_CONFIG" | jq -r '.Role')
-    FUNC_LAST_MODIFIED=$(echo "$FUNC_CONFIG" | jq -r '.LastModified // ""')
-    FUNC_LAYERS_JSON=$(echo "$FUNC_CONFIG" | jq '[.Layers[]?.Arn // empty]' 2>/dev/null || echo "[]")
+  # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
+  FUNCTIONS_FILE="$RUN_DIR/raw/lambda_list_${CURRENT_REGION}.json"
+  echo "$FUNCTIONS" > "$FUNCTIONS_FILE"
+  jq -c '.Functions[]' "$FUNCTIONS_FILE" | while IFS= read -r FUNC_JSON; do
+    FUNC_ARN=$(echo "$FUNC_JSON" | jq -r '.FunctionArn')
+    FUNC_NAME=$(echo "$FUNC_JSON" | jq -r '.FunctionName')
+    FUNC_RUNTIME=$(echo "$FUNC_JSON" | jq -r '.Runtime // "unknown"')
+    FUNC_ROLE=$(echo "$FUNC_JSON" | jq -r '.Role')
+    FUNC_LAST_MODIFIED=$(echo "$FUNC_JSON" | jq -r '.LastModified // ""')
+    FUNC_LAYERS_JSON=$(echo "$FUNC_JSON" | jq '[.Layers[]?.Arn // empty]' 2>/dev/null || echo "[]")
 
     # Detect secret-pattern env var names
     # (uses ENV_SECRET_NAMES_JSON extraction template above)
@@ -161,9 +166,13 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
     fi
 
     # Run lambda_function extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$FUNC_FINDINGS]" '. + $new')
+    # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
+    echo "$FUNC_FINDINGS" >> "$RUN_DIR/raw/lambda_findings_${CURRENT_REGION}.jsonl"
   done
 done
+# PERF-02: merge all region finding files into ALL_FINDINGS
+cat "$RUN_DIR/raw/lambda_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' > /tmp/lambda_merged.json 2>/dev/null
+ALL_FINDINGS=$(cat /tmp/lambda_merged.json 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
