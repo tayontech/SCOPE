@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The IAM agent issues `get-account-authorization-details` with `--filter User Role Group LocalManagedPolicy` and the raw response is piped via stdin to jq (never passed as `--argjson`). Note: `--no-paginate` is NOT used — AWS CLI v2 auto-paginates by default; adding `--no-paginate` would silently truncate results.
   3. `trust_relationships` is non-empty for cross-account roles in the output — AssumeRolePolicyDocument decoded correctly
   4. Diffing `iam.json` before and after migration against the same account shows no field regressions — all previously populated fields remain populated
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 01-01-PLAN.md — Foundation: create shared validator and test AssumeRolePolicyDocument encoding
@@ -66,6 +66,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. IAM Bulk Migration | 1/3 | In Progress|  |
+| 1. IAM Bulk Migration | 2/3 | In Progress|  |
 | 2. Agent Correctness and Performance Pass | 0/TBD | Not started | - |
 | 3. Regional Optimization and Compatibility Validation | 0/TBD | Not started | - |

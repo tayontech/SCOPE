@@ -7,19 +7,19 @@
 
 ### IAM Optimization
 
-- [ ] **IAM-01**: IAM agent uses `get-account-authorization-details` instead of per-resource list+get loops for users, roles, groups, and policies
-- [ ] **IAM-02**: IAM agent retains per-user credential-state calls (list-access-keys, list-mfa-devices, get-login-profile) since GAAD omits these fields
+- [x] **IAM-01**: IAM agent uses `get-account-authorization-details` instead of per-resource list+get loops for users, roles, groups, and policies
+- [x] **IAM-02**: IAM agent retains per-user credential-state calls (list-access-keys, list-mfa-devices, get-login-profile) since GAAD omits these fields
 - [x] **IAM-03**: IAM agent handles `AssumeRolePolicyDocument` encoding correctly from GAAD response
-- [ ] **IAM-04**: IAM agent uses `--filter User Role Group LocalManagedPolicy` to exclude AWS-managed policies from GAAD response
+- [x] **IAM-04**: IAM agent uses `--filter User Role Group LocalManagedPolicy` to exclude AWS-managed policies from GAAD response
 
 ### Pagination
 
 - [x] **PAGE-01**: All enumeration agents handle pagination correctly — no silent truncation of results
-- [ ] **PAGE-02**: Agents use `--no-paginate` or implement NextToken/Marker loops for all list/describe calls that paginate
+- [x] **PAGE-02**: Agents use `--no-paginate` or implement NextToken/Marker loops for all list/describe calls that paginate
 
 ### Performance Patterns
 
-- [ ] **PERF-01**: All agents pipe large JSON via stdin instead of `--argjson` to avoid ARG_MAX limits
+- [x] **PERF-01**: All agents pipe large JSON via stdin instead of `--argjson` to avoid ARG_MAX limits
 - [ ] **PERF-02**: All agents replace O(n^2) incremental jq array building with temp-file append + final `jq -s` merge
 - [ ] **PERF-03**: Secrets and Lambda agents eliminate inner `select()` re-scans by iterating list response once in jq
 - [ ] **PERF-04**: Regional agents parallelize region iteration where possible (background subshells with `wait`)
@@ -58,13 +58,13 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IAM-01 | Phase 1 | Pending |
-| IAM-02 | Phase 1 | Pending |
+| IAM-01 | Phase 1 | Complete |
+| IAM-02 | Phase 1 | Complete |
 | IAM-03 | Phase 1 | Complete |
-| IAM-04 | Phase 1 | Pending |
+| IAM-04 | Phase 1 | Complete |
 | PAGE-01 | Phase 1 | Complete |
-| PAGE-02 | Phase 1 | Pending |
-| PERF-01 | Phase 1 | Pending |
+| PAGE-02 | Phase 1 | Complete |
+| PERF-01 | Phase 1 | Complete |
 | PERF-02 | Phase 2 | Pending |
 | PERF-03 | Phase 2 | Pending |
 | PERF-04 | Phase 3 | Pending |
