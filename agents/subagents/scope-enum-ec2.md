@@ -153,13 +153,18 @@ CLASSIC_FINDINGS=$(echo "$CLASSIC_LBS" | jq --arg region "$CURRENT_REGION" \
   }]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for ec2_load_balancer (classic) in $CURRENT_REGION"; STATUS="error"; }
 ```
 
-Per-region ELB listener collection:
+Per-region ELB listener collection (temp-file append — O(n) instead of O(n^2) jq reparsing):
 ```bash
-ELBV2_LISTENERS="[]"
+# Clean up for reruns before the LB loop
+rm -f "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl"
+
 for LB_ARN in $(echo "$ELBV2_LBS" | jq -r '.LoadBalancers[].LoadBalancerArn'); do
   LSNRS=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --region "$CURRENT_REGION" --output json 2>&1) || continue
-  ELBV2_LISTENERS=$(echo "$ELBV2_LISTENERS" | jq --argjson new "$(echo "$LSNRS" | jq '.Listeners')" '. + $new')
+  echo "$LSNRS" | jq -c '.Listeners[]' >> "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl" 2>/dev/null
 done
+
+# Merge after loop: jq -s '.' reads all JSONL lines into an array
+ELBV2_LISTENERS=$(jq -s '.' "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl" 2>/dev/null || echo "[]")
 ```
 
 On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `CLASSIC_FINDINGS="[]"`
@@ -167,7 +172,9 @@ On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `C
 ### Regional Iteration
 
 ```bash
-ALL_FINDINGS="[]"
+# Clean up temp findings file for reruns before the region loop
+rm -f "$RUN_DIR/raw/ec2_findings.jsonl"
+
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   INSTANCES=$(aws ec2 describe-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeInstances AccessDenied $CURRENT_REGION"); INSTANCES='{"Reservations":[]}'; }
   SECURITY_GROUPS=$(aws ec2 describe-security-groups --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("ec2:DescribeSecurityGroups AccessDenied $CURRENT_REGION"); SECURITY_GROUPS='{"SecurityGroups":[]}'; }
@@ -180,17 +187,16 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   # Run public snapshot detection before ec2_ebs_snapshot extraction
   # Collect ELBv2 listeners before ec2_load_balancer extraction
 
-  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq \
-    --argjson inst "$INSTANCE_FINDINGS" \
-    --argjson sg "$SG_FINDINGS" \
-    --argjson vpc "$VPC_FINDINGS" \
-    --argjson snap "$SNAPSHOT_FINDINGS" \
-    --argjson elbv2 "$ELBv2_FINDINGS" \
-    --argjson classic "$CLASSIC_FINDINGS" \
-    '. + $inst + $sg + $vpc + $snap + $elbv2 + $classic')
+  # Append all resource type findings for this region to temp file (O(n) file appends vs O(n^2) jq reparsing)
+  for TYPE_FINDINGS in "$INSTANCE_FINDINGS" "$SG_FINDINGS" "$VPC_FINDINGS" "$SNAPSHOT_FINDINGS" "$ELBv2_FINDINGS" "$CLASSIC_FINDINGS"; do
+    echo "$TYPE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/ec2_findings.jsonl" 2>/dev/null
+  done
 
   COMPLETED_REGIONS="$COMPLETED_REGIONS,$CURRENT_REGION"
 done
+
+# Merge all regions after loop: jq -s 'add // []' handles empty file correctly
+ALL_FINDINGS=$(jq -s 'add // []' "$RUN_DIR/raw/ec2_findings.jsonl" 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
