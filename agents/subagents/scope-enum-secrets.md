@@ -131,9 +131,9 @@ REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   (
     REGION_STATUS="complete"
-    SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { echo "secretsmanager:ListSecrets AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/secrets_errors.txt"; echo "error" > "$RUN_DIR/raw/secrets_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { echo "secretsmanager:ListSecrets AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/secrets_errors.txt"; echo "error" > "$RUN_DIR/raw/secrets_region_status_$CURRENT_REGION.txt"; exit 0; }
     # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
-    SECRETS_FILE="$RUN_DIR/raw/secrets_list_${CURRENT_REGION}.json"
+    SECRETS_FILE="$RUN_DIR/raw/secrets_list_$CURRENT_REGION.json"
     echo "$SECRETS" > "$SECRETS_FILE"
     jq -c '.SecretList[]' "$SECRETS_FILE" | while IFS= read -r SECRET_OBJ; do
       SECRET_ARN=$(echo "$SECRET_OBJ" | jq -r '.ARN')
@@ -155,9 +155,9 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
 
       # Run secrets_secret extraction template above
       # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
-      echo "$SECRET_FINDINGS" >> "$RUN_DIR/raw/secrets_findings_${CURRENT_REGION}.jsonl"
+      echo "$SECRET_FINDINGS" >> "$RUN_DIR/raw/secrets_findings_$CURRENT_REGION.jsonl"
     done
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/secrets_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/secrets_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -171,7 +171,7 @@ wait
 # Collect per-region status files to derive aggregate STATUS
 STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/secrets_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/secrets_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # PERF-02: merge all region finding files into ALL_FINDINGS

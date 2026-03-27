@@ -35,11 +35,14 @@ if [ -n "$LATEST_AUDIT" ]; then
       fi
     else
       # Clean run — enforce mandatory artifacts
+      # Note: findings.md and agent-log.jsonl may still be in progress when
+      # Gemini AfterAgent fires. Downgrade to warnings to avoid blocking
+      # the agent before it finishes writing these files.
       if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
-        ERRORS+=("MISSING: $LATEST_AUDIT/agent-log.jsonl (mandatory audit artifact)")
+        ERRORS+=("WARNING: $LATEST_AUDIT/agent-log.jsonl missing (may still be generating)")
       fi
       if [ ! -f "$LATEST_AUDIT/findings.md" ]; then
-        ERRORS+=("MISSING: $LATEST_AUDIT/findings.md (mandatory audit artifact)")
+        ERRORS+=("WARNING: $LATEST_AUDIT/findings.md missing (may still be generating)")
       fi
     fi
   else

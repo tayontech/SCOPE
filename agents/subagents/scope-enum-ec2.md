@@ -157,16 +157,16 @@ CLASSIC_FINDINGS=$(echo "$CLASSIC_LBS" | jq --arg region "$CURRENT_REGION" \
 Per-region ELB listener collection (temp-file append — O(n) instead of O(n^2) jq reparsing):
 ```bash
 # Clean up for reruns before the LB loop
-rm -f "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl"
+rm -f "$RUN_DIR/raw/elbv2_listeners_$CURRENT_REGION.jsonl"
 
 for LB_ARN in $(echo "$ELBV2_LBS" | jq -r '.LoadBalancers[].LoadBalancerArn'); do
   echo "[scope-enum-ec2] Processing: $LB_ARN"
   LSNRS=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --region "$CURRENT_REGION" --output json 2>&1) || continue
-  echo "$LSNRS" | jq -c '.Listeners[]' >> "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl" 2>/dev/null
+  echo "$LSNRS" | jq -c '.Listeners[]' >> "$RUN_DIR/raw/elbv2_listeners_$CURRENT_REGION.jsonl" 2>/dev/null
 done
 
 # Merge after loop: jq -s '.' reads all JSONL lines into an array
-ELBV2_LISTENERS=$(jq -s '.' "$RUN_DIR/raw/elbv2_listeners_${CURRENT_REGION}.jsonl" 2>/dev/null || echo "[]")
+ELBV2_LISTENERS=$(jq -s '.' "$RUN_DIR/raw/elbv2_listeners_$CURRENT_REGION.jsonl" 2>/dev/null || echo "[]")
 ```
 
 On AccessDenied for elbv2/elb describe-load-balancers: `ELBv2_FINDINGS="[]"`, `CLASSIC_FINDINGS="[]"`
@@ -200,10 +200,10 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
 
     # Append all resource type findings for this region to per-region temp file (no shared file writes across parallel subshells)
     for TYPE_FINDINGS in "$INSTANCE_FINDINGS" "$SG_FINDINGS" "$VPC_FINDINGS" "$SNAPSHOT_FINDINGS" "$ELBv2_FINDINGS" "$CLASSIC_FINDINGS"; do
-      echo "$TYPE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/ec2_findings_${CURRENT_REGION}.jsonl" 2>/dev/null
+      echo "$TYPE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/ec2_findings_$CURRENT_REGION.jsonl" 2>/dev/null
     done
 
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/ec2_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/ec2_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -222,7 +222,7 @@ wait
 STATUS="complete"
 COMPLETED_REGIONS=""
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/ec2_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/ec2_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" = "complete" ] || [ "$RS" = "partial" ]; then
     COMPLETED_REGIONS="$COMPLETED_REGIONS,$REGION"
   fi
@@ -342,11 +342,11 @@ After completing EACH region's enumeration, append that region's findings to the
 Track completed regions via status files (shell variables cannot propagate from background subshells):
 ```bash
 # Each background subshell writes its status to a file:
-echo "$REGION_STATUS" > "$RUN_DIR/raw/ec2_region_status_${CURRENT_REGION}.txt"
+echo "$REGION_STATUS" > "$RUN_DIR/raw/ec2_region_status_$CURRENT_REGION.txt"
 # After wait, reconstruct COMPLETED_REGIONS by scanning which status files exist:
 COMPLETED_REGIONS=""
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/ec2_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/ec2_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" = "complete" ] || [ "$RS" = "partial" ]; then
     COMPLETED_REGIONS="$COMPLETED_REGIONS,$REGION"
   fi

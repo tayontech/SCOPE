@@ -100,10 +100,10 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
     RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { echo "rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/rds_errors.txt"; SNAPSHOT_FINDINGS="[]"; REGION_STATUS="partial"; }
     # Run extraction templates above (per-snapshot describe-db-snapshot-attributes inner loop runs correctly inside this subshell)
     # Append findings to per-region temp files (no shared file writes across parallel subshells)
-    echo "$INSTANCE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_instance_findings_${CURRENT_REGION}.jsonl" 2>/dev/null
-    echo "$SNAPSHOT_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_snapshot_findings_${CURRENT_REGION}.jsonl" 2>/dev/null
+    echo "$INSTANCE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_instance_findings_$CURRENT_REGION.jsonl" 2>/dev/null
+    echo "$SNAPSHOT_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_snapshot_findings_$CURRENT_REGION.jsonl" 2>/dev/null
 
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/rds_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/rds_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -121,7 +121,7 @@ wait
 # Collect per-region status to derive aggregate STATUS and ERRORS
 STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/rds_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/rds_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then
     STATUS="partial"
     ERRORS+=("rds: region $REGION status: $RS")

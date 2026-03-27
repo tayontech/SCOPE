@@ -198,7 +198,7 @@ Claims: claim-{type}-{seq} (e.g., claim-scp-001 for SCP claims, claim-det-001 fo
 See Phase 2 evidence indexing in `agents/subagents/scope-pipeline.md` for the full schema of each record type:
 - `api_call` — service, action, parameters, response_status, response_summary, duration_ms
 - `policy_eval` — principal_arn, action_tested, 7-step evaluation_chain, source_evidence_ids
-- `claim` — statement, classification (guaranteed/conditional/speculative), confidence_pct, confidence_reasoning, gating_conditions, source_evidence_ids
+- `claim` — statement, classification (guaranteed/conditional/speculative), confidence_reasoning, gating_conditions, source_evidence_ids
 - `coverage_check` — scope_area, checked[], not_checked[], not_checked_reason, coverage_pct
 
 ### Failure handling
@@ -2211,7 +2211,7 @@ Continue processing. Note in the run completion summary that normalized data was
 
 ### Zero Attack Paths Across All Runs
 
-**Condition:** All audit runs parsed successfully but zero attack paths were found (all paths were below the 50% confidence threshold or the account has no exploitable paths).
+**Condition:** All audit runs parsed successfully but zero attack paths were found (all speculative paths were stripped by verification or the account has no exploitable paths).
 
 **Action:** Report clean bill of health and generate a minimal executive summary:
 ```

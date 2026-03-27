@@ -151,7 +151,6 @@ For each path block, extract:
   - remediation: items under "**Remediation:**"
   - affected_resources: ARNs referenced in the narrative
   - exploitability: from "**Exploitability:**" line
-  - confidence_pct: integer from "**Confidence:**" line
 ```
 
 **Step 2: Build graph from findings**
@@ -195,10 +194,10 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
   },
   "graph": {
     "nodes": [
-      {"id": "string", "label": "string", "type": "user | role | escalation | data | external"}
+      {"id": "string", "label": "string", "type": "user | role | group | escalation | data | external"}
     ],
     "edges": [
-      {"source": "string", "target": "string", "trust_type": "same-account | cross-account", "edge_type": "normal | priv_esc | data_access | cross_account", "severity": "critical | high | medium | low", "label": "string"}
+      {"source": "string", "target": "string", "trust_type": "same-account | cross-account", "edge_type": "priv_esc | trust | data_access | network | service | public_access | cross_account | membership", "severity": "critical | high | medium | low", "label": "string"}
     ]
   },
   "attack_paths": [
@@ -208,7 +207,6 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
       "category": "privilege_escalation | trust_misconfiguration | data_exposure | credential_risk | excessive_permission | network_exposure | persistence | post_exploitation | lateral_movement",
       "description": "string",
       "exploitability": "string — e.g., 'high — requires only iam:CreatePolicyVersion'",
-      "confidence_pct": "int — 0-100",
       "steps": ["string"],
       "mitre_techniques": ["string — e.g., T1078.004"],
       "detection_opportunities": ["string — CloudTrail eventName + SPL"],
@@ -818,7 +816,6 @@ Logged when the agent asserts a finding, attack path step, or conclusion.
   "timestamp": "ISO8601",
   "statement": "User alice can escalate to admin via iam:CreatePolicyVersion",
   "classification": "guaranteed",
-  "confidence_pct": 95,
   "confidence_reasoning": "Direct policy attachment confirmed via ListAttachedUserPolicies; no boundary or SCP restrictions observed",
   "gating_conditions": [],
   "source_evidence_ids": ["ev-001", "ev-002"]
@@ -832,8 +829,7 @@ Logged when the agent asserts a finding, attack path step, or conclusion.
 | timestamp | string | yes | ISO8601 |
 | statement | string | yes | Human-readable assertion |
 | classification | string | yes | One of: `guaranteed`, `conditional`, `speculative` |
-| confidence_pct | number | yes | 0-100 confidence percentage |
-| confidence_reasoning | string | yes | Why this confidence level — must be non-empty |
+| confidence_reasoning | string | yes | Why this classification — must be non-empty |
 | gating_conditions | string[] | yes | Conditions that must hold for this claim. Empty for guaranteed claims. Must have ≥1 entry for conditional claims. |
 | source_evidence_ids | string[] | yes | IDs of evidence records supporting this claim. Must have ≥1 entry. |
 
@@ -896,7 +892,6 @@ The output file `./agent-logs/<phase>/<run-id>.json` contains the validated, str
       "id": "claim-ap-001",
       "statement": "string",
       "classification": "guaranteed | conditional | speculative",
-      "confidence_pct": 95,
       "confidence_reasoning": "string",
       "gating_conditions": [],
       "source_evidence_ids": ["ev-001", "ev-002"]
@@ -1027,9 +1022,6 @@ For every `claim` record:
 
 3. **Confidence reasoning required:** `confidence_reasoning` must be a non-empty string.
    - Violation: `"Warning: claim {id} has empty confidence_reasoning — excluding"`
-
-4. **Confidence range:** `confidence_pct` must be between 0 and 100 inclusive.
-   - Violation: `"Warning: claim {id} has confidence_pct out of range — clamping to [0, 100]"`
 
 ### API Call Validation
 

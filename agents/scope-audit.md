@@ -563,7 +563,7 @@ Attack paths identified: [count]
   HIGH: [count] paths
   MEDIUM: [count] paths
   LOW: [count] paths
-  Below threshold (<50% confidence): [count] paths (excluded from findings)
+  Speculative (stripped by verify): [count] paths — gating conditions not satisfiable
 
 Top findings:
   1. [Most critical path name — one sentence]
@@ -680,7 +680,7 @@ Order by exploitability score DESC, then confidence DESC.
 
 ### ATTACK PATH #1: [Descriptive Name] — [CRITICAL/HIGH/MEDIUM/LOW]
 **Exploitability:** [CRITICAL/HIGH/MEDIUM/LOW]
-**Confidence:** [N%] — [what was verified vs not verified]
+**Confidence:** [what was verified and what was not — e.g., "IAM policy confirmed; SCP status unknown"]
 **MITRE:** [T1078.004], [T1548]
 
 [Narrative paragraph: what an attacker with access to [principal] could do, WHY the chain works
@@ -935,7 +935,7 @@ Claims: `claim-{type}-{seq}` (e.g., `claim-ap-001` for attack paths)
 - `subagent_return` — name, STATUS, METRICS, ERRORS, timestamp
 - `gate_transition` — gate, decision, timestamp
 - `policy_eval` — principal_arn, action_tested, 7-step evaluation_chain, source_evidence_ids
-- `claim` — statement, classification, confidence_pct, confidence_reasoning, gating_conditions
+- `claim` — statement, classification, confidence_reasoning, gating_conditions
 - `coverage_check` — scope_area, checked[], not_checked[], coverage_pct
 
 ### Writing Log Entries
