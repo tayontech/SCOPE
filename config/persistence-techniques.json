@@ -1,0 +1,313 @@
+{
+  "version": "2026-03",
+  "description": "Persistence technique catalogue for AWS environments. Covers IAM, STS, EC2, Lambda, and storage persistence vectors. Used by scope-attack-paths Part 7 analysis.",
+  "categories": {
+    "iam": [
+      {
+        "id": "persist-iam-backdoor-user",
+        "name": "Create backdoor user",
+        "required_permissions": ["iam:CreateUser", "iam:CreateAccessKey"],
+        "what_attacker_achieves": "New long-term credentials that survive rotation of the original",
+        "detection_events": ["CreateUser", "CreateAccessKey"],
+        "severity_default": "critical",
+        "notes": "Survives credential rotation of the original compromised principal. Most durable persistence method."
+      },
+      {
+        "id": "persist-iam-backdoor-role-trust",
+        "name": "Backdoor role trust policy",
+        "required_permissions": ["iam:UpdateAssumeRolePolicy"],
+        "what_attacker_achieves": "External attacker account can AssumeRole indefinitely",
+        "detection_events": ["UpdateAssumeRolePolicy"],
+        "severity_default": "critical",
+        "notes": "Modifies the trust policy of an existing role to add the attacker's account or principal. Survives incident response that only resets credentials."
+      },
+      {
+        "id": "persist-iam-backdoor-policy-version",
+        "name": "Backdoor policy version",
+        "required_permissions": ["iam:CreatePolicyVersion"],
+        "what_attacker_achieves": "Hidden permissive policy version; attacker can switch default later",
+        "detection_events": ["CreatePolicyVersion"],
+        "severity_default": "high",
+        "notes": "Creates a non-default policy version with broad permissions. The version is invisible unless auditors enumerate all policy versions. Attacker can flip it to default at any time."
+      },
+      {
+        "id": "persist-iam-add-attacker-mfa",
+        "name": "Add attacker MFA device",
+        "required_permissions": ["iam:CreateVirtualMFADevice", "iam:EnableMFADevice"],
+        "what_attacker_achieves": "Locks out legitimate user, attacker controls MFA",
+        "detection_events": ["CreateVirtualMFADevice", "EnableMFADevice"],
+        "severity_default": "critical",
+        "notes": "Attacker registers their own MFA device on the target user. If MFA is enforced, legitimate user loses access. Attacker retains it."
+      },
+      {
+        "id": "persist-iam-backdoor-saml-oidc",
+        "name": "Create/backdoor SAML/OIDC provider",
+        "required_permissions": ["iam:CreateSAMLProvider", "iam:UpdateSAMLProvider", "iam:CreateOpenIDConnectProvider"],
+        "what_attacker_achieves": "Federated access via attacker's identity provider",
+        "detection_events": ["CreateSAMLProvider", "UpdateSAMLProvider", "CreateOpenIDConnectProvider"],
+        "severity_default": "critical",
+        "notes": "Attacker registers or modifies a SAML/OIDC provider pointing to infrastructure they control. Any role trusting that provider is now attacker-accessible."
+      },
+      {
+        "id": "persist-iam-disable-mfa",
+        "name": "Disable MFA",
+        "required_permissions": ["iam:DeactivateMFADevice"],
+        "what_attacker_achieves": "Removes MFA barrier for future access",
+        "detection_events": ["DeactivateMFADevice"],
+        "severity_default": "high",
+        "notes": "Deactivates MFA on the compromised principal or other users, enabling password-only authentication for future sessions."
+      }
+    ],
+    "sts": [
+      {
+        "id": "persist-sts-long-lived-tokens",
+        "name": "Long-lived session tokens",
+        "required_permissions": ["sts:GetSessionToken"],
+        "what_attacker_achieves": "36-hour tokens that survive key rotation and can't be enumerated",
+        "detection_events": ["GetSessionToken"],
+        "severity_default": "high",
+        "notes": "GetSessionToken issues tokens valid up to 36 hours. Unlike access keys, these tokens are not listed in IAM — defenders can't enumerate them. Tokens survive static credential rotation."
+      },
+      {
+        "id": "persist-sts-role-chain-juggling",
+        "name": "Role chain juggling",
+        "required_permissions": ["sts:AssumeRole"],
+        "what_attacker_achieves": "Infinite credential refresh loop — indefinite access with no long-term keys",
+        "detection_events": ["AssumeRole"],
+        "severity_default": "high",
+        "notes": "Attacker assumes roles in a cycle (A assumes B, B assumes A or a third role). Each assumption refreshes credentials. With two mutually-trusting roles, access is indefinite with no static keys to rotate."
+      },
+      {
+        "id": "persist-sts-federation-token",
+        "name": "Federation token console access",
+        "required_permissions": ["sts:GetFederationToken"],
+        "what_attacker_achieves": "Stealthy console access that doesn't appear in IAM user list",
+        "detection_events": ["GetFederationToken"],
+        "severity_default": "high",
+        "notes": "GetFederationToken creates long-lived (up to 36 hours) federated sessions. Sessions use the calling user's name as a federated identity — hard to distinguish from legitimate use."
+      }
+    ],
+    "ec2": [
+      {
+        "id": "persist-ec2-lifecycle-manager",
+        "name": "Lifecycle Manager exfiltration",
+        "required_permissions": ["dlm:CreateLifecyclePolicy"],
+        "what_attacker_achieves": "Recurring AMI/snapshot sharing to attacker account",
+        "detection_events": ["CreateLifecyclePolicy"],
+        "severity_default": "high",
+        "notes": "DLM lifecycle policies can share snapshots/AMIs to external accounts on a schedule. Provides ongoing data exfiltration without repeated API calls."
+      },
+      {
+        "id": "persist-ec2-spot-fleet",
+        "name": "Spot Fleet (long-lived)",
+        "required_permissions": ["ec2:RequestSpotFleet", "iam:PassRole"],
+        "what_attacker_achieves": "Up to 5-year compute with high-priv role, auto-beacons to attacker",
+        "detection_events": ["RequestSpotFleet"],
+        "severity_default": "high",
+        "notes": "Spot Fleet requests can have validity periods up to 5 years. Instances run with the passed role and can beacon to attacker C2. Cheaper and longer-lived than On-Demand."
+      },
+      {
+        "id": "persist-ec2-backdoor-launch-template",
+        "name": "Backdoor launch template",
+        "required_permissions": ["ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate"],
+        "what_attacker_achieves": "Every Auto Scaling instance runs attacker code / has attacker SSH key",
+        "detection_events": ["CreateLaunchTemplateVersion", "ModifyLaunchTemplate"],
+        "severity_default": "critical",
+        "notes": "Modifies the default launch template version to include a malicious user data script or attacker SSH key. All future instances from that template are compromised at launch."
+      },
+      {
+        "id": "persist-ec2-replace-root-volume",
+        "name": "Replace root volume",
+        "required_permissions": ["ec2:CreateReplaceRootVolumeTask"],
+        "what_attacker_achieves": "Swap root EBS to attacker-controlled volume; instance keeps its IPs and role",
+        "detection_events": ["CreateReplaceRootVolumeTask"],
+        "severity_default": "critical",
+        "notes": "Replaces the root EBS volume of a running instance with an attacker-controlled snapshot. The instance retains its IP addresses, security groups, and IAM role after the swap."
+      },
+      {
+        "id": "persist-ec2-vpn-into-vpc",
+        "name": "VPN into VPC",
+        "required_permissions": ["ec2:CreateVpnGateway", "ec2:CreateVpnConnection", "ec2:CreateCustomerGateway"],
+        "what_attacker_achieves": "Persistent network-level access into victim VPC",
+        "detection_events": ["CreateVpnGateway", "CreateVpnConnection", "CreateCustomerGateway"],
+        "severity_default": "critical",
+        "notes": "Establishes a Site-to-Site VPN from attacker infrastructure into the victim VPC. Provides persistent L3 access that bypasses security groups and survives instance restarts."
+      },
+      {
+        "id": "persist-ec2-vpc-peering",
+        "name": "VPC peering",
+        "required_permissions": ["ec2:CreateVpcPeeringConnection"],
+        "what_attacker_achieves": "Direct routing between attacker and victim VPCs",
+        "detection_events": ["CreateVpcPeeringConnection"],
+        "severity_default": "high",
+        "notes": "Creates a VPC peering connection between victim VPC and attacker-controlled VPC. Peering connections persist until explicitly deleted."
+      },
+      {
+        "id": "persist-ec2-user-data-backdoor",
+        "name": "User data backdoor",
+        "required_permissions": ["ec2:ModifyInstanceAttribute"],
+        "what_attacker_achieves": "Malicious script runs on next instance start",
+        "detection_events": ["ModifyInstanceAttribute"],
+        "severity_default": "high",
+        "notes": "Modifies instance user data to include a backdoor script. The script executes on the next instance start/reboot, establishing persistence without modifying the AMI."
+      },
+      {
+        "id": "persist-ec2-ssm-state-manager",
+        "name": "SSM State Manager",
+        "required_permissions": ["ssm:CreateAssociation"],
+        "what_attacker_achieves": "Recurring command execution on all SSM-managed instances (every 30 min+)",
+        "detection_events": ["CreateAssociation"],
+        "severity_default": "critical",
+        "notes": "SSM State Manager associations run documents on a schedule across all matching instances. Can target all instances in the account using wildcard resource targeting."
+      }
+    ],
+    "lambda": [
+      {
+        "id": "persist-lambda-layer-backdoor",
+        "name": "Lambda layer backdoor",
+        "required_permissions": ["lambda:PublishLayerVersion", "lambda:UpdateFunctionConfiguration"],
+        "what_attacker_achieves": "Injected code runs on every invocation; function's own code appears clean",
+        "detection_events": ["PublishLayerVersion", "UpdateFunctionConfiguration"],
+        "severity_default": "critical",
+        "notes": "Publishes a malicious Lambda layer and attaches it to target functions. The backdoor code in the layer executes before the function handler. The function's deployment package appears clean in code reviews."
+      },
+      {
+        "id": "persist-lambda-extension",
+        "name": "Lambda extension",
+        "required_permissions": ["lambda:PublishLayerVersion", "lambda:UpdateFunctionConfiguration"],
+        "what_attacker_achieves": "Separate process intercepts/modifies all requests; inherits execution role",
+        "detection_events": ["PublishLayerVersion", "UpdateFunctionConfiguration"],
+        "severity_default": "critical",
+        "notes": "Lambda extensions run as a separate process alongside the function. Unlike layers, extensions can intercept requests/responses and run after the handler returns. They inherit the execution role."
+      },
+      {
+        "id": "persist-lambda-resource-policy-cross-account",
+        "name": "Resource policy (cross-account invoke)",
+        "required_permissions": ["lambda:AddPermission"],
+        "what_attacker_achieves": "External account can invoke/update the function indefinitely",
+        "detection_events": ["AddPermission20150331v2"],
+        "severity_default": "high",
+        "notes": "Adds a resource-based policy granting an attacker-controlled AWS account permission to invoke the function. Survives role rotation and is easy to miss in IAM audits."
+      },
+      {
+        "id": "persist-lambda-weighted-alias",
+        "name": "Weighted alias distribution",
+        "required_permissions": ["lambda:PublishVersion", "lambda:CreateAlias"],
+        "what_attacker_achieves": "Backdoored version receives 1% of traffic — extremely stealthy",
+        "detection_events": ["PublishVersion", "CreateAlias"],
+        "severity_default": "high",
+        "notes": "Publishes a backdoored function version and creates/updates an alias with weighted routing (e.g., 99% legitimate, 1% backdoor). Very low traffic rate makes anomaly detection difficult."
+      },
+      {
+        "id": "persist-lambda-exec-wrapper",
+        "name": "EXEC_WRAPPER env var",
+        "required_permissions": ["lambda:UpdateFunctionConfiguration"],
+        "what_attacker_achieves": "Wrapper script executes before every handler; steals credentials",
+        "detection_events": ["UpdateFunctionConfiguration"],
+        "severity_default": "critical",
+        "notes": "Sets the AWS_LAMBDA_EXEC_WRAPPER environment variable to a path in an attacker-controlled layer. The wrapper runs before every handler invocation and can exfiltrate execution role credentials."
+      },
+      {
+        "id": "persist-lambda-async-self-loop",
+        "name": "Async self-loop",
+        "required_permissions": ["lambda:UpdateFunctionEventInvokeConfig", "lambda:PutFunctionRecursionConfig"],
+        "what_attacker_achieves": "Code-free heartbeat loop; function reinvokes itself via destinations",
+        "detection_events": ["UpdateFunctionEventInvokeConfig", "PutFunctionRecursionConfig"],
+        "severity_default": "high",
+        "notes": "Configures the function to invoke itself asynchronously via on-failure/on-success destinations. Creates a persistent execution loop that doesn't require external triggers."
+      },
+      {
+        "id": "persist-lambda-cron-trigger",
+        "name": "Cron/Event trigger",
+        "required_permissions": ["events:PutRule", "events:PutTargets"],
+        "what_attacker_achieves": "Scheduled or event-driven execution of attacker function",
+        "detection_events": ["PutRule", "PutTargets"],
+        "severity_default": "high",
+        "notes": "Creates an EventBridge rule targeting a Lambda function (attacker's or backdoored). Can trigger on a cron schedule or on specific AWS events (e.g., console login, role assumption)."
+      },
+      {
+        "id": "persist-lambda-alias-scoped-resource-policy",
+        "name": "Alias-scoped resource policy",
+        "required_permissions": ["lambda:AddPermission"],
+        "what_attacker_achieves": "Hidden invoke permission on specific backdoored version only",
+        "detection_events": ["AddPermission20150331v2"],
+        "severity_default": "high",
+        "notes": "Adds a resource policy with a --qualifier scoped to a specific alias or version. The permission only appears when enumerating that specific qualifier, making it easy to miss in broad audits."
+      },
+      {
+        "id": "persist-lambda-freeze-runtime",
+        "name": "Freeze runtime version",
+        "required_permissions": ["lambda:PutRuntimeManagementConfig"],
+        "what_attacker_achieves": "Pins vulnerable runtime; prevents auto-patching",
+        "detection_events": ["PutRuntimeManagementConfig"],
+        "severity_default": "high",
+        "notes": "Pins the Lambda runtime to a specific version using manual update mode. Prevents AWS from auto-applying runtime patches. Preserves any runtime-level vulnerabilities the attacker is exploiting."
+      }
+    ],
+    "storage": [
+      {
+        "id": "persist-storage-s3-acl-backdoor",
+        "name": "S3 ACL backdoor",
+        "required_permissions": ["s3:PutBucketAcl"],
+        "what_attacker_achieves": "Full control via ACLs — often overlooked in audits",
+        "detection_events": ["PutBucketAcl"],
+        "severity_default": "high",
+        "notes": "Grants an attacker-controlled account full control via S3 bucket ACLs. ACLs are often overlooked when auditing bucket policies. Persists until explicitly removed."
+      },
+      {
+        "id": "persist-storage-kms-key-policy",
+        "name": "KMS key policy backdoor",
+        "required_permissions": ["kms:PutKeyPolicy"],
+        "what_attacker_achieves": "External account gets permanent decrypt access to all data using that key",
+        "detection_events": ["PutKeyPolicy"],
+        "severity_default": "critical",
+        "notes": "Modifies the KMS key policy to grant the attacker's account kms:Decrypt and kms:GenerateDataKey. All data encrypted with that key is permanently accessible to the attacker."
+      },
+      {
+        "id": "persist-storage-kms-eternal-grant",
+        "name": "KMS eternal grant",
+        "required_permissions": ["kms:CreateGrant"],
+        "what_attacker_achieves": "Self-renewing grants — attacker can re-create grants even if some are revoked",
+        "detection_events": ["CreateGrant"],
+        "severity_default": "critical",
+        "notes": "Creates a KMS grant with CreateGrant permission in the grant constraints. Even if defenders revoke the grant, the attacker can recreate it. Grants bypass IAM policy and persist independently."
+      },
+      {
+        "id": "persist-storage-secretsmanager-resource-policy",
+        "name": "Secrets Manager resource policy",
+        "required_permissions": ["secretsmanager:PutResourcePolicy"],
+        "what_attacker_achieves": "External account reads secrets indefinitely",
+        "detection_events": ["PutResourcePolicy"],
+        "severity_default": "critical",
+        "notes": "Attaches a resource policy to a Secrets Manager secret granting the attacker's account GetSecretValue. Survives secret rotation — the policy persists on the secret regardless of value changes."
+      },
+      {
+        "id": "persist-storage-malicious-rotation-lambda",
+        "name": "Malicious rotation Lambda",
+        "required_permissions": ["secretsmanager:RotateSecret", "iam:PassRole"],
+        "what_attacker_achieves": "Every scheduled rotation exfiltrates current secret values",
+        "detection_events": ["RotateSecret"],
+        "severity_default": "critical",
+        "notes": "Points the secret's rotation Lambda to an attacker-controlled function. Every subsequent rotation event calls the malicious function, which exfiltrates the new secret value before completing rotation."
+      },
+      {
+        "id": "persist-storage-version-stage-hijacking",
+        "name": "Version stage hijacking",
+        "required_permissions": ["secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage"],
+        "what_attacker_achieves": "Hidden secret version; attacker atomically flips AWSCURRENT on demand",
+        "detection_events": ["PutSecretValue", "UpdateSecretVersionStage"],
+        "severity_default": "high",
+        "notes": "Creates a hidden secret version with a known value. The attacker can atomically promote it to AWSCURRENT at a chosen moment, poisoning all systems that read the secret."
+      },
+      {
+        "id": "persist-storage-cross-region-replica",
+        "name": "Cross-region replica promotion",
+        "required_permissions": ["secretsmanager:ReplicateSecretToRegions", "secretsmanager:StopReplicationToReplica"],
+        "what_attacker_achieves": "Standalone replica under attacker KMS key in untrusted region",
+        "detection_events": ["ReplicateSecretToRegions", "StopReplicationToReplica"],
+        "severity_default": "high",
+        "notes": "Replicates the secret to a region encrypted with an attacker-controlled KMS key, then stops replication to make the replica standalone. The replica retains the current secret value and is independently accessible."
+      }
+    ]
+  }
+}

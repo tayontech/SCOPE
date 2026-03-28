@@ -1,0 +1,291 @@
+{
+  "version": "2026-03",
+  "description": "Post-exploitation vector catalogue for AWS environments. Covers data exfiltration, lateral movement, and destructive actions. Used by scope-attack-paths Part 8 analysis.",
+  "categories": {
+    "data_exfiltration": [
+      {
+        "id": "postex-s3-data-theft",
+        "name": "S3 data theft",
+        "required_permissions": ["s3:GetObject", "s3:ListBucket"],
+        "impact": "Read sensitive data: Terraform state, backups, database dumps, configs",
+        "detection_events": ["GetObject", "ListBuckets"],
+        "severity_default": "high",
+        "notes": "High-value targets: buckets with names matching *prod*, *backup*, *config*, *terraform*, *state*."
+      },
+      {
+        "id": "postex-ebs-snapshot-dump",
+        "name": "EBS snapshot dump",
+        "required_permissions": ["ec2:CreateSnapshot", "ec2:ModifySnapshotAttribute"],
+        "impact": "Share disk snapshots to attacker account for offline analysis",
+        "detection_events": ["CreateSnapshot", "ModifySnapshotAttribute"],
+        "severity_default": "critical",
+        "notes": "Share EBS snapshots to an attacker-controlled account. Full disk image of production volumes accessible offline. Check for snapshots of database volumes and root volumes."
+      },
+      {
+        "id": "postex-ami-sharing",
+        "name": "AMI sharing",
+        "required_permissions": ["ec2:CreateImage", "ec2:ModifyImageAttribute"],
+        "impact": "Full disk image of running instance shared externally",
+        "detection_events": ["CreateImage", "ModifyImageAttribute"],
+        "severity_default": "critical",
+        "notes": "Creates an AMI from a running instance and shares it to an attacker account. Includes all data on attached volumes at time of snapshot. More complete than snapshot dump (captures all volumes)."
+      },
+      {
+        "id": "postex-secrets-batch-exfil",
+        "name": "Secrets Manager batch exfil",
+        "required_permissions": ["secretsmanager:BatchGetSecretValue", "secretsmanager:GetSecretValue"],
+        "impact": "Mass retrieval of secrets (up to 20/call)",
+        "detection_events": ["BatchGetSecretValue", "GetSecretValue"],
+        "severity_default": "critical",
+        "notes": "BatchGetSecretValue retrieves up to 20 secrets in a single API call, reducing CloudTrail noise vs individual GetSecretValue calls. Prioritize secrets with names matching *prod*, *db*, *rds*, *api*."
+      },
+      {
+        "id": "postex-kms-decrypt",
+        "name": "KMS decrypt data",
+        "required_permissions": ["kms:Decrypt"],
+        "impact": "Decrypt any data encrypted with accessible KMS keys",
+        "detection_events": ["Decrypt"],
+        "severity_default": "high",
+        "notes": "kms:Decrypt combined with S3/EBS/Secrets access unlocks encrypted data at rest. Check which keys are accessible and what services use them."
+      },
+      {
+        "id": "postex-lambda-credential-theft",
+        "name": "Lambda credential theft",
+        "required_permissions": ["lambda:InvokeFunction"],
+        "impact": "Steal execution role credentials from /proc/self/environ",
+        "detection_events": ["Invoke20150331v2"],
+        "severity_default": "high",
+        "notes": "Invoke an existing Lambda with a payload that returns environment variables or AWS_* credentials from /proc/self/environ. Credentials are temporary STS tokens but may have high privilege."
+      },
+      {
+        "id": "postex-vpc-traffic-mirror",
+        "name": "VPC traffic mirror",
+        "required_permissions": ["ec2:CreateTrafficMirrorSession", "ec2:CreateTrafficMirrorTarget", "ec2:CreateTrafficMirrorFilter"],
+        "impact": "Passive capture of all network traffic from target instances",
+        "detection_events": ["CreateTrafficMirrorSession", "CreateTrafficMirrorTarget", "CreateTrafficMirrorFilter"],
+        "severity_default": "critical",
+        "notes": "Creates a traffic mirroring session that copies all ENI traffic to an attacker-controlled target. Captures unencrypted traffic including API calls, database queries, and application data."
+      },
+      {
+        "id": "postex-glacier-restoration",
+        "name": "Glacier restoration",
+        "required_permissions": ["s3:RestoreObject", "s3:GetObject"],
+        "impact": "Restore and exfiltrate archived data assumed inaccessible",
+        "detection_events": ["RestoreObject", "GetObject"],
+        "severity_default": "high",
+        "notes": "Restores Glacier/S3 Glacier Deep Archive objects and exfiltrates them. Defenders often assume archived data is inaccessible. Restoration is asynchronous — plan for 12-48 hour delay."
+      },
+      {
+        "id": "postex-ebs-multiattach-live-read",
+        "name": "EBS Multi-Attach live read",
+        "required_permissions": ["ec2:AttachVolume"],
+        "impact": "Read live production data without creating snapshots",
+        "detection_events": ["AttachVolume"],
+        "severity_default": "critical",
+        "notes": "io1/io2 volumes support Multi-Attach — can be attached to an attacker-controlled instance while still attached to production. Reads live data without the snapshot creation events that typically trigger alerts."
+      },
+      {
+        "id": "postex-codebuild-env-var-secret-exfil",
+        "name": "CodeBuild environment variable secret exfiltration",
+        "required_permissions": ["codebuild:BatchGetProjects"],
+        "impact": "Plaintext credential retrieval: database passwords, API keys, OAuth tokens stored in CodeBuild project environment variables",
+        "detection_events": ["BatchGetProjects"],
+        "severity_default": "high",
+        "notes": "CodeBuild projects sometimes store secrets directly in environment variable definitions visible via BatchGetProjects — returned in plaintext in the API response. Check codebuild.json for env_secrets_exposure: true or environment variable names matching secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE). Flag existence — do NOT read values in SCOPE output. This is a read-only reconnaissance technique; actual exploitation requires using the retrieved credentials against their target service."
+      },
+      {
+        "id": "postex-s3-access-point-delegation",
+        "name": "S3 Access Points cross-account delegation bypass",
+        "required_permissions": ["s3:CreateAccessPoint", "s3:PutBucketPolicy"],
+        "impact": "Cross-account data access to S3 bucket contents bypassing the bucket's main access policy",
+        "detection_events": ["CreateAccessPoint", "PutBucketPolicy", "GetObject"],
+        "severity_default": "high",
+        "notes": "S3 Access Points allow creating separate access policies per application. An attacker with s3:PutBucketPolicy on a sensitive bucket can add a statement delegating s3:CreateAccessPoint to an attacker-controlled account. The attacker then creates an access point in their own account for the target bucket, gaining read access to all objects under the access point's scope — bypassing any IP conditions or principal conditions in the main bucket policy. Check s3.json bucket policies for statements that include s3:CreateAccessPoint or s3:* with cross-account principals. Unlike direct bucket policy changes, the access point delegation creates a persistent exfiltration channel that survives cleanup of the original policy statement if the access point is not deleted."
+      }
+    ],
+    "lateral_movement": [
+      {
+        "id": "postex-cross-account-role-assumption",
+        "name": "Cross-account role assumption",
+        "required_permissions": ["sts:AssumeRole"],
+        "impact": "Pivot into other AWS accounts via trust relationships",
+        "detection_events": ["AssumeRole"],
+        "severity_default": "critical",
+        "notes": "Enumerate cross-account trust relationships from iam.json. Roles with Principal:* or wildcards are high-value pivots. Check config/accounts.json to distinguish internal vs external trusts."
+      },
+      {
+        "id": "postex-ssm-session-port-forward",
+        "name": "SSM session + port forwarding",
+        "required_permissions": ["ssm:StartSession"],
+        "impact": "Pivot through EC2 instances behind restrictive SGs/NACLs",
+        "detection_events": ["StartSession"],
+        "severity_default": "high",
+        "notes": "SSM Session Manager bypasses security groups entirely — traffic goes through the SSM endpoint. Port forwarding allows tunneling to RDS, Elasticache, or internal services unreachable from outside."
+      },
+      {
+        "id": "postex-lambda-event-source-hijack",
+        "name": "Lambda event source hijack",
+        "required_permissions": ["lambda:UpdateEventSourceMapping"],
+        "impact": "Redirect DynamoDB/Kinesis/SQS data streams to attacker function",
+        "detection_events": ["UpdateEventSourceMapping20150331v2"],
+        "severity_default": "high",
+        "notes": "Modifies an existing event source mapping to point a DynamoDB stream, Kinesis stream, or SQS queue at an attacker-controlled Lambda. All records processed by the legitimate function are also seen by the attacker."
+      },
+      {
+        "id": "postex-ec2-instance-connect-endpoint",
+        "name": "EC2 instance connect endpoint",
+        "required_permissions": ["ec2:CreateInstanceConnectEndpoint"],
+        "impact": "SSH access to private instances with no public IP",
+        "detection_events": ["CreateInstanceConnectEndpoint"],
+        "severity_default": "high",
+        "notes": "Creates an Instance Connect Endpoint that enables SSH to private instances in a VPC without a bastion host or public IP. The endpoint is created in the VPC and tunnels through AWS."
+      },
+      {
+        "id": "postex-ecs-agent-impersonation",
+        "name": "ECS agent impersonation (ECScape)",
+        "required_permissions": ["ecs:DiscoverPollEndpoint"],
+        "impact": "Steal all task role credentials on the host",
+        "detection_events": ["DiscoverPollEndpoint"],
+        "severity_default": "critical",
+        "notes": "From IMDS access on an ECS-managed EC2 host, an attacker can impersonate the ECS agent to steal credentials for all tasks running on that host. ECScape technique — access IMDS to get container credentials then call DiscoverPollEndpoint."
+      },
+      {
+        "id": "postex-s3-code-injection",
+        "name": "S3 code injection",
+        "required_permissions": ["s3:PutObject"],
+        "impact": "Modify S3-hosted code (Airflow DAGs, JS, CloudFormation) to pivot",
+        "detection_events": ["PutObject"],
+        "severity_default": "critical",
+        "notes": "Overwrite S3-hosted code files: Airflow DAG definitions, JavaScript bundles, CloudFormation templates, or configuration files loaded at runtime. Code executes with the consuming service's permissions."
+      },
+      {
+        "id": "postex-eni-private-ip-hijack",
+        "name": "ENI private IP hijack",
+        "required_permissions": ["ec2:AssignPrivateIpAddresses"],
+        "impact": "Impersonate trusted internal hosts; bypass IP-based ACLs",
+        "detection_events": ["AssignPrivateIpAddresses"],
+        "severity_default": "high",
+        "notes": "Assigns a secondary private IP from another host to an attacker-controlled instance. Allows bypassing IP-based NACLs and security group rules that trust specific private IPs."
+      },
+      {
+        "id": "postex-elastic-ip-hijack",
+        "name": "Elastic IP hijack",
+        "required_permissions": ["ec2:DisassociateAddress", "ec2:AssociateAddress"],
+        "impact": "Intercept inbound traffic; appear as trusted IP",
+        "detection_events": ["DisassociateAddress", "AssociateAddress"],
+        "severity_default": "high",
+        "notes": "Disassociates an Elastic IP from a legitimate instance and reassociates it to an attacker-controlled instance. All inbound traffic to that EIP is now directed to the attacker."
+      },
+      {
+        "id": "postex-sg-prefix-list-expansion",
+        "name": "Security group via prefix lists",
+        "required_permissions": ["ec2:ModifyManagedPrefixList"],
+        "impact": "Silently expand network access across all referencing SGs",
+        "detection_events": ["ModifyManagedPrefixList"],
+        "severity_default": "high",
+        "notes": "Adds attacker-controlled IP ranges to a managed prefix list. Any security group referencing that prefix list automatically allows the attacker's IPs. A single API call can expand access across hundreds of SGs."
+      },
+      {
+        "id": "postex-lambda-vpc-egress-bypass",
+        "name": "Lambda VPC egress bypass",
+        "required_permissions": ["lambda:UpdateFunctionConfiguration"],
+        "impact": "Remove Lambda from restricted VPC; restore internet access",
+        "detection_events": ["UpdateFunctionConfiguration"],
+        "severity_default": "high",
+        "notes": "Removes a Lambda function's VPC configuration, giving it unrestricted internet access. Useful when the function has a high-privilege execution role but is isolated in a private VPC with no NAT gateway."
+      },
+      {
+        "id": "postex-codepipeline-artifact-override",
+        "name": "CodePipeline artifact bucket poisoning — Deploy attacker code via pipeline service role",
+        "required_permissions": ["s3:PutObject"],
+        "impact": "Code execution in deployment targets with CodePipeline service role permissions (often cross-account, often production)",
+        "detection_events": ["PutObject", "StartPipelineExecution", "PutActionRevision"],
+        "severity_default": "critical",
+        "notes": "If codebuild.json shows a project with pipeline_source pointing to an S3 bucket, and the caller has s3:PutObject on that bucket, replacing the artifact triggers the pipeline — executing attacker-controlled code with the pipeline service role. This role typically has broad deployment permissions including cross-account assume role to production. Sub-technique: codepipeline:PutActionRevision injects a different source revision into a running pipeline without stopping it, potentially bypassing approval gates on specific revisions. Impact radius depends on how many AWS accounts the pipeline deploys to."
+      }
+    ],
+    "destructive_actions": [
+      {
+        "id": "postex-kms-ransomware-policy-swap",
+        "name": "KMS ransomware (policy swap)",
+        "required_permissions": ["kms:PutKeyPolicy"],
+        "impact": "Lock victim out of all data encrypted with the key",
+        "detection_events": ["PutKeyPolicy"],
+        "severity_default": "critical",
+        "notes": "Replaces the KMS key policy to remove all victim account access. All data encrypted with the key becomes permanently inaccessible unless key policy is restored within the deletion window."
+      },
+      {
+        "id": "postex-kms-ransomware-reencrypt",
+        "name": "KMS ransomware (re-encryption)",
+        "required_permissions": ["kms:ReEncrypt", "kms:ScheduleKeyDeletion"],
+        "impact": "Re-encrypt with attacker key, delete original",
+        "detection_events": ["ReEncrypt", "ScheduleKeyDeletion"],
+        "severity_default": "critical",
+        "notes": "Re-encrypts all data with an attacker-controlled KMS key, then schedules deletion of the original key. Data is inaccessible without the attacker's key after the 7-30 day deletion window."
+      },
+      {
+        "id": "postex-s3-ransomware-ssec",
+        "name": "S3 ransomware (SSE-C)",
+        "required_permissions": ["s3:PutObject"],
+        "impact": "Rewrite objects with attacker-held encryption key",
+        "detection_events": ["PutObject"],
+        "severity_default": "critical",
+        "notes": "Re-uploads S3 objects with SSE-C using an attacker-only encryption key. Original objects are overwritten. Without versioning enabled, originals are permanently lost. SSE-C keys are not stored by AWS."
+      },
+      {
+        "id": "postex-ebs-ransomware",
+        "name": "EBS ransomware",
+        "required_permissions": ["ec2:CreateSnapshot", "kms:ReEncrypt", "ec2:DeleteVolume"],
+        "impact": "Encrypt all volumes with attacker key, delete originals",
+        "detection_events": ["CreateSnapshot", "ReEncrypt", "DeleteVolume"],
+        "severity_default": "critical",
+        "notes": "Snapshot all EBS volumes, re-encrypt snapshots with attacker KMS key, restore to new volumes, then delete originals. Production data is fully inaccessible without attacker cooperation."
+      },
+      {
+        "id": "postex-secret-value-poisoning",
+        "name": "Secret value poisoning",
+        "required_permissions": ["secretsmanager:PutSecretValue"],
+        "impact": "DoS all systems depending on that secret",
+        "detection_events": ["PutSecretValue"],
+        "severity_default": "high",
+        "notes": "Overwrites a secret's value with invalid data (wrong password, invalid API key). Every service that reads the secret will fail to authenticate. Cascading failures across all consumers of the secret."
+      },
+      {
+        "id": "postex-kms-key-deletion",
+        "name": "KMS key deletion",
+        "required_permissions": ["kms:ScheduleKeyDeletion"],
+        "impact": "Permanent data loss after 7-day window",
+        "detection_events": ["ScheduleKeyDeletion"],
+        "severity_default": "critical",
+        "notes": "Schedules KMS key deletion (minimum 7 days). After deletion, all data encrypted with the key is permanently unrecoverable. AWS does not retain key material after deletion."
+      },
+      {
+        "id": "postex-iam-identity-deletion",
+        "name": "IAM identity deletion",
+        "required_permissions": ["iam:DeleteUser", "iam:DeleteRole"],
+        "impact": "Destroy identities and audit trails",
+        "detection_events": ["DeleteUser", "DeleteRole"],
+        "severity_default": "high",
+        "notes": "Deletes IAM users and roles to disrupt operations and destroy audit trails. Deleting the break-glass admin role creates a lockout scenario. Role deletion is not immediately reversible."
+      },
+      {
+        "id": "postex-flow-log-deletion",
+        "name": "Flow log deletion",
+        "required_permissions": ["ec2:DeleteFlowLogs"],
+        "impact": "Blind defenders to network activity",
+        "detection_events": ["DeleteFlowLogs"],
+        "severity_default": "high",
+        "notes": "Deletes VPC flow logs to remove network visibility. Defenders lose the ability to trace lateral movement, data exfiltration paths, or C2 communication after the logs are deleted."
+      },
+      {
+        "id": "postex-federation-provider-deletion",
+        "name": "Federation provider deletion",
+        "required_permissions": ["iam:DeleteSAMLProvider", "iam:DeleteOpenIDConnectProvider"],
+        "impact": "Break all SSO/federated access",
+        "detection_events": ["DeleteSAMLProvider", "DeleteOpenIDConnectProvider"],
+        "severity_default": "critical",
+        "notes": "Deletes SAML or OIDC identity providers used for SSO. All users authenticating via that provider immediately lose access. In orgs that rely entirely on federated access, this is a full lockout."
+      }
+    ]
+  }
+}

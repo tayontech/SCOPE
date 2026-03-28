@@ -127,13 +127,13 @@ REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   (
     REGION_STATUS="complete"
-    TOPICS=$(aws sns list-topics --region "$CURRENT_REGION" --output json 2>&1) || { echo "sns:ListTopics AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/sns_errors.txt"; echo "error" > "$RUN_DIR/raw/sns_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    TOPICS=$(aws sns list-topics --region "$CURRENT_REGION" --output json 2>&1) || { echo "sns:ListTopics AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/sns_errors.txt"; echo "error" > "$RUN_DIR/raw/sns_region_status_$CURRENT_REGION.txt"; exit 0; }
     for TOPIC_ARN in $(echo "$TOPICS" | jq -r '.Topics[].TopicArn'); do
       TOPIC_ATTRS=$(aws sns get-topic-attributes --topic-arn "$TOPIC_ARN" --region "$CURRENT_REGION" --output json 2>&1) || { echo "sns:GetTopicAttributes AccessDenied $TOPIC_ARN" >> "$RUN_DIR/raw/sns_errors.txt"; REGION_STATUS="partial"; continue; }
       # Run sns_topic extraction template above, then append to temp file
-      echo "$TOPIC_FINDINGS" >> "$RUN_DIR/raw/sns_findings_${CURRENT_REGION}.jsonl"
+      echo "$TOPIC_FINDINGS" >> "$RUN_DIR/raw/sns_findings_$CURRENT_REGION.jsonl"
     done
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/sns_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/sns_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -147,7 +147,7 @@ wait
 # Collect per-region status files to derive aggregate STATUS
 STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/sns_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/sns_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge all per-topic findings across all regions (O(n) — single pass after loops)

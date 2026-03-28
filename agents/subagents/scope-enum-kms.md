@@ -145,7 +145,7 @@ REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   (
     REGION_STATUS="complete"
-    KEYS=$(aws kms list-keys --region "$CURRENT_REGION" --output json 2>&1) || { echo "kms:ListKeys AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/kms_errors.txt"; echo "error" > "$RUN_DIR/raw/kms_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    KEYS=$(aws kms list-keys --region "$CURRENT_REGION" --output json 2>&1) || { echo "kms:ListKeys AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/kms_errors.txt"; echo "error" > "$RUN_DIR/raw/kms_region_status_$CURRENT_REGION.txt"; exit 0; }
     for KEY_ARN in $(echo "$KEYS" | jq -r '.Keys[].KeyArn'); do
       KEY_ID=$(echo "$KEY_ARN" | rev | cut -d'/' -f1 | rev)
       # Describe key — skip AWS-managed keys
@@ -172,9 +172,9 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
       fi
 
       # Run kms_key extraction template above, then append to temp file
-      echo "$KEY_FINDINGS" >> "$RUN_DIR/raw/kms_findings_${CURRENT_REGION}.jsonl"
+      echo "$KEY_FINDINGS" >> "$RUN_DIR/raw/kms_findings_$CURRENT_REGION.jsonl"
     done
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/kms_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/kms_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -188,7 +188,7 @@ wait
 # Collect per-region status files to derive aggregate STATUS
 STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/kms_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/kms_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge all per-key findings across all regions (O(n) — single pass after loops)

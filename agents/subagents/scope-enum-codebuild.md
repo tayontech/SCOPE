@@ -57,15 +57,15 @@ REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   (
     REGION_STATUS="complete"
-    PROJECT_LIST=$(aws codebuild list-projects --region "$CURRENT_REGION" --output json 2>&1) || { echo "codebuild:ListProjects AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/codebuild_errors.txt"; echo "error" > "$RUN_DIR/raw/codebuild_region_status_${CURRENT_REGION}.txt"; exit 0; }
+    PROJECT_LIST=$(aws codebuild list-projects --region "$CURRENT_REGION" --output json 2>&1) || { echo "codebuild:ListProjects AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/codebuild_errors.txt"; echo "error" > "$RUN_DIR/raw/codebuild_region_status_$CURRENT_REGION.txt"; exit 0; }
     PROJECT_NAMES=$(echo "$PROJECT_LIST" | jq -r '.projects[]?' 2>/dev/null)
     if [ -n "$PROJECT_NAMES" ]; then
-      PROJECTS_DATA=$(aws codebuild batch-get-projects --names $PROJECT_NAMES --region "$CURRENT_REGION" --output json 2>&1) || { echo "codebuild:BatchGetProjects AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/codebuild_errors.txt"; echo "partial" > "$RUN_DIR/raw/codebuild_region_status_${CURRENT_REGION}.txt"; exit 0; }
+      PROJECTS_DATA=$(aws codebuild batch-get-projects --names $PROJECT_NAMES --region "$CURRENT_REGION" --output json 2>&1) || { echo "codebuild:BatchGetProjects AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/codebuild_errors.txt"; echo "partial" > "$RUN_DIR/raw/codebuild_region_status_$CURRENT_REGION.txt"; exit 0; }
       # Run codebuild_project extraction template above
       # Append each finding as a JSONL line (temp-file append pattern — no O(n^2) accumulation)
-      echo "$PROJECT_FINDINGS" | jq -c '.[]' >> "$RUN_DIR/raw/codebuild_findings_${CURRENT_REGION}.jsonl"
+      echo "$PROJECT_FINDINGS" | jq -c '.[]' >> "$RUN_DIR/raw/codebuild_findings_$CURRENT_REGION.jsonl"
     fi
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/codebuild_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/codebuild_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -79,7 +79,7 @@ wait
 # Collect per-region status files to derive aggregate STATUS
 STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/codebuild_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/codebuild_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge all per-region finding files (O(n) — single pass after loops)

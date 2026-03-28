@@ -83,7 +83,7 @@ REST_API_FINDINGS=$(echo "$REST_API_POLICY" | jq \
   --arg account_id "$ACCOUNT_ID" \
   --arg api_id "$REST_API_ID" \
   --arg api_name "$REST_API_NAME" \
-  --arg api_arn "arn:aws:apigateway:${CURRENT_REGION}::/restapis/${REST_API_ID}" \
+  --arg api_arn "arn:aws:apigateway:$CURRENT_REGION::/restapis/$REST_API_ID" \
   --argjson has_authorizer "$REST_HAS_AUTHORIZER" \
   --argjson stages "$REST_STAGES_JSON" \
   --argjson lambda_integrations "$REST_LAMBDA_INTEGRATIONS_JSON" \
@@ -126,7 +126,7 @@ V2_API_FINDINGS=$(jq -n \
   --arg api_id "$V2_API_ID" \
   --arg api_name "$V2_API_NAME" \
   --arg api_type "$V2_API_TYPE" \
-  --arg api_arn "arn:aws:apigateway:${CURRENT_REGION}::/apis/${V2_API_ID}" \
+  --arg api_arn "arn:aws:apigateway:$CURRENT_REGION::/apis/$V2_API_ID" \
   --argjson has_authorizer "$V2_HAS_AUTHORIZER" \
   --argjson stages "$V2_STAGES_JSON" \
   --argjson lambda_integrations "$V2_LAMBDA_INTEGRATIONS_JSON" \
@@ -184,7 +184,7 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
       REST_LAMBDA_INTEGRATIONS_JSON=$(echo "$RESOURCES" | jq '[.items[]?.resourceMethods // {} | to_entries[]? | .value.methodIntegration // {} | select(.type == "AWS_PROXY" or .type == "LAMBDA") | .uri // empty | capture("functions/(?<name>[^/]+)/") | .name] | unique' 2>/dev/null || echo "[]")
 
       # Run REST API extraction template above, then append to temp file
-      echo "$REST_API_FINDINGS" >> "$RUN_DIR/raw/apigw_rest_findings_${CURRENT_REGION}.jsonl"
+      echo "$REST_API_FINDINGS" >> "$RUN_DIR/raw/apigw_rest_findings_$CURRENT_REGION.jsonl"
     done
 
     # HTTP and WebSocket APIs (apigatewayv2)
@@ -207,9 +207,9 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
       V2_LAMBDA_INTEGRATIONS_JSON=$(echo "$V2_INTEGRATIONS" | jq '[.Items[]? | select(.IntegrationType == "AWS_PROXY") | .IntegrationUri // empty | capture("functions/(?<name>[^/]+)") | .name] | unique' 2>/dev/null || echo "[]")
 
       # Run HTTP/WebSocket API extraction template above, then append to temp file
-      echo "$V2_API_FINDINGS" >> "$RUN_DIR/raw/apigw_v2_findings_${CURRENT_REGION}.jsonl"
+      echo "$V2_API_FINDINGS" >> "$RUN_DIR/raw/apigw_v2_findings_$CURRENT_REGION.jsonl"
     done
-    echo "$REGION_STATUS" > "$RUN_DIR/raw/apigw_region_status_${CURRENT_REGION}.txt"
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/apigw_region_status_$CURRENT_REGION.txt"
   ) &
   REGION_PIDS+=($!)
   ACTIVE=$((ACTIVE + 1))
@@ -223,7 +223,7 @@ wait
 # Collect per-region status files to derive aggregate STATUS
 STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/apigw_region_status_${REGION}.txt" 2>/dev/null || echo "error")
+  RS=$(cat "$RUN_DIR/raw/apigw_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
 # Merge REST and v2 findings separately, then combine (O(n) — single pass after loops)
