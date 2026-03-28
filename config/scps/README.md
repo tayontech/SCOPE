@@ -55,10 +55,10 @@ done
 Wrap defend-generated SCP files with the required schema fields:
 
 ```bash
-# defend writes SCPs to ./defend/defend-*/policies/scp-*.json
+# defend writes SCPs to ./audit/audit-*/defend/defend-*/policies/scp-*.json
 # Those are raw PolicyDocument objects — wrap them:
 jq '{PolicyId: "p-custom-001", PolicyName: "defend-generated", PolicyDocument: ., Targets: []}' \
-  ./defend/defend-*/policies/scp-deny-root.json > config/scps/deny-root.json
+  ./audit/audit-*/defend/defend-*/policies/scp-deny-root.json > config/scps/deny-root.json
 ```
 
 ## Merge Behavior

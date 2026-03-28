@@ -35,7 +35,7 @@ fi
 (
   # Find the most recent active run directory (audit, defend, or exploit, modified in last 30 min)
   RUN_DIR=""
-  for dir in "$CWD"/audit/audit-* "$CWD"/defend/defend-* "$CWD"/exploit/exploit-*; do
+  for dir in "$CWD"/audit/audit-* "$CWD"/audit/audit-*/defend/defend-* "$CWD"/exploit/exploit-*; do
     if [ -d "$dir" ] && [ "$(find "$dir" -maxdepth 0 -mmin -30 2>/dev/null)" ]; then
       RUN_DIR="$dir"
     fi

@@ -708,13 +708,13 @@ Use REAL ARNs and resource names throughout. Never use placeholders in the final
 ## RECOMMENDED NEXT ACTION
 
 [One specific, contextual recommendation based on highest-risk finding. Reference defensive
-control artifacts already generated at ./defend/defend-{timestamp}/.]
+control artifacts already generated at $RUN_DIR/defend/defend-{timestamp}/.]
 
 **Additional options:**
 - `/scope:exploit` — validate findings by testing exploitability
 - `/scope:audit [another-target]` — drill into [specific related resource]
 - View results: open `dashboard/dashboard.html` in any browser
-- Review defensive control artifacts: `./defend/defend-{timestamp}/`
+- Review defensive control artifacts: `$RUN_DIR/defend/defend-{timestamp}/`
 ```
 </findings_md>
 
@@ -792,13 +792,13 @@ With multi_agent enabled, Codex automatically spawns the registered role.
 Wait for defend to complete and return its summary.
 Expected summary:
   STATUS: complete|error
-  DEFEND_RUN_DIR: ./defend/defend-{timestamp}/
+  DEFEND_RUN_DIR: {audit_run_directory_path}/defend/defend-{timestamp}/
   METRICS: {scps: N, rcps: N, detections: N}
 ```
 
 If defend fails: log a warning, continue to pipeline. Defend failure is non-blocking.
 
-Note: Defend creates its own independent run directory at `./defend/defend-{timestamp}/`. Capture
+Note: Defend creates its run directory as a subdirectory of the audit run at `{audit_run_dir}/defend/defend-{timestamp}/`. Capture
 the DEFEND_RUN_DIR from defend's summary — you need it for the post-processing pipeline Run 2.
 
 **Announce defend completion to the operator:**
@@ -830,7 +830,7 @@ Run Phase 1 data normalization then Phase 2 agent-log indexing for the audit art
 PHASE=defend
 RUN_DIR={defend_run_directory_path}
 ```
-Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./defend/defend-20260301-143022/`).
+Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./audit/audit-20260301-143022-all/defend/defend-20260301-143522-a1b2/`).
 Run Phase 1 data normalization then Phase 2 agent-log indexing for the defend artifacts (if defend succeeded).
 
 Sequential. Automatic. No operator approval needed.
@@ -1129,7 +1129,7 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory `./audit/$RUN_ID/` created, all artifacts written there, run appended to `./audit/INDEX.md` and `./audit/index.json`.
-9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its own `./defend/defend-{timestamp}/` run directory and returns DEFEND_RUN_DIR in its summary.
+9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its run directory at `$RUN_DIR/defend/defend-{timestamp}/` and returns DEFEND_RUN_DIR in its summary.
 10. **Pipeline ran inline** — agents/subagents/scope-pipeline.md invoked for both audit and defend phases. Failures logged as warnings (non-blocking).
 11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
 12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).

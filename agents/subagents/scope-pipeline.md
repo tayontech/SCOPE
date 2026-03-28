@@ -265,7 +265,7 @@ The defend agent does not make AWS API calls, so `account_id` must be inherited 
 
 1. **From defend results.json** — if the defend agent set `account_id`, use it
 2. **From linked audit data** — check `audit_runs_analyzed` in the defend payload. For each run ID, look for `./data/audit/<run-id>.json` and extract `account_id` from the envelope. Use the first non-`"unknown"` value found.
-3. **From audit results.json in AUDIT_RUN_DIR** — if the defend run directory name or agent-log.jsonl contains a reference to an audit run directory, read that directory's `results.json` for `account_id`
+3. **From parent audit run directory** — defend runs are nested under their parent audit run (`audit/<run-id>/defend/<defend-run-id>/`). Derive the parent audit directory as the grandparent of `$RUN_DIR` (i.e., `dirname $(dirname $RUN_DIR)`) and read its `results.json` for `account_id`
 4. **Fallback** — set to `"unknown"` and log a warning
 
 ### Extraction Steps

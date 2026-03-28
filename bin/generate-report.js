@@ -74,7 +74,7 @@ const dataIndexPath = join(projectRoot, "data", "index.json");
 const dashboardIndexPath = join(publicDir, "index.json");
 const dashboardIndexTmpPath = join(publicDir, "index.json.tmp");
 
-const runDir = process.env.RUN_DIR || process.env.DEFEND_RUN_DIR || process.env.AUDIT_RUN_DIR;
+const runDir = process.env.RUN_DIR || process.env.AUDIT_RUN_DIR;
 const currentRunId = runDir ? basename(runDir) : null;
 
 if (existsSync(dashboardIndexPath)) {

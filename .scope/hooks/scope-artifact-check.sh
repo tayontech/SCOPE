@@ -76,7 +76,7 @@ if [ -n "$LATEST_AUDIT" ]; then
 fi
 
 # --- Check for recent defend runs ---
-LATEST_DEFEND=$(find "$CWD/defend" -maxdepth 1 -type d -name "defend-*" -mmin -30 2>/dev/null | sort -r | head -1 || true)
+LATEST_DEFEND=$(find "$CWD/audit" -maxdepth 3 -type d -name "defend-*" -mmin -30 2>/dev/null | sort -r | head -1 || true)
 
 if [ -n "$LATEST_DEFEND" ]; then
   if [ ! -f "$LATEST_DEFEND/executive-summary.md" ]; then

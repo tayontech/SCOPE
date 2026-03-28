@@ -150,11 +150,11 @@ After generating all artifacts but BEFORE writing results.json, verify proportio
 After writing all artifacts, run this pipeline. Both steps are required — not optional.
 
 1. **Pipeline:** Read `agents/subagents/scope-pipeline.md` — run with PHASE=defend, RUN_DIR=$RUN_DIR (pipeline internally runs Phase 1 data normalization then Phase 2 evidence indexing)
-2. **Report generation:** Generate the self-contained dashboard report:
+2. **Report generation (standalone mode only):** When invoked standalone (not by the audit orchestrator), generate the dashboard:
    ```bash
    cd dashboard && npm run dashboard 2>&1
    ```
-   This produces `dashboard/dashboard.html` — a portable file that opens in any browser without a server. The report includes both audit and defend data (whatever is in `dashboard/public/`). Essential for Codex and Gemini CLI environments.
+   When dispatched by the audit orchestrator, skip this step — the orchestrator generates the dashboard after both audit and defend pipeline runs complete, ensuring all data is present.
 
 Sequential. Automatic. No operator approval needed.
 If a step fails: log a warning and continue to the next step — the raw artifacts are already written. Pipeline failure is non-blocking but MUST be attempted.
@@ -212,28 +212,46 @@ Every defend invocation is an independent session. Results from different defend
 
 ### Run Directory
 
-At the start of every defend run (after audit intake, before any processing), create a unique run directory:
+At the start of every defend run (after audit intake, before any processing), create a unique run directory. Defend output lives as a subdirectory of the audit run it analyzes.
+
+**Autonomous mode (AUDIT_RUN_DIR provided by orchestrator):**
 
 ```bash
 # Generate run ID from timestamp
 RUN_ID="defend-$(date +%Y%m%d-%H%M%S)-$(head -c 2 /dev/urandom | xxd -p)"
-RUN_DIR="$(pwd)/defend/$RUN_ID"
+RUN_DIR="$AUDIT_RUN_DIR/defend/$RUN_ID"
 mkdir -p "$RUN_DIR/policies"
 ```
 
-**Standalone mode path canonicalization:** When an operator provides a run-dir argument (i.e., AUDIT_RUN_DIR is set from operator input, not from orchestrator dispatch), canonicalize the path before creating the defend run directory:
+**Standalone mode (operator-provided path):** Canonicalize the path before creating the defend run directory:
 
 ```bash
-# Standalone mode only — canonicalize operator-provided path to absolute
+# Standalone mode — canonicalize operator-provided path to absolute
 AUDIT_RUN_DIR=$(cd "$INPUT_DIR" && pwd)
+RUN_ID="defend-$(date +%Y%m%d-%H%M%S)-$(head -c 2 /dev/urandom | xxd -p)"
+RUN_DIR="$AUDIT_RUN_DIR/defend/$RUN_ID"
+mkdir -p "$RUN_DIR/policies"
 ```
 
-Evaluate this BEFORE creating the defend run directory. Store the absolute result in AUDIT_RUN_DIR. This ensures that relative paths like `./audit/audit-20260301-143022-all` are resolved against the shell's current working directory at invocation time, preventing path drift when the shell CWD changes during execution.
+Evaluate canonicalization BEFORE creating the defend run directory. Store the absolute result in AUDIT_RUN_DIR. This ensures that relative paths like `./audit/audit-20260301-143022-all` are resolved against the shell's current working directory at invocation time, preventing path drift when the shell CWD changes during execution.
+
+**Standalone mode without a specific audit run (multi-run aggregation):** When no AUDIT_RUN_DIR is set at all, create defend under the most recent audit run directory:
+
+```bash
+AUDIT_RUN_DIR=$(ls -dt "$(pwd)"/audit/audit-* 2>/dev/null | head -1)
+if [ -z "$AUDIT_RUN_DIR" ]; then
+  echo "ERROR: No audit runs found — run an audit first or provide a run directory"
+  exit 1
+fi
+RUN_ID="defend-$(date +%Y%m%d-%H%M%S)-$(head -c 2 /dev/urandom | xxd -p)"
+RUN_DIR="$AUDIT_RUN_DIR/defend/$RUN_ID"
+mkdir -p "$RUN_DIR/policies"
+```
 
 Examples:
 ```
-./defend/defend-20260301-143022/
-./defend/defend-20260302-091530/
+./audit/audit-20260301-143022-all/defend/defend-20260301-143522-a1b2/
+./audit/audit-20260302-091530-iam/defend/defend-20260302-092030-c3d4/
 ```
 
 ### Artifacts Written to Run Directory
@@ -252,41 +270,41 @@ All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`,
 
 At the end of the run, output the run directory path:
 ```
-All artifacts saved to: ./defend/defend-20260301-143022/
+All artifacts saved to: ./audit/audit-20260301-143022-all/defend/defend-20260301-143522-a1b2/
 ```
 
 ### Context Isolation Rules
 
 1. **No carryover.** Do NOT reference prior defend run outputs to inform the current run.
 2. **Reads audit runs as input.** In autonomous mode (AUDIT_RUN_DIR provided), read only the current run. In manual mode, read `./audit/*/findings.md` and `./data/audit/*.json` as intake sources.
-3. **Engagement context exception.** If an engagement directory exists (`./engagements/<name>/`), write artifacts to `./engagements/<name>/defend/$RUN_ID/` instead. The engagement groups related runs but each defend session is still isolated.
+3. **Engagement context exception.** If an engagement directory exists (`./engagements/<name>/`), the audit run is already under that engagement. Defend nests under the audit run regardless of engagement structure.
 
 ### Run Index
 
-After each run completes, append an entry to `./defend/INDEX.md` (create if it doesn't exist):
+After each run completes, append an entry to `$AUDIT_RUN_DIR/defend/INDEX.md` (create if it doesn't exist):
 
 ```markdown
 | Run ID | Date | Audit Runs Analyzed | Attack Paths | SCPs | RCPs | Directory |
 |--------|------|--------------------|--------------|----|------|-----------|
-| defend-20260301-143022 | 2026-03-01 14:30 | 3 | 12 (4 systemic) | 5 | 2 | ./defend/defend-20260301-143022/ |
+| defend-20260301-143022-a1b2 | 2026-03-01 14:30 | 1 | 12 (4 systemic) | 5 | 2 | defend/defend-20260301-143022-a1b2/ |
 ```
 
-Also update `./defend/index.json` (machine-readable). Create if it doesn't exist with `{"runs": []}`. Append/upsert (match on `run_id`) an entry:
+Also update `$AUDIT_RUN_DIR/defend/index.json` (machine-readable). Create if it doesn't exist with `{"runs": []}`. Append/upsert (match on `run_id`) an entry:
 
 ```json
 {
-  "run_id": "defend-20260301-143022",
+  "run_id": "defend-20260301-143022-a1b2",
   "date": "2026-03-01T14:30:22Z",
-  "audit_runs_analyzed": 3,
+  "audit_runs_analyzed": 1,
   "attack_paths": 12,
   "systemic": 4,
   "scps": 5,
   "rcps": 2,
-  "directory": "./defend/defend-20260301-143022/"  // engagement mode: "./engagements/<name>/defend/..."
+  "directory": "defend/defend-20260301-143022-a1b2/"
 }
 ```
 
-Read `./defend/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
+Read `$AUDIT_RUN_DIR/defend/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
 
 ### Post-Processing Pipeline
 
@@ -1846,11 +1864,11 @@ REMEDIATION COMPLETE
 
 Run ID: defend-YYYYMMDD-HHMMSS
 Artifacts written:
-  ./defend/[run_id]/executive-summary.md
-  ./defend/[run_id]/technical-remediation.md
-  ./defend/[run_id]/policies/scp-[name].json  ([count] SCPs)
-  ./defend/[run_id]/policies/rcp-[name].json  ([count] RCPs)
-  ./defend/[run_id]/results.json
+  $RUN_DIR/executive-summary.md
+  $RUN_DIR/technical-remediation.md
+  $RUN_DIR/policies/scp-[name].json  ([count] SCPs)
+  $RUN_DIR/policies/rcp-[name].json  ([count] RCPs)
+  $RUN_DIR/results.json
   dashboard/public/[run_id].json
   Dashboard updated: dashboard/public/index.json
 
@@ -1907,8 +1925,8 @@ SCPS_ARRAY=$(jq -n '[
       "break_glass": "<break-glass mechanism or none>"
     }
   }
-  // ... one entry per generated SCP
 ]')
+# Add one entry per generated SCP to the array above
 
 # RCPS_ARRAY: one object per generated RCP policy
 # Each object: name, file, policy_json (object), source_attack_paths, source_run_ids, impact_analysis
@@ -1926,8 +1944,8 @@ RCPS_ARRAY=$(jq -n '[
       "break_glass": "<break-glass mechanism or none>"
     }
   }
-  // ... one entry per generated RCP
 ]')
+# Add one entry per generated RCP to the array above
 
 # DETECTIONS_ARRAY: one object per SPL detection
 # Each object: name, spl, severity, category, mitre_technique, source_attack_paths, source_run_ids
@@ -1941,8 +1959,8 @@ DETECTIONS_ARRAY=$(jq -n '[
     "source_attack_paths": ["<attack path names>"],
     "source_run_ids": ["<audit run IDs>"]
   }
-  // ... one entry per generated detection
 ]')
+# Add one entry per generated detection to the array above
 
 # CONTROLS_ARRAY: one object per security control recommendation
 # Each object: service, recommendation, priority, effort, source_attack_paths
@@ -1954,8 +1972,8 @@ CONTROLS_ARRAY=$(jq -n '[
     "effort": "low | medium | high",
     "source_attack_paths": ["<attack path names>"]
   }
-  // ... one entry per control recommendation
 ]')
+# Add one entry per control recommendation to the array above
 
 # PRIORITIZATION_ARRAY: all remediation actions ranked by Risk x Effort
 # Each object: rank, action, risk, effort, category
@@ -1967,8 +1985,8 @@ PRIORITIZATION_ARRAY=$(jq -n '[
     "effort": "low | medium | high",
     "category": "scp | rcp | detection | control | config"
   }
-  // ... all prioritized actions
 ]')
+# Add all prioritized actions to the array above
 ```
 
 ### Step 2: Derive summary counts FROM arrays
@@ -2066,6 +2084,9 @@ RUN_ID=$(basename "$RUN_DIR")
 mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
+# Determine pipeline status — default to 'complete' (set by pipeline if it ran)
+PIPELINE_STATUS="${PIPELINE_STATUS:-complete}"
+
 # Update dashboard index — runs[] only, no latest* fields
 if [ -f dashboard/public/index.json ]; then
   node -e "
@@ -2151,7 +2172,7 @@ A defend run is complete when ALL of the following are true:
 
 ### Index and Operator Gates
 
-- [ ] `./defend/INDEX.md` entry appended after run completes — created if it doesn't exist
+- [ ] `$AUDIT_RUN_DIR/defend/INDEX.md` entry appended after run completes — created if it doesn't exist
 - [ ] Run completion summary displayed with artifact paths and top 3 quick wins
 
 ### Pipeline

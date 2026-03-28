@@ -65,6 +65,12 @@ config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js — editor setup, generate-report.js — dashboard builder)
 .scope/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, agent logger
 .scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
+
+# Runtime output structure (gitignored):
+audit/<run-id>/           Audit run — enum JSONs, results.json, findings.md
+audit/<run-id>/defend/    Defend output nested under its parent audit run
+exploit/<run-id>/         Exploit run — playbooks, results.json
+investigate/<run-id>/     Investigation artifacts
 ```
 
 ## Hooks
