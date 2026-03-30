@@ -2,9 +2,9 @@
 
 ## Overview
 
-This guide walks you through connecting SCOPE's `scope-investigate` agent to your Splunk Cloud instance via the official Splunk MCP Server app (Splunkbase app 7931). Once configured, the agent executes SPL queries live with analyst approval — no more manual copy-paste loops.
+This guide walks you through connecting SCOPE's `scope-hunt` agent to your Splunk Cloud instance via the official Splunk MCP Server app (Splunkbase app 7931). Once configured, the agent executes SPL queries live with analyst approval — no more manual copy-paste loops.
 
-**What this enables:** Live Splunk query execution from `scope-investigate` instead of the default MANUAL mode (SPL generation with paste-back). The agent probes for MCP connectivity at startup and falls back to MANUAL mode automatically when no MCP server is available.
+**What this enables:** Live Splunk query execution from `scope-hunt` instead of the default MANUAL mode (SPL generation with paste-back). The agent probes for MCP connectivity at startup and falls back to MANUAL mode automatically when no MCP server is available.
 
 **Scope:** Splunk Cloud Platform only (official Splunkbase app 7931, version 1.0.2+). Splunk Enterprise and on-premises deployments are out of scope for this guide.
 
@@ -169,7 +169,7 @@ SPLUNK_TOKEN = "$SPLUNK_TOKEN"
 
 1. Open a terminal in the SCOPE project directory
 2. Start your CLI tool (`claude`, `gemini`, or `codex`)
-3. Run the investigate command: `/scope:investigate`
+3. Run the investigate command: `/scope:hunt`
 4. Watch the startup output — the agent probes for Splunk MCP connectivity automatically
 
 **Expected output (success):**
@@ -296,7 +296,7 @@ claude --version
 
 **Cause:** The app version on your Splunk Cloud instance exposes `splunk_run_query` as the primary tool name rather than `search_oneshot`.
 
-**Fix:** When `scope-investigate` starts and shows the MANUAL message, use the analyst override option:
+**Fix:** When `scope-hunt` starts and shows the MANUAL message, use the analyst override option:
 1. Tell the agent: "Splunk MCP IS connected"
 2. When prompted, enter: `splunk_run_query`
 3. The agent will attempt that tool and switch to CONNECTED mode if it succeeds
