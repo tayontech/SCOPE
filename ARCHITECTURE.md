@@ -9,7 +9,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 
 **Standalone agents** (slash commands — operator-triggered):
 - `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
-- `scope-investigate` — SOC alert investigation via Splunk
+- `scope-hunt` — SOC alert investigation via Splunk
 
 **Operator-invoked or orchestrator-dispatched:**
 - `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
@@ -77,7 +77,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  detections, controls             │
     │                               └──────────────────────────────────┘
     │
-    └── /scope:investigate ────────►┌──────────────────────────────────┐
+    └── /scope:hunt ────────►┌──────────────────────────────────┐
                                     │  Standalone Agent                 │
                                     │                                   │
                                     │  1. Load context.json             │
@@ -92,7 +92,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 
 ## Post-Processing Pipeline
 
-Source agents (audit, exploit, defend) trigger this pipeline after writing artifacts. Investigate is standalone and does not run the post-processing pipeline — if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./investigate/context.json` is always updated regardless of save choice.
+Source agents (audit, exploit, defend) trigger this pipeline after writing artifacts. Hunt is standalone and does not run the post-processing pipeline — if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice.
 
 ```
   $RUN_DIR/findings.md          ./data/$PHASE/$RUN_ID.json
@@ -185,9 +185,9 @@ Verification results are in-memory — scope-verify returns corrections to the c
                                               │
   ┌───────────────────────────────────────────┘
   │
-  │   scope-investigate is STANDALONE
+  │   scope-hunt is STANDALONE
   │   • No reads from ./audit/, ./exploit/, ./agent-logs/
-  │   • Reads ./investigate/context.json (environment knowledge)
+  │   • Reads ./hunt/context.json (environment knowledge)
   │   • Analyst brings alert context, queries Splunk
   │   • Intentional isolation: SOC ≠ pentest
   └──────────────────────────────────────────────────
@@ -220,7 +220,7 @@ Downstream agents consume upstream output in this priority order:
 | **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 12 enum subagents + attack-paths + defend |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
-| **investigate** | `/scope:investigate` | Splunk MCP, `./investigate/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./investigate/context.json` | scope-verify (standalone — no post-processing pipeline) |
+| **investigate** | `/scope:hunt` | Splunk MCP, `./hunt/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (standalone — no post-processing pipeline) |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
 | **scope-pipeline** | Read inline after artifacts | `$RUN_DIR/` raw artifacts (Phase 1), `$RUN_DIR/agent-log.jsonl` + `./data/` (Phase 2) | `./data/$PHASE/$RUN_ID.json`, `./data/index.json` (Phase 1); `./agent-logs/$PHASE/$RUN_ID.json`, `./agent-logs/index.json` (Phase 2) | — |
 
