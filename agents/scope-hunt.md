@@ -1163,7 +1163,10 @@ investigation_findings:
     query: "[full SPL query run, or null if skipped]"
     result_summary: "[what was found — event count, key events, key field values]"
     key_finding: "[single most important takeaway from this step, or null]"
+    hypothesis_verdict: confirms | refutes | inconclusive | not_tested
 ```
+
+`not_tested` is used when: the step was skipped, no active hypothesis was set, or the step's query did not directly test the hypothesis.
 
 This accumulator is the source for the final output summary. Do not re-query to build the summary — read from this structure.
 
