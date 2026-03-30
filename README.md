@@ -53,7 +53,7 @@ export AWS_PROFILE=your-profile
 /scope:exploit
 
 # Investigate a SOC alert
-/scope:investigate
+/scope:hunt
 ```
 
 The installer presents an interactive selector — pick your runtime (Claude Code, Gemini, Codex, or all) and install scope (local project or global).
@@ -123,7 +123,7 @@ SCOPE has two types of agents:
 **Skills** — run in your session, inherit your model:
 - `scope-audit` — orchestrator, dispatches subagents
 - `scope-exploit` — standalone red team playbook generator
-- `scope-investigate` — standalone SOC investigation assistant
+- `scope-hunt` — standalone SOC investigation assistant
 
 **Subagents** — dispatched with their own pinned model:
 - 12 enum agents — lightweight enumeration
