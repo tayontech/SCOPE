@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Threat Hunt
 status: in_progress
-stopped_at: Phase 41 plan 41-01 complete — config/hunt-techniques.json created; next is Phase 41 plan 41-02 (scope-hunt.md changes)
+stopped_at: Phase 41 complete — both plans done (41-01 config/hunt-techniques.json, 41-02 scope-hunt.md); next is Phase 42 (Documentation Update, INTG-03)
 last_updated: "2026-03-30"
-last_activity: 2026-03-30 — Phase 41 plan 41-01 complete (config/hunt-techniques.json: 13 patterns across 5 categories, all 9 fields, jq valid)
+last_activity: 2026-03-30 — Phase 41 plan 41-02 complete (scope-hunt.md: hunt_technique_patterns section, PURPOSE label step 3.5, HYPOTHESIS CHECK citations, UNABLE TO QUERY verdict, Recommended Response Actions for MODE=HUNT)
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 3
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 ## Current Position
 
-Phase: 41 (Hunt Techniques) — in progress
-Plan: 41-01 done; 41-02 pending
-Status: Phase 41 plan 1 complete; plan 41-02 (scope-hunt.md changes) next
-Last activity: 2026-03-30 — Plan 41-01 complete (config/hunt-techniques.json: 13 patterns across 5 categories, all 9 required fields, SPL index=cloudtrail, data_event_caveat on S3 pattern, jq valid)
+Phase: 42 (Documentation Update) — pending
+Plan: Phase 41 complete (both plans); Phase 42 plan 42-01 next
+Status: Phase 41 done — Hunt Techniques complete (HUNT-01, HUNT-02, HUNT-03); Phase 42 is documentation-only close phase
+Last activity: 2026-03-30 — Plan 41-02 complete (scope-hunt.md: hunt_technique_patterns section inserted, PURPOSE label step 3.5, HYPOTHESIS CHECK citations, UNABLE TO QUERY verdict distinct from INCONCLUSIVE, Recommended Response Actions for MODE=HUNT)
 
 ## Phase Summary
 
@@ -36,7 +36,7 @@ Last activity: 2026-03-30 — Plan 41-01 complete (config/hunt-techniques.json: 
 | 38 | Agent Rebrand | RBRD-01, RBRD-02, RBRD-03, RBRD-04 | Complete (2026-03-30) |
 | 39 | Session Integration | INTG-01, INTG-02 | Complete (2026-03-30) |
 | 40 | Hypothesis Engine | HYPO-01, HYPO-02, HYPO-03, HYPO-04 | Complete (2026-03-30) |
-| 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | In Progress (1/2 plans done) |
+| 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | Complete (2026-03-30) |
 | 42 | Documentation Update | INTG-03 | Pending |
 
 ## Performance Metrics
@@ -85,5 +85,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 41 plan 41-01 done — config/hunt-techniques.json created (13 patterns, 5 categories, all 9 fields, jq valid); next is Phase 41 plan 41-02 (scope-hunt.md changes)
+Stopped at: Phase 41 complete — all plans done; next is Phase 42 (Documentation Update — INTG-03)
 Resume file: None
