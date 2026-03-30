@@ -1462,6 +1462,25 @@ If the alert type does not match any reference pattern, use the Generic pattern.
 
 The narrative summary and event table are generated AFTER the analyst says "done" at the completion signal — not incrementally during the investigation. The `investigation_findings` accumulator (maintained throughout the session) is read at this point to construct both parts.
 
+### Hypothesis Verdict (if active_hypothesis was set)
+
+When a hypothesis was active during the investigation, display this block before the narrative summary. Omit entirely if no hypothesis was set (e.g., investigation mode where hypothesis engine was not reached).
+
+Determine the verdict from the `investigation_findings` accumulator:
+- **CONFIRMED** — at least one step confirmed the hypothesis and no step refuted it
+- **REFUTED** — at least one step directly refuted the hypothesis with specific evidence
+- **PARTIAL** — some steps confirmed and at least one refuted (mixed evidence)
+- **INCONCLUSIVE** — no steps confirmed or refuted the hypothesis (evidence neither supports nor contradicts)
+
+```
+HYPOTHESIS VERDICT: [CONFIRMED | REFUTED | INCONCLUSIVE | PARTIAL]
+  Hypothesis:          [active_hypothesis.name]
+  Evidence supporting: [step numbers where hypothesis_verdict=confirms — e.g., "Steps 1, 3"]
+  Evidence against:    [step numbers where hypothesis_verdict=refutes — e.g., "Step 4" or "None"]
+  Gaps:                [observable steps from active_hypothesis.observable_steps with no CloudTrail evidence found — or "None"]
+  Analyst assessment:  _______________________________________________
+```
+
 ### Part 1 — Narrative Summary
 
 ```markdown
