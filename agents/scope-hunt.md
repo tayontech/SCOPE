@@ -490,6 +490,14 @@ Read `./hunt/context.json`. If it exists and parses successfully, display the co
 **Step 2: Display MCP result and prompt for alert intake.**
 
 Display the MCP result (CONNECTED or MANUAL), the context summary, then prompt for alert intake per the `<alert_intake>` section.
+
+**Hunt mode note:** If MODE=HUNT and MCP_MODE=MANUAL, Splunk is not required. Proceed with the findings loaded in `<hunt_mode_intake>` — the agent can produce a hypothesis report from audit/exploit output alone. State this to the analyst:
+
+```
+
+    Splunk MCP not available. In hunt mode, I can produce a findings summary from the run directory without querying Splunk. To add Splunk validation, see config/mcp-setup.md.
+
+```
 </mcp_detection>
 
 <alert_intake>
