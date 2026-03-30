@@ -52,9 +52,9 @@ investigate/          Investigation artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard (dashboard.html)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js -- editor setup, generate-report.js -- dashboard builder)
-.scope/hooks/         Lifecycle hooks -- safety guard, SPL lint, schema validation, artifact check, agent logger
-.scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
-.scope/settings/      Committed hook settings templates for Claude Code and Gemini CLI
+config/hooks/         Lifecycle hooks -- safety guard, SPL lint, schema validation, artifact check, agent logger
+config/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
+config/settings/      Committed hook settings templates for Claude Code and Gemini CLI
 
 # Runtime output structure (gitignored):
 audit/<run-id>/           Audit run -- enum JSONs, results.json, findings.md
@@ -120,7 +120,7 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 ## Hooks
 
-**Claude Code and Gemini CLI:** Lifecycle hooks in `.scope/hooks/` enforce safety constraints at the tool level. See `.scope/settings/claude.settings.json` (Claude) or `.scope/settings/gemini.settings.json` (Gemini) for event wiring. The installer copies the appropriate template to `.claude/settings.json` or `.gemini/settings.json` during setup.
+**Claude Code and Gemini CLI:** Lifecycle hooks in `config/hooks/` enforce safety constraints at the tool level. See `config/settings/claude.settings.json` (Claude) or `config/settings/gemini.settings.json` (Gemini) for event wiring. The installer copies the appropriate template to `.claude/settings.json` or `.gemini/settings.json` during setup.
 
 **Codex:** No lifecycle hooks available. Safety constraints are enforced through this guidance only.
 
@@ -128,10 +128,10 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 ## Schema Enforcement
 
-Canonical JSON Schema files in `.scope/schemas/` define required fields for each phase's `results.json`:
-- `.scope/schemas/audit.schema.json` -- audit results
-- `.scope/schemas/defend.schema.json` -- defend results
-- `.scope/schemas/exploit.schema.json` -- exploit results
+Canonical JSON Schema files in `config/schemas/` define required fields for each phase's `results.json`:
+- `config/schemas/audit.schema.json` -- audit results
+- `config/schemas/defend.schema.json` -- defend results
+- `config/schemas/exploit.schema.json` -- exploit results
 
 **Claude Code / Gemini CLI:** The `scope-schema-validate.sh` hook validates every write to `results.json` or `dashboard/public/*.json` automatically.
 

@@ -66,9 +66,7 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 agents/               Core agents: audit orchestrator, defend, exploit, investigate
 agents/subagents/     12 enumeration agents, attack path reasoning, verification, data pipeline
 dashboard/            React + D3 interactive dashboard (self-contained HTML output)
-config/               Runtime reference data (cloudtrail-classes.json) + optional account config
-.scope/hooks/         Lifecycle hooks: safety guard, SPL lint, schema validation
-.scope/schemas/       JSON Schema definitions for structured output
+config/               Runtime reference data, lifecycle hooks, schemas, settings templates
 bin/                  Tooling: installer, report generator
 ```
 
@@ -151,8 +149,8 @@ Skills (audit, exploit, investigate) are not in this table — they inherit your
 |---|---|
 | [CLAUDE.md](https://github.com/tayontech/SCOPE/blob/main/CLAUDE.md) | Full technical reference: agents, hooks, data layer, error handling |
 | [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
-| [Hooks](https://github.com/tayontech/SCOPE/tree/main/.scope/hooks) | Safety and validation hook reference |
-| [Schemas](https://github.com/tayontech/SCOPE/tree/main/.scope/schemas) | JSON Schema definitions for audit, defend, exploit output |
+| [Hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hook reference |
+| [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, defend, exploit output |
 
 ## Community
 

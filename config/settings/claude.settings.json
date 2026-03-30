@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-safety-guard.sh"
+            "command": "config/hooks/scope-safety-guard.sh"
           }
         ]
       }
@@ -17,11 +17,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-spl-lint.sh"
+            "command": "config/hooks/scope-spl-lint.sh"
           },
           {
             "type": "command",
-            "command": ".scope/hooks/scope-schema-validate.sh"
+            "command": "config/hooks/scope-schema-validate.sh"
           }
         ]
       },
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-agent-logger.sh"
+            "command": "config/hooks/scope-agent-logger.sh"
           }
         ]
       }
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-artifact-check.sh"
+            "command": "config/hooks/scope-artifact-check.sh"
           }
         ]
       }

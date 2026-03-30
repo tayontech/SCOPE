@@ -63,8 +63,8 @@ investigate/          Investigation artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard (`dashboard.html`)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js — editor setup, generate-report.js — dashboard builder)
-.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, agent logger
-.scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
+config/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, agent logger
+config/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
 
 # Runtime output structure (gitignored):
 audit/<run-id>/           Audit run — enum JSONs, results.json, findings.md
@@ -75,9 +75,9 @@ investigate/<run-id>/     Investigation artifacts
 
 ## Hooks
 
-SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hooks are shared scripts in `.scope/hooks/` with platform-specific configuration installed from settings templates in `.scope/settings/`.
+SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hooks are shared scripts in `config/hooks/` with platform-specific configuration installed from settings templates in `config/settings/`.
 
-**Settings templates:** `.scope/settings/claude.settings.json` and `.scope/settings/gemini.settings.json` are the committed sources. Run `bin/install.js --local` (or `node bin/install.js`) to copy them to `.claude/settings.json` and `.gemini/settings.json` in your working directory.
+**Settings templates:** `config/settings/claude.settings.json` and `config/settings/gemini.settings.json` are the committed sources. Run `bin/install.js --local` (or `node bin/install.js`) to copy them to `.claude/settings.json` and `.gemini/settings.json` in your working directory.
 
 | Hook | Event | Purpose |
 |------|-------|---------|

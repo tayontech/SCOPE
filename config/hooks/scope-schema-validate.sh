@@ -1,10 +1,10 @@
 #!/bin/bash
 # SCOPE Schema Validation — PostToolUse / AfterTool hook
 # Runs after Write|Edit on results.json files and dashboard public JSON files.
-# Validates required fields using jq against the canonical schemas in .scope/schemas/.
+# Validates required fields using jq against the canonical schemas in config/schemas/.
 # Returns decision: "block" with reason if required fields are missing.
 #
-# Canonical JSON Schema files are in .scope/schemas/{audit,defend,exploit}.schema.json
+# Canonical JSON Schema files are in config/schemas/{audit,defend,exploit}.schema.json
 # and can be used with any JSON Schema validator (ajv, python jsonschema, etc.) for CI.
 # This hook does lightweight jq-based validation for real-time enforcement.
 
@@ -84,7 +84,7 @@ case "$FILE_PATH" in
       REASON=$(printf '  - %s\n' "${ERRORS[@]}")
       jq -n --arg reason "$REASON" --arg file "$FILE_PATH" '{
         decision: "block",
-        reason: ("SCOPE Module Envelope Validation FAILED (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: .scope/schemas/module-envelope.schema.json")
+        reason: ("SCOPE Module Envelope Validation FAILED (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: config/schemas/module-envelope.schema.json")
       }'
     fi
     exit 0
@@ -343,7 +343,7 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
   REASON=$(printf '  - %s\n' "${ERRORS[@]}")
   jq -n --arg reason "$REASON" --arg file "$FILE_PATH" --arg source "$SOURCE" '{
     decision: "block",
-    reason: ("SCOPE Schema Validation FAILED for " + $source + " results (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: .scope/schemas/" + $source + ".schema.json")
+    reason: ("SCOPE Schema Validation FAILED for " + $source + " results (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: config/schemas/" + $source + ".schema.json")
   }'
   exit 0
 fi
