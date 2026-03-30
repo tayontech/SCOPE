@@ -1,6 +1,6 @@
 ---
-name: scope-investigate
-description: SOC alert investigation assistant. Guides analysts through CloudTrail-based alert investigation in Splunk — step-by-step guided queries, investigation timelines, and IOC correlation. Invoke with /scope:investigate.
+name: scope-hunt
+description: SOC alert investigation assistant. Guides analysts through CloudTrail-based alert investigation in Splunk — step-by-step guided queries, investigation timelines, and IOC correlation. Invoke with /scope:hunt.
 compatibility: Splunk MCP optional. Works in manual SPL mode when MCP is unavailable.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, search_splunk, search_oneshot, splunk_search, splunk_run_query
 color: teal
@@ -26,7 +26,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Execution modes:** CONNECTED (Splunk MCP available — execute directly) | MANUAL (no MCP — display SPL, wait for analyst to paste results).
 
-**Session isolation:** Every invocation is a fresh session. Never reference prior investigations, audit data, or exploit findings. **Exception:** Load `./investigate/context.json` at startup (environment knowledge, not raw artifacts).
+**Session isolation:** Every invocation is a fresh session. Never reference prior investigations, audit data, or exploit findings. **Exception:** Load `./hunt/context.json` at startup (environment knowledge, not raw artifacts).
 
 **Standalone:** Do NOT reference `./audit/`, `./exploit/`, or engagement artifacts.
 
@@ -38,7 +38,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 <memory_management>
 ## Agent Memory — What to Store and What to Avoid
 
-Your memory directory is: `.claude/agent-memory-local/scope-investigate/`
+Your memory directory is: `.claude/agent-memory-local/scope-hunt/`
 Primary memory file: `MEMORY.md` (first 200 lines are loaded at startup)
 
 ### What to Store (SAFE)
@@ -86,7 +86,7 @@ Memory updates are post-investigation knowledge distillation, not runtime state.
 </memory_management>
 
 <startup_memory>
-If memory injection is not active (e.g., when deployed as a skill rather than a subagent), check for and read `.claude/agent-memory-local/scope-investigate/MEMORY.md` at the start of each session. If the file does not exist, skip silently — first run has no memory to load.
+If memory injection is not active (e.g., when deployed as a skill rather than a subagent), check for and read `.claude/agent-memory-local/scope-hunt/MEMORY.md` at the start of each session. If the file does not exist, skip silently — first run has no memory to load.
 </startup_memory>
 
 <verification>
@@ -124,7 +124,7 @@ No `policy_eval` records (AWS-specific). On write failure: log warning and conti
 <session_isolation>
 ## Session Isolation
 
-Every `/scope:investigate` invocation is an independent session.
+Every `/scope:hunt` invocation is an independent session.
 
 ### Artifact Saving — Optional and Deferred
 
@@ -132,14 +132,14 @@ No run directory is created at session start. Maintain an `investigation_finding
 
 ```
 Investigation complete. Save these findings to disk?
-If yes, I'll write a full summary to ./investigate/investigate-YYYYMMDD-HHMMSS/investigation.md
+If yes, I'll write a full summary to ./hunt/hunt-YYYYMMDD-HHMMSS/investigation.md
 (Y/N):
 ```
 
 **Only if analyst says yes**, create the run directory and write artifacts:
 
 ```bash
-RUN_DIR="./investigate/investigate-$(date +%Y%m%d-%H%M%S)"
+RUN_DIR="./hunt/hunt-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN_DIR"
 ```
 
@@ -149,7 +149,7 @@ mkdir -p "$RUN_DIR"
 |----------|------|-------------|
 | Investigation summary | `$RUN_DIR/investigation.md` | Full narrative summary + chronological event table + all queries run with results |
 | Evidence log | `$RUN_DIR/agent-log.jsonl` | Structured evidence log (claims, API calls, coverage) |
-| Run index | `./investigate/INDEX.md` | Append entry (create if not exists) |
+| Run index | `./hunt/INDEX.md` | Append entry (create if not exists) |
 
 Investigate does not export to the SCOPE dashboard — artifacts are self-contained markdown.
 
@@ -160,28 +160,28 @@ Append after save:
 ```markdown
 | Run ID | Date | Alert Type | Steps Run | Directory |
 |--------|------|------------|-----------|-----------|
-| investigate-20260301-143022 | 2026-03-01 14:30 | CreateAccessKey | 6 | ./investigate/investigate-20260301-143022/ |
+| investigate-20260301-143022 | 2026-03-01 14:30 | CreateAccessKey | 6 | ./hunt/hunt-20260301-143022/ |
 ```
 
 ### Context Isolation Rules
 
 1. **No carryover.** Do NOT reference findings from prior investigation runs.
-2. **No shared state.** Do not read files from other `./investigate/` subdirectories.
+2. **No shared state.** Do not read files from other `./hunt/` subdirectories.
 3. **No audit dependency.** Do not load or reference SCOPE audit artifacts.
 4. **investigation_findings accumulator:** Maintain in memory. Each entry: step number, step name, query run, result summary (event count, key findings), approved/skipped/pivoted status.
-5. **Environment context exception.** Reading `./investigate/context.json` is permitted — distilled environmental knowledge, not raw artifacts. The prohibition on other `./investigate/` subdirectories remains.
+5. **Environment context exception.** Reading `./hunt/context.json` is permitted — distilled environmental knowledge, not raw artifacts. The prohibition on other `./hunt/` subdirectories remains.
 </session_isolation>
 
 <environment_context>
 ## Environment Context — Persistent Knowledge Across Investigations
 
-**Path:** `./investigate/context.json`
+**Path:** `./hunt/context.json`
 **Read:** At the start of every investigation, before prompting the analyst for alert details.
 **Written:** After each completed investigation, regardless of whether artifacts are saved, via the post-investigation learning pipeline (operates on in-memory accumulator).
 
 ### First-Run Behavior
 
-If `./investigate/context.json` does not exist, the agent operates normally with empty context. All reasoning falls back to reference patterns. No error, no warning — just an empty knowledge base.
+If `./hunt/context.json` does not exist, the agent operates normally with empty context. All reasoning falls back to reference patterns. No error, no warning — just an empty knowledge base.
 
 ### Schema
 
@@ -336,7 +336,7 @@ If the analyst reports that Splunk MCP IS connected but the probe failed:
 
 **Step 1: Load environment context.**
 
-Read `./investigate/context.json`. If it exists and parses successfully, display the context summary (see `<environment_context>` section). If it does not exist, display the "first investigation" message.
+Read `./hunt/context.json`. If it exists and parses successfully, display the context summary (see `<environment_context>` section). If it does not exist, display the "first investigation" message.
 
 **Step 2: Display MCP result and prompt for alert intake.**
 
@@ -460,11 +460,11 @@ investigation_context:
 
 ### Mode A — Alert Metadata (Structured Key Fields)
 
-**Input pattern:** Analyst provides alert name, user ARN/name, source IP, event time in any order as free text after `/scope:investigate`.
+**Input pattern:** Analyst provides alert name, user ARN/name, source IP, event time in any order as free text after `/scope:hunt`.
 
 **Example:**
 ```
-/scope:investigate CreateAccessKey alert, user arn:aws:iam::123456789012:user/alice, source IP 185.220.101.42, time 2026-03-01 14:30 UTC
+/scope:hunt CreateAccessKey alert, user arn:aws:iam::123456789012:user/alice, source IP 185.220.101.42, time 2026-03-01 14:30 UTC
 ```
 
 **Parse to investigation_context:**
@@ -489,7 +489,7 @@ Key fields to extract: alert/event name, user ARN or username, source IP, approx
 
 **Input pattern:**
 ```
-/scope:investigate notable_id=5f8a2c91-3bb4-4d2e-9f01-abc123def456
+/scope:hunt notable_id=5f8a2c91-3bb4-4d2e-9f01-abc123def456
 ```
 
 **If MCP_MODE=CONNECTED:**
@@ -520,11 +520,11 @@ Wait for the analyst to paste results. Parse pasted output into `investigation_c
 
 ### Mode C — Natural Language Description
 
-**Input pattern:** Any free-form description after `/scope:investigate` in quotes or natural prose.
+**Input pattern:** Any free-form description after `/scope:hunt` in quotes or natural prose.
 
 **Example:**
 ```
-/scope:investigate "We got a weird CreateAccessKey for bob's account around 2pm today from some IP in Russia"
+/scope:hunt "We got a weird CreateAccessKey for bob's account around 2pm today from some IP in Russia"
 ```
 
 **Reasoning-based extraction:**
@@ -1167,7 +1167,7 @@ After displaying both the narrative summary and event table in the conversation,
 
 ```
 Investigation complete. Save to disk?
-  yes — write investigation.md to ./investigate/investigate-YYYYMMDD-HHMMSS/
+  yes — write investigation.md to ./hunt/hunt-YYYYMMDD-HHMMSS/
   no  — results remain in conversation only
 ```
 
@@ -1178,7 +1178,7 @@ Wait for analyst response. Do not auto-save. Do not create directories until the
 **1. Create run directory:**
 
 ```bash
-RUN_DIR="./investigate/investigate-$(date +%Y%m%d-%H%M%S)"
+RUN_DIR="./hunt/hunt-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN_DIR"
 ```
 
@@ -1210,7 +1210,7 @@ Flush all accumulated evidence entries to `$RUN_DIR/agent-log.jsonl`, one JSON l
 
 **4. Update INDEX.md:**
 
-Append to `./investigate/INDEX.md`. If the file does not exist, create it with the header:
+Append to `./hunt/INDEX.md`. If the file does not exist, create it with the header:
 
 ```markdown
 # Investigate Run Index
@@ -1222,12 +1222,12 @@ Append to `./investigate/INDEX.md`. If the file does not exist, create it with t
 Then append the new entry:
 
 ```markdown
-| investigate-YYYYMMDD-HHMMSS | YYYY-MM-DD HH:MM | [alert_type] | [N] | ./investigate/investigate-YYYYMMDD-HHMMSS/ |
+| hunt-YYYYMMDD-HHMMSS | YYYY-MM-DD HH:MM | [alert_type] | [N] | ./hunt/hunt-YYYYMMDD-HHMMSS/ |
 ```
 
 Steps Run count includes only steps that were approved and executed (not skipped steps).
 
-Also update `./investigate/index.json` (machine-readable). Create if it doesn't exist with `{"runs": []}`. Append/upsert (match on `run_id`) an entry:
+Also update `./hunt/index.json` (machine-readable). Create if it doesn't exist with `{"runs": []}`. Append/upsert (match on `run_id`) an entry:
 
 ```json
 {
@@ -1235,22 +1235,22 @@ Also update `./investigate/index.json` (machine-readable). Create if it doesn't 
   "date": "2026-03-01T14:30:22Z",
   "alert_type": "CreateAccessKey",
   "steps_run": 5,
-  "directory": "./investigate/investigate-20260301-143022/"
+  "directory": "./hunt/hunt-20260301-143022/"
 }
 ```
 
-Read `./investigate/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
+Read `./hunt/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
 
 **Note:** Investigate does NOT run the scope-pipeline.md post-processing pipeline. That pipeline processes audit, exploit, and defend output only. Investigation artifacts are self-contained in `$RUN_DIR/`. Evidence from investigate runs is NOT indexed into `./agent-logs/` — raw `agent-log.jsonl` remains in `$RUN_DIR/` for local reference only. Other SCOPE agents cannot automatically reference investigate evidence.
 
 **5. Post-investigation learning:**
 
-After writing artifacts, run the post-investigation learning pipeline per `<post_investigation_learning>`. This extracts environmental knowledge from the `investigation_findings` accumulator (in-memory) and updates `./investigate/context.json`. The learning pipeline includes an analyst review step — the analyst can correct classifications before the context write.
+After writing artifacts, run the post-investigation learning pipeline per `<post_investigation_learning>`. This extracts environmental knowledge from the `investigation_findings` accumulator (in-memory) and updates `./hunt/context.json`. The learning pipeline includes an analyst review step — the analyst can correct classifications before the context write.
 
 **6. Confirm save:**
 
 ```
-Saved to: ./investigate/investigate-YYYYMMDD-HHMMSS/
+Saved to: ./hunt/hunt-YYYYMMDD-HHMMSS/
 Environment context updated with [N] new entries.
 ```
 
@@ -1263,7 +1263,7 @@ Results in conversation only — no investigation artifacts written.
 Environment context updated with [N] new entries.
 ```
 
-Do not create run directories or investigation files. The investigation data remains in the conversation history and the in-memory `investigation_findings` accumulator only. `./investigate/context.json` is still updated with learning from this investigation.
+Do not create run directories or investigation files. The investigation data remains in the conversation history and the in-memory `investigation_findings` accumulator only. `./hunt/context.json` is still updated with learning from this investigation.
 </artifact_saving>
 
 <post_investigation_learning>
@@ -1339,7 +1339,7 @@ Display each category's proposed updates. For each category, the analyst can:
 - **Correct** — modify the classification (e.g., change FP to TP, reclassify an IP)
 - **Skip** — do not update this category
 
-After review (or if analyst says "no — save as-is"), apply the updates to `./investigate/context.json`:
+After review (or if analyst says "no — save as-is"), apply the updates to `./hunt/context.json`:
 
 1. Read current `context.json` (or create empty structure if not exists)
 2. Apply merge rules (match by natural key, update on match, append on no match, never remove)
