@@ -828,33 +828,48 @@ function main() {
 }
 
 /**
- * Copy hook settings.json for an editor if installing locally.
- * Only copies the project-level settings file — global hooks are not deployed.
+ * Copy hook scripts and settings.json for an editor.
+ * Scripts are copied from config/hooks/ to the platform-native hooks directory
+ * (.claude/hooks/ or .gemini/hooks/), and settings are written with absolute
+ * paths so hooks resolve correctly regardless of CWD (Stop hooks fire from ~).
  */
 function installHooks(editor, scope) {
-  if (scope !== 'local') return;
   if (editor === 'codex') return; // Codex does not support hooks
 
   const settingsMap = {
-    claude: { src: 'config/settings/claude.settings.json', dest: '.claude/settings.json' },
-    gemini: { src: 'config/settings/gemini.settings.json', dest: '.gemini/settings.json' },
+    claude: { src: 'config/settings/claude.settings.json', dest: '.claude/settings.json', hooksDir: '.claude/hooks' },
+    gemini: { src: 'config/settings/gemini.settings.json', dest: '.gemini/settings.json', hooksDir: '.gemini/hooks' },
   };
-  const srcSettings = path.join(__dirname, '..', settingsMap[editor].src);
+  const entry = settingsMap[editor];
+  const srcSettings = path.join(__dirname, '..', entry.src);
   if (!fs.existsSync(srcSettings)) return;
 
-  const destDir = path.join(process.cwd(), path.dirname(settingsMap[editor].dest));
-  const destFile = path.join(destDir, 'settings.json');
+  const base = scope === 'global' ? os.homedir() : process.cwd();
 
-  // Read template, replace relative hook paths with absolute paths.
-  // Stop hooks fire from ~ (home dir), so relative paths fail.
-  const projectRoot = process.cwd();
+  // Step 1: Copy hook scripts to platform-native hooks directory
+  const srcHooksDir = path.join(__dirname, '..', 'config', 'hooks');
+  const destHooksDir = path.join(base, entry.hooksDir);
+  if (fs.existsSync(srcHooksDir)) {
+    fs.mkdirSync(destHooksDir, { recursive: true });
+    const hookFiles = fs.readdirSync(srcHooksDir).filter(f => f.endsWith('.sh'));
+    for (const file of hookFiles) {
+      const src = path.join(srcHooksDir, file);
+      const dest = path.join(destHooksDir, file);
+      fs.copyFileSync(src, dest);
+      fs.chmodSync(dest, 0o755);
+    }
+    console.log(`  Installed ${hookFiles.length} hook scripts -> ${entry.hooksDir}/`);
+  }
+
+  // Step 2: Write settings with absolute hook paths
+  const destDir = path.join(base, path.dirname(entry.dest));
+  const destFile = path.join(destDir, 'settings.json');
   let content = fs.readFileSync(srcSettings, 'utf8');
-  content = content.replace(/\.scope\/hooks\//g, path.join(projectRoot, '.scope', 'hooks') + '/');
+  content = content.replace(/__HOOKS_DIR__/g, path.join(base, entry.hooksDir));
 
   fs.mkdirSync(destDir, { recursive: true });
   fs.writeFileSync(destFile, content, 'utf8');
-  const action = fs.existsSync(destFile) ? 'Updated' : 'Installed';
-  console.log(`  ${action} hook settings -> ${settingsMap[editor].dest}`);
+  console.log(`  Updated hook settings -> ${entry.dest}`);
 }
 
 /**
@@ -866,7 +881,7 @@ function checkLegacyGeminiSkills(scope) {
     ? path.join(os.homedir(), '.gemini', 'skills')
     : path.join(process.cwd(), '.gemini', 'skills');
 
-  const scopeSkills = ['scope-audit', 'scope-exploit', 'scope-investigate'];
+  const scopeSkills = ['scope-audit', 'scope-exploit', 'scope-investigate', 'scope-hunt'];
   const stale = scopeSkills.filter(s => fs.existsSync(path.join(legacyBase, s)));
 
   if (stale.length > 0) {

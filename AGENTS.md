@@ -120,7 +120,7 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 ## Hooks
 
-**Claude Code and Gemini CLI:** Lifecycle hooks in `config/hooks/` enforce safety constraints at the tool level. See `config/settings/claude.settings.json` (Claude) or `config/settings/gemini.settings.json` (Gemini) for event wiring. The installer copies the appropriate template to `.claude/settings.json` or `.gemini/settings.json` during setup.
+**Claude Code and Gemini CLI:** Lifecycle hooks enforce safety constraints at the tool level. Source scripts are in `config/hooks/` and settings templates in `config/settings/`. The installer copies hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json` with absolute paths.
 
 **Codex:** No lifecycle hooks available. Safety constraints are enforced through this guidance only.
 
