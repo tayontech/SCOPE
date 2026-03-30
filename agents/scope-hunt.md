@@ -1596,7 +1596,9 @@ mkdir -p "$RUN_DIR"
 
 **2. Write investigation.md:**
 
-Write `$RUN_DIR/investigation.md` containing three sections:
+Write `$RUN_DIR/investigation.md` containing up to four sections:
+
+Section 0 (if active_hypothesis was set): The hypothesis verdict block (from output_format Hypothesis Verdict — reproduced exactly as displayed)
 
 Section 1: The full narrative summary (Part 1 from output_format — reproduced exactly as displayed)
 
