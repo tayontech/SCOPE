@@ -1061,6 +1061,13 @@ Briefly note what was found and how it affects the investigation direction:
 - "No [expected event] found — this is inconsistent with [Y]. Let's check [Z]."
 - "Found [N] events. Key finding: [most significant result]."
 
+When `active_hypothesis` is set, add a hypothesis verdict line after the result note:
+- **Confirms hypothesis:** "This confirms [specific hypothesis step/signal] — [eventName] found at [time] from [actor]."
+- **Refutes hypothesis:** "This refutes [specific hypothesis step] — [eventName] is absent where we expected it. Consider: [alternative explanation]."
+- **Inconclusive:** "Inconclusive for the hypothesis — [eventName] is present but actor/time/resource does not match. Continuing investigation."
+
+Record the verdict in the `investigation_findings` accumulator for this step.
+
 **7. Propose Next Step**
 "Next: [Step N+1 name] — [one-line reason why]"
 Then begin the next iteration of the loop.
