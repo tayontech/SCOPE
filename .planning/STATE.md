@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Threat Hunt
 status: in_progress
-stopped_at: Phase 40 plan 40-01 complete — hypothesis_engine section inserted, ready for 40-02
+stopped_at: Phase 40 complete — both plans done; next is Phase 41 (Hunt Techniques)
 last_updated: "2026-03-30"
-last_activity: 2026-03-30 — Phase 40 plan 40-01 complete (<hypothesis_engine> section inserted; HYPO-01 through HYPO-04 implemented)
+last_activity: 2026-03-30 — Phase 40 plan 40-02 complete (hypothesis threaded through reasoning_framework, investigation_loop, output_format, artifact_saving)
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 ## Current Position
 
-Phase: 40 (Hypothesis Engine) — plan 40-01 complete
-Plan: 40-01 done; 40-02 pending
-Status: In progress
-Last activity: 2026-03-30 — Plan 40-01 complete (<hypothesis_engine> section inserted; all 9 verification checks passed)
+Phase: 40 (Hypothesis Engine) — complete
+Plan: 40-01 done; 40-02 done; Phase 41 pending
+Status: Phase 40 complete; Phase 41 (Hunt Techniques) next
+Last activity: 2026-03-30 — Plan 40-02 complete (hypothesis threaded through reasoning_framework, investigation_loop, output_format, artifact_saving; all 10 verification checks passed)
 
 ## Phase Summary
 
@@ -35,7 +35,7 @@ Last activity: 2026-03-30 — Plan 40-01 complete (<hypothesis_engine> section i
 |-------|------|--------------|--------|
 | 38 | Agent Rebrand | RBRD-01, RBRD-02, RBRD-03, RBRD-04 | Complete (2026-03-30) |
 | 39 | Session Integration | INTG-01, INTG-02 | Complete (2026-03-30) |
-| 40 | Hypothesis Engine | HYPO-01, HYPO-02, HYPO-03, HYPO-04 | In progress (plan 40-01 done) |
+| 40 | Hypothesis Engine | HYPO-01, HYPO-02, HYPO-03, HYPO-04 | Complete (2026-03-30) |
 | 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | Pending |
 | 42 | Documentation Update | INTG-03 | Pending |
 
@@ -52,7 +52,7 @@ Last activity: 2026-03-30 — Plan 40-01 complete (<hypothesis_engine> section i
 |-------|-------|-------|----------|
 | 38 | 1/1 | ~20min | ~20min |
 | 39 | 1/1 | ~20min | ~20min |
-| 40 | 1/2 | ~15min | ~15min |
+| 40 | 2/2 | ~30min | ~15min |
 | 41 | - | - | - |
 | 42 | - | - | - |
 
@@ -85,5 +85,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 40 plan 40-01 complete — <hypothesis_engine> section inserted (HYPO-01 through HYPO-04); all 9 verification checks passed; next is plan 40-02
+Stopped at: Phase 40 complete — plan 40-02 done; hypothesis threaded through reasoning_framework, investigation_loop, output_format, artifact_saving; next is Phase 41 (Hunt Techniques)
 Resume file: None
