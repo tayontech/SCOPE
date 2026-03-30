@@ -75,9 +75,9 @@ investigate/<run-id>/     Investigation artifacts
 
 ## Hooks
 
-SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hooks are shared scripts in `config/hooks/` with platform-specific configuration installed from settings templates in `config/settings/`.
+SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hook source scripts are in `config/hooks/` and settings templates in `config/settings/`.
 
-**Settings templates:** `config/settings/claude.settings.json` and `config/settings/gemini.settings.json` are the committed sources. Run `bin/install.js --local` (or `node bin/install.js`) to copy them to `.claude/settings.json` and `.gemini/settings.json` in your working directory.
+**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
 
 | Hook | Event | Purpose |
 |------|-------|---------|

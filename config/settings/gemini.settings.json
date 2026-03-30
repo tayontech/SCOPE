@@ -27,11 +27,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "config/hooks/scope-safety-guard.sh"
+            "command": "__HOOKS_DIR__/scope-safety-guard.sh"
           },
           {
             "type": "command",
-            "command": "config/hooks/scope-aws-output-inject.sh"
+            "command": "__HOOKS_DIR__/scope-aws-output-inject.sh"
           }
         ]
       }
@@ -42,11 +42,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "config/hooks/scope-spl-lint.sh"
+            "command": "__HOOKS_DIR__/scope-spl-lint.sh"
           },
           {
             "type": "command",
-            "command": "config/hooks/scope-schema-validate.sh"
+            "command": "__HOOKS_DIR__/scope-schema-validate.sh"
           }
         ]
       },
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "config/hooks/scope-agent-logger.sh"
+            "command": "__HOOKS_DIR__/scope-agent-logger.sh"
           }
         ]
       }
@@ -65,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "config/hooks/scope-artifact-check.sh"
+            "command": "__HOOKS_DIR__/scope-artifact-check.sh"
           }
         ]
       }
