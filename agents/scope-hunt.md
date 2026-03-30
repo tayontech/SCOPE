@@ -160,7 +160,7 @@ Append after save:
 ```markdown
 | Run ID | Date | Alert Type | Steps Run | Directory |
 |--------|------|------------|-----------|-----------|
-| investigate-20260301-143022 | 2026-03-01 14:30 | CreateAccessKey | 6 | ./hunt/hunt-20260301-143022/ |
+| hunt-20260301-143022 | 2026-03-01 14:30 | CreateAccessKey | 6 | ./hunt/hunt-20260301-143022/ |
 ```
 
 ### Context Isolation Rules

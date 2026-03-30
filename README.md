@@ -9,7 +9,7 @@
 
 Most AWS security assessments are manual, fragmented, and slow. Enumeration scripts dump raw output that someone has to stitch together. Findings live in spreadsheets. Attack paths exist only in the assessor's head. Defensive recommendations are generic and disconnected from what was actually found.
 
-**SCOPE changes that.** It's an agentic AI framework that runs the full purple team loop: enumerate AWS resources, reason about attack paths, generate exploit playbooks, produce targeted defensive controls, and investigate alerts.
+**SCOPE changes that.** It's an agentic AI framework that runs the full purple team loop: enumerate AWS resources, reason about attack paths, generate exploit playbooks, produce targeted defensive controls, and hunt threats.
 
 ## How It Works
 
@@ -63,7 +63,7 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 ## Architecture
 
 ```
-agents/               Core agents: audit orchestrator, defend, exploit, investigate
+agents/               Core agents: audit orchestrator, defend, exploit, hunt
 agents/subagents/     12 enumeration agents, attack path reasoning, verification, data pipeline
 dashboard/            React + D3 interactive dashboard (self-contained HTML output)
 config/               Runtime reference data, lifecycle hooks, schemas, settings templates
@@ -130,7 +130,7 @@ SCOPE has two types of agents:
 - `scope-attack-paths` — security reasoning over combined findings
 - `scope-defend` — defensive controls generation
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Exploit and investigate always use whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Exploit and hunt always use whatever model your session is running.
 
 ### Model Routing
 
@@ -141,7 +141,7 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 | Enum subagents (12) | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
 | Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
-Skills (audit, exploit, investigate) are not in this table — they inherit your session model.
+Skills (audit, exploit, hunt) are not in this table — they inherit your session model.
 
 ## Documentation
 

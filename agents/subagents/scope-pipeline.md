@@ -962,7 +962,7 @@ The output file `./agent-logs/<phase>/<run-id>.json` contains the validated, str
 
 When invoked, the calling agent provides two values:
 
-- **PHASE**: one of `audit`, `defend`, `exploit` (investigate does not call this middleware — it writes agent-log.jsonl directly)
+- **PHASE**: one of `audit`, `defend`, `exploit` (hunt does not call this middleware — it writes agent-log.jsonl directly)
 - **RUN_DIR**: path to the run directory containing raw artifacts
 
 ### Dispatch

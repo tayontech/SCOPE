@@ -71,7 +71,7 @@ The operator reviews the final combined output (audit findings + remediation pla
 <project_context>
 ## SCOPE Project Context
 
-SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → investigate.
+SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → hunt.
 
 **Credential model:** This agent does NOT make AWS API calls. It reads audit output files and writes remediation artifacts. No credential checks are needed. SCOPE inherits credentials from the shell environment for agents that do make API calls (audit, exploit).
 

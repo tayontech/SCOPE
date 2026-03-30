@@ -13,7 +13,7 @@ Apply the full verification protocol to all technical claims before they reach t
 - **audit**: shared preamble + `<domain-aws>` + (if SPL present) `<domain-splunk>`
 - **defend**: shared preamble + `<domain-aws>` + `<domain-splunk>`
 - **exploit**: shared preamble + `<domain-aws>`
-- **investigate**: shared preamble + `<domain-splunk>` (no domain-aws)
+- **hunt**: shared preamble + `<domain-splunk>` (no domain-aws)
 </role>
 
 <claim_ledger>

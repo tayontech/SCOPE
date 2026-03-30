@@ -124,11 +124,11 @@ Failures are non-blocking — each step logs warnings but never stops the source
 `scope-verify` is read inline during source agent execution. The caller specifies which XML domain sections to activate:
 
 ```
-  Source Agent (audit / defend / exploit / investigate)
+  Source Agent (audit / defend / exploit / hunt)
        │
        │  inline read with domain spec
        │  e.g., audit: domain-core + domain-aws
-       │         investigate: domain-core + domain-splunk
+       │         hunt: domain-core + domain-splunk
        ▼
   ┌──────────────────────────┐
   │       scope-verify       │
@@ -220,7 +220,7 @@ Downstream agents consume upstream output in this priority order:
 | **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 12 enum subagents + attack-paths + defend |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
-| **investigate** | `/scope:hunt` | Splunk MCP, `./hunt/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (standalone — no post-processing pipeline) |
+| **hunt** | `/scope:hunt` | Splunk MCP, `./hunt/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (standalone — no post-processing pipeline) |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
 | **scope-pipeline** | Read inline after artifacts | `$RUN_DIR/` raw artifacts (Phase 1), `$RUN_DIR/agent-log.jsonl` + `./data/` (Phase 2) | `./data/$PHASE/$RUN_ID.json`, `./data/index.json` (Phase 1); `./agent-logs/$PHASE/$RUN_ID.json`, `./agent-logs/index.json` (Phase 2) | — |
 
