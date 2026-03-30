@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Threat Hunt
 status: in_progress
-stopped_at: Phase 38 complete — ready to begin Phase 39
+stopped_at: Phase 39 plan 39-01 complete — ready for Phase 40
 last_updated: "2026-03-30"
-last_activity: 2026-03-30 — Phase 38 plan 38-01 complete
+last_activity: 2026-03-30 — Phase 39 plan 39-01 complete (entry_point_detection + hunt_mode_intake sections added to scope-hunt.md)
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  total_plans: 2
+  completed_plans: 2
 ---
 
 # Project State
@@ -20,21 +20,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Every agent, reference, and cross-platform config must be correct and tested — a single broken reference or wrong invocation syntax means an operator's security workflow silently fails.
-**Current focus:** v1.9 Threat Hunt — Phase 38 complete, beginning Phase 39
+**Current focus:** v1.9 Threat Hunt — Phase 39 complete, beginning Phase 40
 
 ## Current Position
 
-Phase: 39 (Session Integration) — not started
+Phase: 40 (Hypothesis Engine) — not started
 Plan: —
-Status: Phase 38 complete
-Last activity: 2026-03-30 — Plan 38-01 complete (scope-investigate → scope-hunt rename, 12 tasks, zero old references)
+Status: Phase 39 complete
+Last activity: 2026-03-30 — Plan 39-01 complete (entry_point_detection + hunt_mode_intake sections added to scope-hunt.md)
 
 ## Phase Summary
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
 | 38 | Agent Rebrand | RBRD-01, RBRD-02, RBRD-03, RBRD-04 | Complete (2026-03-30) |
-| 39 | Session Integration | INTG-01, INTG-02 | Pending |
+| 39 | Session Integration | INTG-01, INTG-02 | Complete (2026-03-30) |
 | 40 | Hypothesis Engine | HYPO-01, HYPO-02, HYPO-03, HYPO-04 | Pending |
 | 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | Pending |
 | 42 | Documentation Update | INTG-03 | Pending |
@@ -42,16 +42,16 @@ Last activity: 2026-03-30 — Plan 38-01 complete (scope-investigate → scope-h
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0 (v1.9)
-- Average duration: unknown (v1.8 avg was ~15min)
-- Total execution time: 0 hours
+- Total plans completed: 2 (v1.9)
+- Average duration: ~20min (v1.9 so far)
+- Total execution time: ~40min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 38 | 1/1 | ~20min | ~20min |
-| 39 | - | - | - |
+| 39 | 1/1 | ~20min | ~20min |
 | 40 | - | - | - |
 | 41 | - | - | - |
 | 42 | - | - | - |
@@ -85,5 +85,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 38 plan 38-01 complete — all 12 tasks done, zero old references
+Stopped at: Phase 39 plan 39-01 complete — entry_point_detection and hunt_mode_intake sections added; all 5 tasks verified
 Resume file: None
