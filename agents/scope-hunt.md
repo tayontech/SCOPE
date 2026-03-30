@@ -1171,6 +1171,8 @@ The agent selects investigation steps autonomously based on a priority hierarchy
 
 At each step, the agent evaluates these priorities in order. The highest-priority match determines the next step:
 
+0. **Hypothesis test** — If `active_hypothesis` is set, the highest-priority next step is the one that most directly tests the active hypothesis. Evaluate which question in the active hypothesis is most unanswered and select accordingly. Priorities 1-5 apply when no active hypothesis exists or when all hypothesis-critical CloudTrail signals have been checked.
+
 1. **IOC match** — An entity in the alert (IP, ARN, user agent) matches a known IOC from `context.json`. Immediately confirm or refute the IOC match.
 2. **Baseline deviation** — A known principal (from `context.json`) is acting outside their recorded baseline (unusual source IP, unusual actions, unusual hours, unusual region). Investigate the deviation.
 3. **Novel entity** — An entity in the alert (IP, user, account) has no match in `context.json`. Establish whether it is truly novel or simply not yet recorded.
