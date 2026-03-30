@@ -1241,8 +1241,8 @@ Each entry in `./agent-logs/index.json` `runs` array:
     defend-20260301-160000.json                 # One file per defend run
   exploit/
     exploit-20260301-170000-user-alice.json     # One file per exploit run
-  investigate/
-    investigate-20260301-180000.json            # One file per investigate run
+  hunt/
+    hunt-20260301-180000.json            # One file per hunt run
 ```
 
 ### Data Hierarchy for Downstream Agents
