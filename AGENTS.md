@@ -3,7 +3,7 @@
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) -- AI agent set for purple team security operations against AWS accounts: resource audit -> exploit playbook generation -> defensive controls with SCPs and SPL detections -> SOC alert investigation.
 
-The audit agent is an orchestrator that dispatches enumeration subagents in parallel. Standalone agents (exploit, investigate) reference subagents at `agents/subagents/` for verification and pipeline.
+The audit agent is an orchestrator that dispatches enumeration subagents in parallel. Standalone agents (exploit, hunt) reference subagents at `agents/subagents/` for verification and pipeline.
 
 ## Agents
 
@@ -11,7 +11,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 agents/scope-audit.md       AWS audit orchestrator — dispatches enum subagents in parallel
 agents/scope-defend.md      Defensive controls generation — dispatched by orchestrator or invoked directly
 agents/scope-exploit.md     Privilege escalation playbooks
-agents/scope-investigate.md SOC alert investigation
+agents/scope-hunt.md SOC alert investigation
 ```
 
 **Subagents** (`agents/subagents/` -- dispatched by orchestrator or read inline):
@@ -48,7 +48,7 @@ agents/               Agent .md files -- source format for all editors (flat, on
 agents/subagents/     Dispatched subagents and inline-read middleware (enum, attack-paths, verify, pipeline)
 data/                 Normalized JSON output (runtime-generated, gitignored)
 agent-logs/           Agent activity logs (runtime-generated, gitignored)
-investigate/          Investigation artifacts (runtime-generated, gitignored)
+hunt/          Hunt artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard (dashboard.html)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js -- editor setup, generate-report.js -- dashboard builder)
@@ -60,7 +60,7 @@ config/settings/      Committed hook settings templates for Claude Code and Gemi
 audit/<run-id>/           Audit run -- enum JSONs, results.json, findings.md
 audit/<run-id>/defend/    Defend output nested under its parent audit run
 exploit/<run-id>/         Exploit run -- playbooks, results.json
-investigate/<run-id>/     Investigation artifacts
+hunt/<run-id>/     Hunt artifacts
 ```
 
 ## Skills
@@ -93,7 +93,7 @@ node bin/install.js --codex --local   # deploys to .agents/skills/ + .codex/agen
 
 ## Context Isolation (Claude Code Only)
 
-SCOPE entry-point skills (`scope-audit`, `scope-investigate`) use `context: fork` in their Claude Code skill frontmatter. When an operator invokes `/scope:audit` or `/scope:investigate`, Claude Code runs the skill in a forked subagent context: the skill content becomes the task, the forked agent gets its own isolated context window, and results summarize back to the main conversation cleanly.
+SCOPE entry-point skills (`scope-audit`, `scope-hunt`) use `context: fork` in their Claude Code skill frontmatter. When an operator invokes `/scope:audit` or `/scope:hunt`, Claude Code runs the skill in a forked subagent context: the skill content becomes the task, the forked agent gets its own isolated context window, and results summarize back to the main conversation cleanly.
 
 **Why it exists:**
 - Verbose AWS enumeration output and Splunk query result sets stay out of the main conversation window
@@ -159,7 +159,7 @@ edge_type must be exactly one of: priv_esc, trust, data_access, network, service
 |---------|-------------|
 | `$scope-audit <target>` | Enumerate AWS resources -- accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services). Auto-chains defend after audit completes. |
 | `$scope-exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `$scope-investigate` | SOC alert investigation via Splunk -- guided queries, timeline building, IOC correlation |
+| `$scope-hunt` | SOC alert investigation via Splunk -- guided queries, timeline building, IOC correlation |
 | `$scope-help` | List available commands, show usage examples |
 
 Gemini CLI operators: describe the task naturally and the model will activate the appropriate skill. The `$scope-*` prefixes above correspond to skill names in `.agents/skills/`.
@@ -205,7 +205,7 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## Agent Isolation
 
-scope-investigate is standalone -- does not read audit/exploit/defend output. All other agents share data through the agent-logs/data layer.
+scope-hunt is standalone -- does not read audit/exploit/defend output. All other agents share data through the agent-logs/data layer.
 
 ## Configuration Files
 
