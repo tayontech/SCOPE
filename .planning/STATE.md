@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Threat Hunt
 status: in_progress
-stopped_at: Phase 41 complete — both plans done (41-01 config/hunt-techniques.json, 41-02 scope-hunt.md); next is Phase 42 (Documentation Update, INTG-03)
+stopped_at: Phase 42 complete — plan 42-01 done (CLAUDE.md, AGENTS.md, ARCHITECTURE.md dual-mode isolation updates); v1.9 Threat Hunt milestone complete
 last_updated: "2026-03-30"
-last_activity: 2026-03-30 — Phase 41 plan 41-02 complete (scope-hunt.md: hunt_technique_patterns section, PURPOSE label step 3.5, HYPOTHESIS CHECK citations, UNABLE TO QUERY verdict, Recommended Response Actions for MODE=HUNT)
+last_activity: 2026-03-30 — Phase 42 plan 42-01 complete (CLAUDE.md/AGENTS.md agent isolation + slash commands dual-mode; ARCHITECTURE.md flow diagram, post-processing prose, cross-agent dependencies, communication matrix)
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 5
+  total_plans: 6
+  completed_plans: 6
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 ## Current Position
 
-Phase: 42 (Documentation Update) — pending
-Plan: Phase 41 complete (both plans); Phase 42 plan 42-01 next
-Status: Phase 41 done — Hunt Techniques complete (HUNT-01, HUNT-02, HUNT-03); Phase 42 is documentation-only close phase
-Last activity: 2026-03-30 — Plan 41-02 complete (scope-hunt.md: hunt_technique_patterns section inserted, PURPOSE label step 3.5, HYPOTHESIS CHECK citations, UNABLE TO QUERY verdict distinct from INCONCLUSIVE, Recommended Response Actions for MODE=HUNT)
+Phase: 42 (Documentation Update) — complete
+Plan: Phase 42 plan 42-01 complete; all v1.9 phases done
+Status: Phase 42 done — Documentation Update complete (INTG-03); v1.9 Threat Hunt milestone complete
+Last activity: 2026-03-30 — Plan 42-01 complete (CLAUDE.md/AGENTS.md/ARCHITECTURE.md dual-mode isolation; all SC1-SC5 checks passed)
 
 ## Phase Summary
 
@@ -37,7 +37,7 @@ Last activity: 2026-03-30 — Plan 41-02 complete (scope-hunt.md: hunt_technique
 | 39 | Session Integration | INTG-01, INTG-02 | Complete (2026-03-30) |
 | 40 | Hypothesis Engine | HYPO-01, HYPO-02, HYPO-03, HYPO-04 | Complete (2026-03-30) |
 | 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | Complete (2026-03-30) |
-| 42 | Documentation Update | INTG-03 | Pending |
+| 42 | Documentation Update | INTG-03 | Complete (2026-03-30) |
 
 ## Performance Metrics
 
