@@ -1015,6 +1015,10 @@ REASONING:
                           entries by label/value, or "no context entries match" if none]
   Reference pattern:     [Which former playbook pattern this draws from, if any — e.g.,
                           "CreateAccessKey pattern Step 1: Anchor event", or "none — novel approach"]
+  Hypothesis test:       [How this query tests the active hypothesis — "This confirms step 3 of
+                          the exploit path is observable" / "This refutes the hypothesis if
+                          [eventName] is absent" / "This is context-gathering before testing
+                          the hypothesis directly" / "No active hypothesis — general investigation"]
   Independent reasoning: [Why THIS query is the logical next step given the above three inputs.
                           What we expect to find. How it connects to previous step findings.]
 ```
