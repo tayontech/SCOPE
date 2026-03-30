@@ -13,7 +13,7 @@ Transform scope-attack-paths.md from a static checklist-driven engine into an ad
 - [x] **Phase 38: Agent Rebrand** — Rename scope-investigate to scope-hunt across all agent files, docs, installer, hooks, and installed copies; rename ./investigate/ runtime directory to ./hunt/; rename /scope:investigate slash command to /scope:hunt; update context.json path (RBRD-01 through RBRD-04) (completed 2026-03-30)
 - [x] **Phase 39: Session Integration** — Break session isolation for hunt mode — agent reads audit/exploit run directories when provided; implement dual entry point detection where directory path triggers hunt mode and Splunk search/ID triggers detection investigation mode (INTG-01, INTG-02) (completed 2026-03-30)
 - [x] **Phase 40: Hypothesis Engine** — Agent forms attack hypothesis from any detection event before investigating; generates hypotheses from SCOPE audit run directory and exploit output; operator selects which hypothesis to hunt when given an audit run directory (HYPO-01 through HYPO-04) (completed 2026-03-30)
-- [ ] **Phase 41: Hunt Techniques** — Add hunt technique patterns for credential abuse, data exfiltration, persistence, lateral movement, and defense evasion; extend reasoning framework with hypothesis-driven step selection; update output format to hunt report with hypothesis result (HUNT-01 through HUNT-03)
+- [ ] **Phase 41: Hunt Techniques** — Add hunt technique patterns for credential abuse, data exfiltration, persistence, lateral movement, and defense evasion; extend reasoning framework with hypothesis-driven step selection; update output format to hunt report with hypothesis result (HUNT-01 through HUNT-03) [plan 41-01 complete — config/hunt-techniques.json created; plan 41-02 pending]
 - [ ] **Phase 42: Documentation Update** — Update CLAUDE.md and AGENTS.md to reflect hunt's new integration with audit/exploit output; update agent isolation sections, slash commands, architecture, and all cross-references (INTG-03)
 
 ## Phase Details
@@ -286,4 +286,4 @@ See .planning/MILESTONES.md
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-30 — Phase 40 complete (plan 40-02 done: hypothesis threading through reasoning_framework, investigation_loop, output_format, artifact_saving; HYPO-01 through HYPO-04 all satisfied)*
+*Last updated: 2026-03-30 — Phase 41 plan 41-01 complete (config/hunt-techniques.json: 13 patterns, 5 categories, all 9 fields, SPL index=cloudtrail, data_event_caveat on S3 pattern, jq valid)*

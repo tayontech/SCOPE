@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Threat Hunt
 status: in_progress
-stopped_at: Phase 40 complete — both plans done; next is Phase 41 (Hunt Techniques)
+stopped_at: Phase 41 plan 41-01 complete — config/hunt-techniques.json created; next is Phase 41 plan 41-02 (scope-hunt.md changes)
 last_updated: "2026-03-30"
-last_activity: 2026-03-30 — Phase 40 plan 40-02 complete (hypothesis threaded through reasoning_framework, investigation_loop, output_format, artifact_saving)
+last_activity: 2026-03-30 — Phase 41 plan 41-01 complete (config/hunt-techniques.json: 13 patterns across 5 categories, all 9 fields, jq valid)
 progress:
   total_phases: 5
   completed_phases: 2
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 ## Current Position
 
-Phase: 40 (Hypothesis Engine) — complete
-Plan: 40-01 done; 40-02 done; Phase 41 pending
-Status: Phase 40 complete; Phase 41 (Hunt Techniques) next
-Last activity: 2026-03-30 — Plan 40-02 complete (hypothesis threaded through reasoning_framework, investigation_loop, output_format, artifact_saving; all 10 verification checks passed)
+Phase: 41 (Hunt Techniques) — in progress
+Plan: 41-01 done; 41-02 pending
+Status: Phase 41 plan 1 complete; plan 41-02 (scope-hunt.md changes) next
+Last activity: 2026-03-30 — Plan 41-01 complete (config/hunt-techniques.json: 13 patterns across 5 categories, all 9 required fields, SPL index=cloudtrail, data_event_caveat on S3 pattern, jq valid)
 
 ## Phase Summary
 
@@ -36,7 +36,7 @@ Last activity: 2026-03-30 — Plan 40-02 complete (hypothesis threaded through r
 | 38 | Agent Rebrand | RBRD-01, RBRD-02, RBRD-03, RBRD-04 | Complete (2026-03-30) |
 | 39 | Session Integration | INTG-01, INTG-02 | Complete (2026-03-30) |
 | 40 | Hypothesis Engine | HYPO-01, HYPO-02, HYPO-03, HYPO-04 | Complete (2026-03-30) |
-| 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | Pending |
+| 41 | Hunt Techniques | HUNT-01, HUNT-02, HUNT-03 | In Progress (1/2 plans done) |
 | 42 | Documentation Update | INTG-03 | Pending |
 
 ## Performance Metrics
@@ -85,5 +85,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 40 complete — plan 40-02 done; hypothesis threaded through reasoning_framework, investigation_loop, output_format, artifact_saving; next is Phase 41 (Hunt Techniques)
+Stopped at: Phase 41 plan 41-01 done — config/hunt-techniques.json created (13 patterns, 5 categories, all 9 fields, jq valid); next is Phase 41 plan 41-02 (scope-hunt.md changes)
 Resume file: None
