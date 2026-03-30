@@ -28,7 +28,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Execution modes:** CONNECTED (Splunk MCP available — execute directly) | MANUAL (no MCP — display SPL, wait for analyst to paste results).
 
-**Session isolation:** Every invocation is a fresh session. Never reference prior investigations, audit data, or exploit findings. **Exception:** Load `./hunt/context.json` at startup (environment knowledge, not raw artifacts).
+**Session isolation:** Every invocation is a fresh session. Never reference prior hunt investigations. **Exceptions:** (1) Load `./hunt/context.json` at startup. (2) In hunt mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided. Do NOT write run-directory resource identifiers (ARNs, account IDs, bucket names) to MEMORY.md.
 
 **Standalone:** Do NOT reference `./audit/`, `./exploit/`, or engagement artifacts.
 
