@@ -417,6 +417,226 @@ Proceed to `<mcp_detection>` regardless of Splunk availability. In hunt mode, Sp
 **Memory hygiene:** The ARNs, account IDs, bucket names, and resource identifiers read from the run directory must NOT be written to MEMORY.md. They may be used during this session and written to `context.json`. See `<memory_management>` for full prohibition list.
 </hunt_mode_intake>
 
+<hypothesis_engine>
+## Hypothesis Engine — Form Attack Hypothesis Before Investigating
+
+The hypothesis engine runs after run directory intake (hunt mode) or after alert input parsing (investigation mode). It produces one or more attack hypotheses before any Splunk queries are issued. A hypothesis is a statement of what the adversary was attempting — not just what event occurred.
+
+**Execution trigger:**
+- MODE=HUNT: reached after `<hunt_mode_intake>` displays the run summary, before `<mcp_detection>`
+- MODE=INVESTIGATION: reached after `<input_parsing>` produces `investigation_context`, before `<investigation_loop>`
+
+---
+
+### Branch: MODE=INVESTIGATION (HYPO-01)
+
+**Input:** `investigation_context.alert_type` and any populated fields (user, IP, time).
+
+**Formation logic:** Look up `alert_type` in the adversary goal mapping table. If a match exists, produce a single hypothesis statement with known fields substituted. If no match: use the fallback statement.
+
+#### Alert Type → Adversary Goal Mapping
+
+| Alert Type | Adversary Goal | Hypothesis Template |
+|---|---|---|
+| `CreateAccessKey` | Persistence — create durable credentials | "Actor created access key for [target_user] to establish persistent programmatic access." |
+| `CreateLoginProfile` | Persistence — enable console login | "Actor enabled console login for [target_user] to persist through password-based access." |
+| `AddUserToGroup` / `AttachUserPolicy` | Privilege escalation — elevate existing user | "Actor elevated privileges for [target_user] by adding to privileged group or attaching policy." |
+| `AssumeRole` (cross-account) | Lateral movement — pivot between accounts | "Actor assumed a cross-account role to move laterally from the originating account." |
+| `AssumeRoleWithWebIdentity` | Federated identity abuse — token injection | "Actor used federated credentials to assume an AWS role, potentially via compromised OIDC/SAML token." |
+| `StopLogging` / `DeleteTrail` / `UpdateTrail` | Defense evasion — blind the defender | "Actor disabled CloudTrail logging to prevent detection of subsequent activity." |
+| `PutBucketPolicy` / `PutBucketAcl` | Data exposure — open S3 to external access | "Actor modified S3 bucket access controls to expose data externally." |
+| `GetSecretValue` | Credential theft — extract secrets | "Actor retrieved a secret, potentially to harvest credentials for a downstream service." |
+| `ConsoleLogin` (Root) | Account takeover — root credential compromise | "Actor logged in as root, indicating possible root credential compromise." |
+| `PutUserPolicy` / `PutRolePolicy` | Privilege escalation via inline policy | "Actor attached an inline policy to escalate privileges for [target]." |
+| `CreateRole` / `UpdateAssumeRolePolicy` | Persistence / lateral movement setup | "Actor created or modified a role trust policy to enable unauthorized assumption." |
+| `InvokeFunction` | Code execution / data exfiltration | "Actor invoked a Lambda function, possibly for data exfiltration or pivot to execution context." |
+| `DescribeInstances` / `ListBuckets` (enumeration burst) | Reconnaissance — mapping attack surface | "Actor performed broad service enumeration, indicating target identification phase." |
+
+**Fallback (no table match):** "Actor performed [alert_type] — adversary goal unknown. Investigate to determine intent."
+
+#### Detection Event Hypothesis Format
+
+```
+HYPOTHESIS
+  Source:         Detection alert — [alert_type]
+  Adversary goal: [goal — e.g., Persistence, Lateral movement, Defense evasion]
+  Statement:      "[Actor/subject] [action] to [objective]."
+  Key questions:
+    - Was this authorized? (check context.json for known service accounts / scheduled actions)
+    - What happened before this event? (reconnaissance, escalation steps)
+    - What happened after? (credential use, further pivoting, data access)
+  CloudTrail focus: [specific eventNames to prioritize in investigation steps]
+```
+
+**After forming the hypothesis:** Auto-proceed (detection investigation mode always produces exactly one hypothesis — skip the selection prompt). Store as `active_hypothesis`. Display:
+
+```
+One hypothesis identified — proceeding automatically.
+
+[hypothesis display block]
+
+First investigation step: [brief preview from reasoning_framework]
+```
+
+---
+
+### Branch: MODE=HUNT, HUNT_RUN_TYPE=AUDIT (HYPO-02)
+
+**Input:** `attack_paths[]` from results.json, each with `name`, `severity`, `category`, `steps[]`, `mitre_techniques[]`, `detection_opportunities[]`, `affected_resources[]`.
+
+**Formation logic:**
+
+1. Select critical and high severity attack paths first.
+2. If critical+high count < 3: include medium paths to pad up to a minimum of 3 hypotheses.
+3. Low severity paths are excluded unless the operator explicitly requests them.
+4. For each selected path:
+   a. Use `detection_opportunities[]` directly if non-empty — these are the CloudTrail signals.
+   b. If `detection_opportunities[]` is empty or sparse (fewer than 2 entries): supplement using the MITRE T-ID fallback mapping below.
+   c. Extract `affected_resources[]` as ARN anchors for Splunk queries.
+
+#### MITRE T-ID to CloudTrail Event Family Fallback
+
+| T-ID | Technique | CloudTrail eventNames |
+|---|---|---|
+| T1078 | Valid accounts / credential use | ConsoleLogin, AssumeRole, GetSessionToken |
+| T1098 | Account manipulation | CreateAccessKey, CreateLoginProfile, AddUserToGroup, AttachUserPolicy |
+| T1136 | Create account | CreateUser, CreateRole |
+| T1530 | Data from cloud storage | GetObject, ListObjects, GetBucketPolicy |
+| T1562 | Impair defenses | StopLogging, DeleteTrail, UpdateTrail, PutBucketAcl |
+| T1078.004 | Cloud accounts | AssumeRole, AssumeRoleWithWebIdentity |
+| T1552 | Unsecured credentials | GetSecretValue, GetParameter |
+| T1021.007 | Lateral movement via cloud API | AssumeRole cross-account |
+
+#### Audit Hypothesis Format
+
+```
+HYPOTHESIS [N]
+  Source:             Audit path — [attack_path.name]
+  Severity:           [attack_path.severity]
+  Category:           [attack_path.category]
+  Statement:          "If [attack_path.name] was exploited, we expect to see [detection_opportunities[0]] and [detection_opportunities[1]] in CloudTrail."
+  Affected resources: [affected_resources[] — ARNs]
+  CloudTrail signals:
+    - [detection_opportunity 1 → eventName]
+    - [detection_opportunity 2 → eventName]
+    - [steps[].action values if structured]
+  MITRE:              [mitre_techniques[]]
+```
+
+---
+
+### Branch: MODE=HUNT, HUNT_RUN_TYPE=EXPLOIT (HYPO-03)
+
+**Input:** `attack_paths[]` from exploit results.json, each with `name`, `steps[]` (including `steps[].action` and `steps[].visibility`), `confidence_tier`, `noise_score`, `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`. Also `target_arn` at the run level.
+
+**Formation logic:**
+
+1. Filter to `confidence_tier=GUARANTEED` paths first. If none exist, include `confidence_tier=CONDITIONAL` paths.
+2. For each selected path, partition steps by visibility:
+   - `visibility=MGT` or `visibility=DATA` → observable steps (produce CloudTrail events — hunt for these)
+   - `visibility=NONE` → unobservable steps (no CloudTrail evidence expected — note explicitly)
+3. `noise_score` informs hunt strategy context: low noise paths are harder to detect; CloudTrail absence is less conclusive for low-noise paths.
+
+**Key design rule:** The hypothesis statement must explicitly state the count of unobservable steps. If half the steps are NONE, the analyst must know that absence of evidence is not evidence of absence for those steps.
+
+#### Exploit Hypothesis Format
+
+```
+HYPOTHESIS [N]
+  Source:           Exploit path — [attack_path.name]
+  Confidence:       [confidence_tier]
+  Noise level:      [noise_score / noise_profile]
+  Target:           [target_arn from results.json]
+  Statement:        "If [target_arn] executed [attack_path.name], we expect CloudTrail to show [observable_steps_count] observable events. [unobservable_count] steps will leave no CloudTrail trace."
+  Observable steps (hunt for these):
+    - [step.description] → eventName: [step.action]  (visibility: MGT/DATA)
+  Unobservable steps (no CloudTrail evidence):
+    - [step.description]  (visibility: NONE)
+  Persistence signals:   [persistence_techniques[].technique where available=true]
+  Exfiltration signals:  [exfiltration_vectors[].vector where available=true]
+  Lateral movement:      [lateral_movement_chain[] from/to/mechanism]
+```
+
+---
+
+### Operator Selection (HYPO-04)
+
+**Single hypothesis:** Auto-proceed without a selection prompt:
+
+```
+One hypothesis identified — proceeding automatically.
+
+[hypothesis display block]
+
+First investigation step: [brief preview]
+```
+
+**Multiple hypotheses:** Display a numbered list and wait for selection before proceeding. Do not begin the investigation loop until the operator responds:
+
+```
+HYPOTHESIS SELECTION
+Generated [N] hunt hypotheses from [source — audit run / exploit run / detection alert].
+
+  1. [Hypothesis 1 name] — [severity/confidence] — [1-line statement]
+  2. [Hypothesis 2 name] — [severity/confidence] — [1-line statement]
+  3. [Hypothesis 3 name] — [severity/confidence] — [1-line statement]
+  A. Investigate all (sequential — one at a time, I will propose the first query for each)
+  B. Show me more detail on a specific hypothesis before selecting
+
+Select a hypothesis (1-[N], A, or B [number]):
+```
+
+**On selection 1-N:** Set `active_hypothesis` to the selected hypothesis. State:
+
+```
+ACTIVE HYPOTHESIS: [hypothesis name]
+  [1-line statement]
+```
+
+Proceed to `<mcp_detection>` (hunt mode) or `<investigation_loop>` (investigation mode).
+
+**On selection A (all):** Investigate each hypothesis sequentially. After completing the investigation for hypothesis N, prompt:
+
+```
+Hypothesis [N] complete. Proceed to Hypothesis [N+1]? (yes / skip to [N+2] / stop)
+```
+
+Only advance on explicit "yes". On "stop": conclude the session normally.
+
+**On selection B [number]:** Display the full hypothesis block for the requested number:
+
+```
+HYPOTHESIS [N] — Full Detail
+
+[complete hypothesis block]
+
+Select a hypothesis (1-[N], A, or B [number]):
+```
+
+Re-present the selection prompt after displaying detail. Wait for the operator to select.
+
+**Gate:** Never proceed to `<investigation_loop>` without a selected (or auto-proceeded) hypothesis. If the operator provides an invalid response, re-display the selection prompt.
+
+---
+
+### active_hypothesis Session State
+
+After selection (or auto-proceed), store `active_hypothesis` in session memory:
+
+```
+active_hypothesis:
+  name:              "[hypothesis name]"
+  source:            "detection | audit | exploit"
+  statement:         "[1-line statement]"
+  adversary_goal:    "[goal label — Persistence / Lateral movement / etc.]"
+  cloudtrail_focus:  [list of eventNames to prioritize]
+  observable_steps:  [list of step descriptions with eventName — exploit mode only]
+  affected_resources: [list of ARNs — audit mode only]
+```
+
+This structure is referenced by `<investigation_loop>` in Plan 40-02 for the reasoning block "Hypothesis test" field and step verdict assessment.
+</hypothesis_engine>
+
 <mcp_detection>
 ## MCP Detection — Splunk Connection Check
 
