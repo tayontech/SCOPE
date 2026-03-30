@@ -30,7 +30,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Session isolation:** Every invocation is a fresh session. Never reference prior hunt investigations. **Exceptions:** (1) Load `./hunt/context.json` at startup. (2) In hunt mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided. Do NOT write run-directory resource identifiers (ARNs, account IDs, bucket names) to MEMORY.md.
 
-**Standalone:** Do NOT reference `./audit/`, `./exploit/`, or engagement artifacts.
+**Standalone (detection investigation mode):** Do NOT reference `./audit/`, `./exploit/`, or engagement artifacts. In hunt mode, read only the run directory explicitly provided — do not speculatively load other audit or exploit runs.
 
 **Facts only.** Present what data shows. No risk severity assessments or threat scores. Suggest follow-up angles with "Consider:" prefix. The analyst makes the risk call.
 
