@@ -637,6 +637,59 @@ active_hypothesis:
 This structure is referenced by `<investigation_loop>` in Plan 40-02 for the reasoning block "Hypothesis test" field and step verdict assessment.
 </hypothesis_engine>
 
+<hunt_technique_patterns>
+## Hunt Technique Patterns — Data Layer Reference
+
+This section applies **only in MODE=HUNT** (when an audit or exploit run directory was provided). It is skipped in MODE=INVESTIGATION (detection alert investigation does not use the technique catalogue — the hypothesis engine's alert type mapping table is sufficient).
+
+### Loading the Catalogue
+
+After `active_hypothesis` is set and before entering `<investigation_loop>`, read the hunt technique catalogue:
+
+```bash
+cat config/hunt-techniques.json 2>/dev/null || echo '{}'
+```
+
+If the file is absent, log: `[WARN] config/hunt-techniques.json not found — hunt technique patterns unavailable. Falling back to reference patterns in <reasoning_framework>.`
+
+Continue regardless of whether the file loads.
+
+### Pattern Matching — Adversary Goal → Category Key
+
+Match `active_hypothesis.adversary_goal` to a category key in the catalogue's `categories` object:
+
+| Adversary Goal Label | Category Key |
+|---|---|
+| Persistence | `persistence` |
+| Lateral movement | `lateral_movement` |
+| Defense evasion | `defense_evasion` |
+| Credential abuse / Credential theft | `credential_abuse` |
+| Data exfiltration / Data exposure | `data_exfiltration` |
+
+If no category match: fall back to reference patterns in `<reasoning_framework>`. Do not error — the fallback is expected for custom or novel hypotheses.
+
+### Using Pattern Fields
+
+When a matching category is found, select the most specific pattern by `id` based on the hypothesis statement. Use the pattern fields as follows:
+
+- **`cloudtrail_signals`** — Prioritize these eventNames when selecting queries. Each signal's `confirm_refute` field tells you whether finding the event confirms or refutes the hypothesis. Use this to populate the PURPOSE label in the investigation loop (see `<investigation_loop>` step 3.5).
+- **`spl_templates`** — Use the named SPL blocks as starting points. Adapt field values from `investigation_context` or `active_hypothesis.affected_resources`. Each template's `purpose` field (`confirm` or `refute`) maps directly to the PURPOSE label.
+- **`confirm_criteria`** — Cite this verbatim in the HYPOTHESIS CHECK line at step 6 when result matches.
+- **`refute_criteria`** — Cite this verbatim in the HYPOTHESIS CHECK line at step 6 when result refutes.
+- **`data_event_caveat`** — If `true`, display this warning before proposing any query that uses a DATA-class signal:
+
+```
+DATA EVENT CAVEAT: This query depends on S3 data events (class=DATA). If data event
+logging is not enabled for this bucket, the query will return zero results even if
+the activity occurred. Zero results here is not evidence of absence.
+Confirm data event status before interpreting results.
+```
+
+### Extending the Catalogue
+
+New patterns are added by appending entries to the relevant category array in `config/hunt-techniques.json`. No changes to this section or the reasoning framework are required. The category key lookup (`adversary_goal` → category key) is the only coupling point between the agent and the data file.
+</hunt_technique_patterns>
+
 <mcp_detection>
 ## MCP Detection — Splunk Connection Check
 
