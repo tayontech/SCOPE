@@ -1549,7 +1549,15 @@ Determine the verdict from the `investigation_findings` accumulator:
 - **CONFIRMED** — at least one step confirmed the hypothesis and no step refuted it
 - **REFUTED** — at least one step directly refuted the hypothesis with specific evidence
 - **PARTIAL** — some steps confirmed and at least one refuted (mixed evidence)
-- **INCONCLUSIVE** — no steps confirmed or refuted the hypothesis (evidence neither supports nor contradicts)
+- **INCONCLUSIVE** — queries ran and results were gathered, but evidence neither confirms nor refutes. Do NOT use this verdict when Splunk was unavailable — use UNABLE TO QUERY instead.
+- **UNABLE TO QUERY** — Splunk was not available during this session and zero queries were executed. This verdict is distinct from INCONCLUSIVE. The hypothesis remains open — it has not been tested.
+
+```
+HYPOTHESIS VERDICT: UNABLE TO QUERY
+  Hypothesis:  [active_hypothesis.name]
+  Reason:      Splunk was not available. No CloudTrail queries were executed. The hypothesis has not been tested.
+  Next step:   Re-run this hunt session when Splunk is accessible, or query CloudTrail directly via AWS CLI.
+```
 
 ```
 HYPOTHESIS VERDICT: [CONFIRMED | REFUTED | INCONCLUSIVE | PARTIAL]
@@ -1593,9 +1601,20 @@ source IP 91.132.44.18, a different IP than the key creation."
 
 ### Suggested follow-up actions (analyst's choice)
 
+In MODE=INVESTIGATION, list follow-up investigation steps the analyst may choose to pursue:
+
 - Consider: [action — phrased as option, not directive]
 - Consider: [action]
 - Consider: [action]
+
+In MODE=HUNT, this section becomes **Recommended Response Actions**:
+
+### Recommended Response Actions
+
+Bulleted, plain-English actions tied to specific findings. Max 5 items. "Consider:" prefix required on all items — never directive. Based on what was actually found, not on generic recommendations.
+
+- Consider: [response action tied to a specific finding from the Evidence Timeline]
+- Consider: [response action]
 ```
 
 ### Part 3 — Context Annotations (if environment context was loaded)
