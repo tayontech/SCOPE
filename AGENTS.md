@@ -169,7 +169,7 @@ Gemini CLI operators: describe the task naturally and the model will activate th
 A single middleware agent runs automatically after audit, exploit, and defend:
 - **scope-pipeline** (`agents/subagents/scope-pipeline.md`) -- Phase 1 normalizes raw artifacts to `./data/<phase>/<run-id>.json`, then Phase 2 validates `agent-log.jsonl` into envelopes at `./agent-logs/<phase>/<run-id>.json`
 
-Invoked by the source agent after writing artifacts -- sequential and non-blocking. Investigate does not run this pipeline.
+Invoked by the source agent after writing artifacts -- sequential and non-blocking. Hunt does not run this pipeline.
 
 ## Dashboard
 

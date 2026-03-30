@@ -27,7 +27,7 @@ The orchestrator dispatches parallel enumeration agents across AWS services, fee
 | **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
 | **Defend** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
 | **Exploit** | Produces stealth-ordered playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
-| **Investigate** | Guides SOC analysts through CloudTrail-based alert triage in Splunk |
+| **Hunt** | Guides SOC analysts through CloudTrail-based alert triage in Splunk |
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ export AWS_PROFILE=your-profile
 # Self-target mode (discovers caller identity automatically)
 /scope:exploit
 
-# Investigate a SOC alert
+# Hunt a SOC alert
 /scope:hunt
 ```
 

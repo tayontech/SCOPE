@@ -78,7 +78,7 @@ If results.json is missing, set `SOURCE_ARTIFACT_MISSING=true` and produce an in
    - `defend` → `<defend_normalizer>`
    - `exploit` → `<exploit_normalizer>`
 
-   Note: Investigate does not run the post-processing pipeline — it produces investigation.md only and does not call scope-pipeline.
+   Note: Hunt does not run the post-processing pipeline — it produces investigation.md only and does not call scope-pipeline.
 
 4. Each normalizer returns a `payload` object. Wrap it in the common envelope:
    ```json

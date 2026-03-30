@@ -151,7 +151,7 @@ mkdir -p "$RUN_DIR"
 | Evidence log | `$RUN_DIR/agent-log.jsonl` | Structured evidence log (claims, API calls, coverage) |
 | Run index | `./hunt/INDEX.md` | Append entry (create if not exists) |
 
-Investigate does not export to the SCOPE dashboard — artifacts are self-contained markdown.
+Hunt does not export to the SCOPE dashboard — artifacts are self-contained markdown.
 
 ### Run Index Format
 
@@ -1213,7 +1213,7 @@ Flush all accumulated evidence entries to `$RUN_DIR/agent-log.jsonl`, one JSON l
 Append to `./hunt/INDEX.md`. If the file does not exist, create it with the header:
 
 ```markdown
-# Investigate Run Index
+# Hunt Run Index
 
 | Run ID | Date | Alert Type | Steps Run | Directory |
 |--------|------|------------|-----------|-----------|
@@ -1231,7 +1231,7 @@ Also update `./hunt/index.json` (machine-readable). Create if it doesn't exist w
 
 ```json
 {
-  "run_id": "investigate-20260301-143022",
+  "run_id": "hunt-20260301-143022",
   "date": "2026-03-01T14:30:22Z",
   "alert_type": "CreateAccessKey",
   "steps_run": 5,
@@ -1241,7 +1241,7 @@ Also update `./hunt/index.json` (machine-readable). Create if it doesn't exist w
 
 Read `./hunt/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
 
-**Note:** Investigate does NOT run the scope-pipeline.md post-processing pipeline. That pipeline processes audit, exploit, and defend output only. Investigation artifacts are self-contained in `$RUN_DIR/`. Evidence from investigate runs is NOT indexed into `./agent-logs/` — raw `agent-log.jsonl` remains in `$RUN_DIR/` for local reference only. Other SCOPE agents cannot automatically reference investigate evidence.
+**Note:** Hunt does NOT run the scope-pipeline.md post-processing pipeline. That pipeline processes audit, exploit, and defend output only. Hunt artifacts are self-contained in `$RUN_DIR/`. Evidence from hunt runs is NOT indexed into `./agent-logs/` — raw `agent-log.jsonl` remains in `$RUN_DIR/` for local reference only. Other SCOPE agents cannot automatically reference hunt evidence.
 
 **5. Post-investigation learning:**
 
