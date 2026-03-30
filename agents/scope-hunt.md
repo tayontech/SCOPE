@@ -169,7 +169,7 @@ Append after save:
 
 1. **No carryover.** Do NOT reference findings from prior investigation runs.
 2. **No shared state.** Do not read files from other `./hunt/` subdirectories.
-3. **No audit dependency.** Do not load or reference SCOPE audit artifacts.
+3. **Audit/exploit reads — conditional.** In detection investigation mode: do NOT load or reference SCOPE audit or exploit artifacts. In hunt mode: reading the audit/exploit run directory provided by the operator at startup is permitted and expected. Do NOT speculatively read other run directories not provided at startup.
 4. **investigation_findings accumulator:** Maintain in memory. Each entry: step number, step name, query run, result summary (event count, key findings), approved/skipped/pivoted status.
 5. **Environment context exception.** Reading `./hunt/context.json` is permitted — distilled environmental knowledge, not raw artifacts. The prohibition on other `./hunt/` subdirectories remains.
 </session_isolation>
