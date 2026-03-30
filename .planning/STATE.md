@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Threat Hunt
 status: in_progress
-stopped_at: Phase 39 plan 39-01 complete — ready for Phase 40
+stopped_at: Phase 39 complete — both plans done, ready for Phase 40
 last_updated: "2026-03-30"
-last_activity: 2026-03-30 — Phase 39 plan 39-01 complete (entry_point_detection + hunt_mode_intake sections added to scope-hunt.md)
+last_activity: 2026-03-30 — Phase 39 plan 39-02 complete (role, session_isolation, mcp_detection sections updated for dual-mode)
 progress:
   total_phases: 5
   completed_phases: 1
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 Phase: 40 (Hypothesis Engine) — not started
 Plan: —
-Status: Phase 39 complete
-Last activity: 2026-03-30 — Plan 39-01 complete (entry_point_detection + hunt_mode_intake sections added to scope-hunt.md)
+Status: Phase 39 complete (both 39-01 and 39-02 done)
+Last activity: 2026-03-30 — Plan 39-02 complete (role, session_isolation, mcp_detection updated for dual-mode; all 6 SC checks passed)
 
 ## Phase Summary
 
@@ -85,5 +85,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 39 plan 39-01 complete — entry_point_detection and hunt_mode_intake sections added; all 5 tasks verified
+Stopped at: Phase 39 plan 39-02 complete — role, session_isolation, mcp_detection updated; all 7 tasks and 6 SC checks verified
 Resume file: None
