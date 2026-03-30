@@ -96,7 +96,7 @@ Codex does not support lifecycle hooks — safety constraints are enforced throu
 |---------|-------------|
 | `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services) or inline execution (single service). Auto-chains defend after audit completes. |
 | `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `/scope:hunt` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
+| `/scope:hunt [path]` | Threat hunting and alert investigation — two entry point modes: provide a SCOPE audit or exploit run directory path to enter hunt mode (reads findings, generates hypotheses, optionally queries Splunk), or invoke without a path to enter detection investigation mode (Splunk-driven, guided queries, timeline building, IOC correlation) |
 | `/scope:help` | List available commands, show usage examples |
 
 ## Data Layer
@@ -140,7 +140,11 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## Agent Isolation
 
-scope-hunt is standalone — does not read audit/exploit/defend output. All other agents share data through the agent-logs/data layer.
+scope-hunt has two operating modes with different isolation properties:
+- **Detection investigation mode** (invoked without a path, or with a Splunk alert ID): standalone — does not read audit/exploit/defend output. Isolation matches v1.8 behavior.
+- **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
+
+All other agents share data through the agent-logs/data layer.
 
 ## Configuration Files
 
