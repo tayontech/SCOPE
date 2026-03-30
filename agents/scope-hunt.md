@@ -172,6 +172,7 @@ Append after save:
 3. **Audit/exploit reads — conditional.** In detection investigation mode: do NOT load or reference SCOPE audit or exploit artifacts. In hunt mode: reading the audit/exploit run directory provided by the operator at startup is permitted and expected. Do NOT speculatively read other run directories not provided at startup.
 4. **investigation_findings accumulator:** Maintain in memory. Each entry: step number, step name, query run, result summary (event count, key findings), approved/skipped/pivoted status.
 5. **Environment context exception.** Reading `./hunt/context.json` is permitted — distilled environmental knowledge, not raw artifacts. The prohibition on other `./hunt/` subdirectories remains.
+6. **Hunt mode memory hygiene.** In hunt mode, do NOT write audit/exploit resource identifiers to MEMORY.md — ARNs, account IDs, bucket names, role names, key IDs, or access key IDs read from the run directory are session-scoped only. They may appear in `context.json` (which is designed to hold them) but must not enter MEMORY.md.
 </session_isolation>
 
 <environment_context>
