@@ -226,17 +226,17 @@ Downstream agents consume upstream output in this priority order:
 
 ## Enforcement Layer
 
-Lifecycle hooks enforce safety and quality constraints at the tool level. Shared scripts live in `.scope/hooks/` with editor-specific configuration.
+Lifecycle hooks enforce safety and quality constraints at the tool level. Shared scripts live in `config/hooks/` with editor-specific configuration.
 
 ```
-.scope/hooks/
+config/hooks/
   scope-safety-guard.sh      Block destructive AWS operations (read-only enforcement)
   scope-spl-lint.sh          Hard-fail on SPL anti-patterns (missing index, wrong fields)
   scope-schema-validate.sh   Validate results.json against phase schemas
   scope-artifact-check.sh    Verify mandatory artifacts exist before agent completes
   scope-agent-logger.sh      Auto-log AWS CLI calls to agent-log.jsonl (async)
 
-.scope/schemas/
+config/schemas/
   audit.schema.json          Required fields for audit results.json
   defend.schema.json         Required fields for defend results.json
   exploit.schema.json        Required fields for exploit results.json

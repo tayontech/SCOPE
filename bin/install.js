@@ -836,8 +836,8 @@ function installHooks(editor, scope) {
   if (editor === 'codex') return; // Codex does not support hooks
 
   const settingsMap = {
-    claude: { src: '.scope/settings/claude.settings.json', dest: '.claude/settings.json' },
-    gemini: { src: '.scope/settings/gemini.settings.json', dest: '.gemini/settings.json' },
+    claude: { src: 'config/settings/claude.settings.json', dest: '.claude/settings.json' },
+    gemini: { src: 'config/settings/gemini.settings.json', dest: '.gemini/settings.json' },
   };
   const srcSettings = path.join(__dirname, '..', settingsMap[editor].src);
   if (!fs.existsSync(srcSettings)) return;
