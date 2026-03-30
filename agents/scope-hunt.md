@@ -268,6 +268,152 @@ ENVIRONMENT CONTEXT: None (first investigation — context will build over time)
 ```
 </environment_context>
 
+<entry_point_detection>
+## Entry Point Detection — Hunt Mode vs. Detection Investigation Mode
+
+At startup, before any other step, classify the operator's invocation input to determine execution mode. This runs before MCP detection.
+
+### Detection Algorithm
+
+Capture the full input provided after `/scope:hunt`. Apply these rules in order:
+
+**1. Empty input → detection investigation mode**
+If no argument was provided, set MODE=INVESTIGATION and proceed to `<mcp_detection>`.
+
+**2. Splunk notable ID → detection investigation mode**
+If input matches `notable_id=*`, set MODE=INVESTIGATION and proceed to `<mcp_detection>`.
+
+**3. Path-like input → test directory**
+If input starts with `./`, `/`, `~/`, `audit/`, `exploit/`, or `data/`:
+```bash
+INPUT="<operator-provided-path>"
+test -d "$INPUT" && echo "EXISTS" || echo "NOT_FOUND"
+```
+- If directory exists: set MODE=HUNT, store as `HUNT_RUN_DIR="$INPUT"` — continue to Step 4
+- If directory does not exist: display error and halt:
+  ```
+  Error: Directory not found: $INPUT
+  Provide a valid audit or exploit run directory path, or invoke without a path to start a detection investigation.
+  ```
+
+**4. Anything else → detection investigation mode**
+Alert metadata, natural language, quoted descriptions, or unrecognized input: set MODE=INVESTIGATION and proceed to `<mcp_detection>`.
+
+### Mode Announcement
+
+State the selected mode before continuing:
+
+**Hunt mode:**
+```
+Hunt mode — reading run directory: $HUNT_RUN_DIR
+```
+
+**Detection investigation mode:**
+```
+Detection investigation mode — proceeding to alert intake.
+```
+
+### Routing
+
+- **MODE=HUNT** → continue to `<hunt_mode_intake>` (next section), then `<mcp_detection>`
+- **MODE=INVESTIGATION** → proceed directly to `<mcp_detection>` (existing flow, unchanged)
+</entry_point_detection>
+
+<hunt_mode_intake>
+## Hunt Mode Intake — Read Audit or Exploit Run Directory
+
+Only reached when MODE=HUNT. Reads the provided run directory, validates it, and surfaces findings as context before any investigation begins. Does NOT generate hypotheses — that is Phase 40 work. This phase only reads and displays.
+
+### Step 1: Validate the Run Directory
+
+```bash
+test -f "$HUNT_RUN_DIR/results.json" && echo "VALID" || echo "NO_RESULTS"
+```
+
+If `results.json` is absent, display:
+```
+Error: $HUNT_RUN_DIR/results.json not found.
+This does not appear to be a valid SCOPE audit or exploit run directory.
+Continue in detection investigation mode instead? (Y/N):
+```
+- If Y: set MODE=INVESTIGATION, proceed to `<mcp_detection>`
+- If N: stop
+
+### Step 2: Determine Run Type
+
+Inspect the directory name:
+- Name starts with `audit-` → HUNT_RUN_TYPE=AUDIT
+- Name starts with `exploit-` → HUNT_RUN_TYPE=EXPLOIT
+- Ambiguous → read `results.json` and check for `"source": "audit"` or `"source": "exploit"` field; if absent, default to AUDIT
+
+### Step 3: Read results.json
+
+```bash
+cat "$HUNT_RUN_DIR/results.json"
+```
+
+**For AUDIT runs, extract:**
+- `summary.risk_score`, `summary.top_findings[]`, `summary.paths_by_category`
+- `attack_paths[]` — for each: `name`, `severity`, `category`, `description`, `detection_opportunities[]`, `affected_resources[]`, `mitre_techniques[]`, `steps[]`
+- `principals[]` — for each: `arn`, `reachability.max_privilege`, `reachability.critical_paths[]`
+- `trust_relationships[]` — for each: `role_arn`, `trust_type`, `risk`, `is_wildcard`
+
+**For EXPLOIT runs, extract:**
+- `target_arn`, `summary.risk_score`, `summary.persistence_techniques`, `summary.exfiltration_vectors`, `summary.passrole_chains`
+- `attack_paths[]` — for each: `name`, `category`, `steps[]` (especially `steps[].action` — these are CloudTrail eventNames to hunt), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`, `confidence_tier`
+- Filter: prefer `confidence_tier=GUARANTEED` paths for hunt focus
+
+### Step 4: Read Per-Module JSONs (Audit Only)
+
+For AUDIT runs, list available per-module files and note which services were enumerated:
+
+```bash
+ls "$HUNT_RUN_DIR"/*.json 2>/dev/null | grep -v results.json
+```
+
+Do not read all module files at this step — only note which are present. Individual module files may be read later when anchoring specific Splunk queries to resource identifiers.
+
+### Step 5: Display Run Summary
+
+Display a structured summary of what was read. Do not dump raw JSON — surface the actionable intelligence:
+
+```
+RUN DIRECTORY LOADED
+  Path:           $HUNT_RUN_DIR
+  Type:           [AUDIT | EXPLOIT]
+  Risk score:     [summary.risk_score]
+
+  Attack paths:   [total count]
+    Critical:     [count]
+    High:         [count]
+    Medium:       [count]
+    Low:          [count]
+
+  [AUDIT only]
+  Principals:     [count with max_privilege=admin or write]
+  Cross-account trusts: [count of trust_type=cross-account or is_wildcard=true]
+  Services enumerated: [list of module JSON filenames without extension]
+
+  [EXPLOIT only]
+  Target:         [target_arn]
+  Guaranteed paths: [count of confidence_tier=GUARANTEED]
+  Persistence techniques available: [summary.persistence_techniques count]
+  Exfiltration vectors available:   [summary.exfiltration_vectors count]
+  CloudTrail eventNames to hunt:    [deduplicated list of steps[].action values from GUARANTEED paths]
+
+  Top findings:
+  [summary.top_findings[] — one per line, bulleted]
+```
+
+### After Hunt Mode Intake
+
+Proceed to `<mcp_detection>` regardless of Splunk availability. In hunt mode, Splunk is optional:
+- If CONNECTED: queries will validate hypotheses against CloudTrail
+- If MANUAL: proceed with findings from run directory, generate a hypothesis report from audit/exploit output alone without querying Splunk
+
+**Memory hygiene:** The ARNs, account IDs, bucket names, and resource identifiers read from the run directory must NOT be written to MEMORY.md. They may be used during this session and written to `context.json`. See `<memory_management>` for full prohibition list.
+</hunt_mode_intake>
+
 <mcp_detection>
 ## MCP Detection — Splunk Connection Check
 
