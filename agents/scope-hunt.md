@@ -1083,6 +1083,16 @@ Show the complete SPL query, pre-formatted, copy-pasteable:
 [full SPL query — see SPL Construction Rules below]
 ```
 
+**3.5. PURPOSE Label (when active_hypothesis is set)**
+
+Before presenting the gate, state the query's hypothesis role. Derive this from the active hunt technique pattern's `cloudtrail_signals[].confirm_refute` field for the primary event in this query. In MODE=INVESTIGATION with no pattern loaded, omit this label.
+
+```
+PURPOSE: This query is designed to [confirm / refute] the hypothesis by checking for
+[specific signal — e.g., "CreateAccessKey events from the alerting principal outside
+business hours in the 7-day window before the alert"].
+```
+
 **4. Gate**
 ```
 Run this query? → approve / skip [reason] / pivot: [specify angle]
@@ -1118,6 +1128,22 @@ When `active_hypothesis` is set, add a hypothesis verdict line after the result 
 - **Confirms hypothesis:** "This confirms [specific hypothesis step/signal] — [eventName] found at [time] from [actor]."
 - **Refutes hypothesis:** "This refutes [specific hypothesis step] — [eventName] is absent where we expected it. Consider: [alternative explanation]."
 - **Inconclusive:** "Inconclusive for the hypothesis — [eventName] is present but actor/time/resource does not match. Continuing investigation."
+
+When a hunt technique pattern is active (MODE=HUNT with catalogue loaded), add a HYPOTHESIS CHECK line citing the pattern field that drove the verdict:
+
+```
+HYPOTHESIS CHECK: result matches confirm_criteria ("[excerpt from pattern.confirm_criteria]")
+→ hypothesis_verdict: confirms
+```
+
+Or when refuting:
+
+```
+HYPOTHESIS CHECK: result matches refute_criteria ("[excerpt from pattern.refute_criteria]")
+→ hypothesis_verdict: refutes
+```
+
+If neither confirm nor refute criteria are met: `HYPOTHESIS CHECK: result matches neither confirm_criteria nor refute_criteria → hypothesis_verdict: inconclusive`
 
 Record the verdict in the `investigation_findings` accumulator for this step.
 
