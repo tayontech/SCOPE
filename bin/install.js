@@ -166,7 +166,7 @@ function installCodex(skillName, skillMdContent, targetDir) {
 const INSTALLABLE_AGENTS = new Set([
   'scope-audit',
   'scope-exploit',
-  'scope-investigate',
+  'scope-hunt',
 ]);
 
 // Agents from agents/ (top-level) that must also be deployed as subagents.
@@ -700,7 +700,7 @@ Options:
   --help      Print this usage message
 
 What gets installed:
-  Skills      Operator-invoked slash commands (scope-audit, scope-exploit, scope-investigate)
+  Skills      Operator-invoked slash commands (scope-audit, scope-exploit, scope-hunt)
               -> .claude/skills/ (Claude Code) or .agents/skills/ (Gemini/Codex)
   Subagents   Orchestrator-dispatched workers (enum subagents, attack-paths, scope-defend)
               -> .claude/agents/ (Claude Code)
@@ -881,7 +881,7 @@ function checkLegacyGeminiSkills(scope) {
     ? path.join(os.homedir(), '.gemini', 'skills')
     : path.join(process.cwd(), '.gemini', 'skills');
 
-  const scopeSkills = ['scope-audit', 'scope-exploit', 'scope-investigate', 'scope-hunt'];
+  const scopeSkills = ['scope-audit', 'scope-exploit', 'scope-hunt'];
   const stale = scopeSkills.filter(s => fs.existsSync(path.join(legacyBase, s)));
 
   if (stale.length > 0) {
@@ -890,7 +890,7 @@ function checkLegacyGeminiSkills(scope) {
     }:`);
     stale.forEach(s => console.warn(`    - ${s}/`));
     console.warn('  Remove these to prevent stale skill conflicts:');
-    console.warn(`    rm -rf ${legacyBase}/scope-{audit,exploit,investigate}\n`);
+    console.warn(`    rm -rf ${legacyBase}/scope-{audit,exploit,hunt}\n`);
   }
 }
 

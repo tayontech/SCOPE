@@ -78,7 +78,7 @@ If results.json is missing, set `SOURCE_ARTIFACT_MISSING=true` and produce an in
    - `defend` → `<defend_normalizer>`
    - `exploit` → `<exploit_normalizer>`
 
-   Note: Investigate does not run the post-processing pipeline — it produces investigation.md only and does not call scope-pipeline.
+   Note: Hunt does not run the post-processing pipeline — it produces investigation.md only and does not call scope-pipeline.
 
 4. Each normalizer returns a `payload` object. Wrap it in the common envelope:
    ```json
@@ -962,7 +962,7 @@ The output file `./agent-logs/<phase>/<run-id>.json` contains the validated, str
 
 When invoked, the calling agent provides two values:
 
-- **PHASE**: one of `audit`, `defend`, `exploit` (investigate does not call this middleware — it writes agent-log.jsonl directly)
+- **PHASE**: one of `audit`, `defend`, `exploit` (hunt does not call this middleware — it writes agent-log.jsonl directly)
 - **RUN_DIR**: path to the run directory containing raw artifacts
 
 ### Dispatch
@@ -1241,8 +1241,8 @@ Each entry in `./agent-logs/index.json` `runs` array:
     defend-20260301-160000.json                 # One file per defend run
   exploit/
     exploit-20260301-170000-user-alice.json     # One file per exploit run
-  investigate/
-    investigate-20260301-180000.json            # One file per investigate run
+  hunt/
+    hunt-20260301-180000.json            # One file per hunt run
 ```
 
 ### Data Hierarchy for Downstream Agents

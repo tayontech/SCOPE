@@ -36,7 +36,7 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 <project_context>
 ## SCOPE Project Context
 
-SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → investigate.
+SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → hunt.
 
 **Credential model:** SCOPE inherits credentials from the shell environment (AWS_PROFILE, AWS_ACCESS_KEY_ID, or boto3/AWS CLI defaults). No custom credential loading. The first AWS API call (`sts:GetCallerIdentity` at Gate 1) serves as the credential check.
 

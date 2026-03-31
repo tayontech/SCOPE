@@ -1,0 +1,428 @@
+{
+  "version": "2026-03",
+  "description": "Hunt technique patterns for scope-hunt hypothesis-driven investigations. Five adversary behavior categories. Each pattern is hypothesis-anchored: starts from 'did this happen?' rather than a confirmed event. Referenced by <hunt_technique_patterns> in scope-hunt.md. Follows config/escalation-catalogue.json convention: versioned root, category-grouped arrays of objects.",
+  "categories": {
+    "credential_abuse": [
+      {
+        "id": "cred-abuse-new-access-key",
+        "category": "credential_abuse",
+        "hypothesis_template": "An adversary created a new IAM access key for a target user to establish durable programmatic credentials outside normal provisioning.",
+        "cloudtrail_signals": [
+          { "event": "iam:CreateAccessKey", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "sts:GetCallerIdentity", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:ListAccessKeys", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:DeleteAccessKey", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "new_key_creation": {
+            "name": "New access key creation events",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=CreateAccessKey earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| rename userIdentity.userName AS actor, userIdentity.arn AS actor_arn, requestParameters.userName AS target_user\n| table _time eventName actor actor_arn target_user sourceIPAddress userAgent recipientAccountId errorCode\n| sort _time"
+          },
+          "key_usage_after_creation": {
+            "name": "Key usage within 2h of creation",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (userIdentity.userName=\"[target_user]\") earliest=\"[creation_time]\" latest=\"[2h_after_creation]\"\n| table _time eventName eventSource userIdentity.arn userIdentity.accessKeyId sourceIPAddress userAgent errorCode\n| sort _time"
+          },
+          "prior_key_exists": {
+            "name": "Check if target user already had an active key before the event",
+            "purpose": "refute",
+            "spl": "index=cloudtrail eventName=CreateAccessKey requestParameters.userName=\"[target_user]\" earliest=\"[30d_before_event]\" latest=\"[event_time]\"\n| table _time eventName userIdentity.userName requestParameters.userName sourceIPAddress errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "≥1 CreateAccessKey event for a user outside a known provisioning window, followed by API calls using the new key from a different source IP than the creating actor.",
+        "refute_criteria": "CreateAccessKey event matches a known service account provisioning pattern in context.json, or the key was immediately deleted (DeleteAccessKey within 5 min).",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1098.001", "T1078.004"]
+      },
+      {
+        "id": "cred-abuse-role-chaining",
+        "category": "credential_abuse",
+        "hypothesis_template": "An adversary chained AssumeRole calls across multiple roles or accounts to elevate privileges or obscure the originating identity.",
+        "cloudtrail_signals": [
+          { "event": "sts:AssumeRole", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "sts:GetSessionToken", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "sts:GetFederationToken", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:UpdateLoginProfile", "class": "MGT", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "role_chain_sequence": {
+            "name": "AssumeRole chain — identify sequential assumptions",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=AssumeRole earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| eval assumed_by=coalesce('userIdentity.arn', 'userIdentity.userName')\n| stats count, values(requestParameters.roleArn) AS roles_assumed, dc(requestParameters.roleArn) AS unique_roles by assumed_by sourceIPAddress\n| where unique_roles > 1\n| sort -unique_roles"
+          },
+          "cross_account_assumption": {
+            "name": "Cross-account AssumeRole — accountId mismatch",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=AssumeRole earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| eval is_cross_account=if('userIdentity.accountId'!='recipientAccountId', \"YES\", \"NO\")\n| where is_cross_account=\"YES\"\n| table _time eventName userIdentity.arn requestParameters.roleArn userIdentity.accountId recipientAccountId sourceIPAddress errorCode\n| sort _time"
+          },
+          "baseline_assumption_pattern": {
+            "name": "7-day baseline for this role — compare to alerting pattern",
+            "purpose": "refute",
+            "spl": "index=cloudtrail eventName=AssumeRole requestParameters.roleArn=\"[target_role_arn]\" earliest=\"[7d_before_event]\" latest=\"[event_time]\"\n| stats count by userIdentity.arn sourceIPAddress\n| sort -count"
+          }
+        },
+        "confirm_criteria": "≥2 sequential AssumeRole calls where the session ARN from call N is the assuming principal in call N+1, or cross-account assumption where userIdentity.accountId != recipientAccountId with no baseline match.",
+        "refute_criteria": "All AssumeRole callers and target roles match documented automation or CI/CD service accounts in context.json with consistent source IPs.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1078.004", "T1021.007"]
+      },
+      {
+        "id": "cred-abuse-token-replay",
+        "category": "credential_abuse",
+        "hypothesis_template": "An adversary replayed a stolen temporary credential token to access AWS services from an unexpected source.",
+        "cloudtrail_signals": [
+          { "event": "sts:AssumeRole", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "sts:GetSessionToken", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "sts:GetCallerIdentity", "class": "MGT", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "same_token_different_ip": {
+            "name": "Same access key ID used from multiple source IPs",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| stats dc(sourceIPAddress) AS ip_count, values(sourceIPAddress) AS source_ips, values(eventName) AS events by userIdentity.accessKeyId\n| where ip_count > 1 AND isnotnull(userIdentity.accessKeyId)\n| sort -ip_count"
+          },
+          "session_token_source_deviation": {
+            "name": "Assumed role session used from IP inconsistent with assumption origin",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=AssumeRole earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| eval session_arn=responseElements.assumedRoleUser.arn\n| eval assumption_ip=sourceIPAddress\n| join session_arn [search index=cloudtrail \"userIdentity.arn\"=\"[assumed_session_arn]\" earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\" | eval usage_ip=sourceIPAddress | table session_arn usage_ip]\n| where assumption_ip!=usage_ip\n| table _time eventName session_arn assumption_ip usage_ip\n| sort _time"
+          }
+        },
+        "confirm_criteria": "Same access key ID or assumed-role session ARN used from ≥2 distinct source IPs, where one IP does not match the known principal location in context.json.",
+        "refute_criteria": "All source IPs for the token are consistent with known NAT gateways, VPN egress IPs, or CI/CD runner IPs documented in context.json.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1078", "T1078.004"]
+      }
+    ],
+    "data_exfiltration": [
+      {
+        "id": "exfil-s3-bulk-read",
+        "category": "data_exfiltration",
+        "hypothesis_template": "An adversary performed a bulk read of S3 objects from a sensitive bucket to stage data for exfiltration.",
+        "cloudtrail_signals": [
+          { "event": "s3:GetObject", "class": "DATA", "confirm_refute": "confirm" },
+          { "event": "s3:ListObjects", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "s3:ListBuckets", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "s3:PutObject", "class": "DATA", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "s3_list_then_get": {
+            "name": "ListBuckets/ListObjects followed by GetObject — reconnaissance to exfil sequence",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventSource=s3.amazonaws.com (eventName=ListBuckets OR eventName=ListObjects OR eventName=GetObject) (userIdentity.arn=\"[user_arn]\" OR userIdentity.userName=\"[user_name]\") earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.bucketName requestParameters.key userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "s3_getobject_volume": {
+            "name": "GetObject volume spike — compare to 7d baseline",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=GetObject eventSource=s3.amazonaws.com requestParameters.bucketName=\"[bucket_name]\" earliest=\"[7d_before_event]\" latest=\"[event_time]\"\n| bucket _time span=1h\n| stats count by _time userIdentity.arn\n| sort _time"
+          }
+        },
+        "confirm_criteria": "GetObject event count from a single principal in a 1-hour window exceeds 2x the 7-day hourly baseline, or GetObject events occur from a source IP with no prior access to the bucket.",
+        "refute_criteria": "GetObject volume matches scheduled backup job or known ETL pipeline source IP documented in context.json.",
+        "data_event_caveat": true,
+        "mitre_techniques": ["T1530"]
+      },
+      {
+        "id": "exfil-secrets-bulk-read",
+        "category": "data_exfiltration",
+        "hypothesis_template": "An adversary bulk-retrieved secrets from Secrets Manager or SSM Parameter Store to harvest credentials for downstream services.",
+        "cloudtrail_signals": [
+          { "event": "secretsmanager:GetSecretValue", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ssm:GetParameter", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ssm:GetParameters", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "secretsmanager:ListSecrets", "class": "MGT", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "secrets_bulk_read": {
+            "name": "Bulk GetSecretValue — multiple distinct secrets in short window",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=GetSecretValue earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| stats count, dc(requestParameters.secretId) AS unique_secrets, values(requestParameters.secretId) AS secrets_accessed by userIdentity.arn sourceIPAddress\n| where unique_secrets > 3\n| sort -unique_secrets"
+          },
+          "ssm_parameter_harvest": {
+            "name": "SSM GetParameter calls — credential parameter paths",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=GetParameter OR eventName=GetParameters) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| where like(requestParameters.name, \"%password%\") OR like(requestParameters.name, \"%secret%\") OR like(requestParameters.name, \"%key%\") OR like(requestParameters.name, \"%token%\")\n| table _time eventName requestParameters.name userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "secrets_list_before_read": {
+            "name": "ListSecrets reconnaissance before GetSecretValue",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventSource=secretsmanager.amazonaws.com (eventName=ListSecrets OR eventName=GetSecretValue) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.secretId userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "≥1 GetSecretValue or GetParameter call from a principal that is not a known application service account, or bulk reads (≥4 distinct secrets in ≤10 min) regardless of principal.",
+        "refute_criteria": "All GetSecretValue calls match documented service account ARNs in context.json with consistent source IPs and no anomalous timing.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1552", "T1552.005"]
+      },
+      {
+        "id": "exfil-snapshot-share",
+        "category": "data_exfiltration",
+        "hypothesis_template": "An adversary created and shared an RDS or EBS snapshot with an external AWS account to exfiltrate data outside the organization.",
+        "cloudtrail_signals": [
+          { "event": "rds:CreateDBSnapshot", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "rds:ModifyDBSnapshotAttribute", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ec2:CreateSnapshot", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ec2:ModifySnapshotAttribute", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ec2:DeleteSnapshot", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "snapshot_share_external": {
+            "name": "ModifySnapshotAttribute — add external account to restore list",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=ModifySnapshotAttribute OR eventName=ModifyDBSnapshotAttribute) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| eval shared_with=coalesce('requestParameters.createVolumePermission.add.items{}.userId', 'requestParameters.attributeValues.restore.items{}.id')\n| where isnotnull(shared_with)\n| table _time eventName requestParameters.snapshotId requestParameters.dbSnapshotIdentifier shared_with userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "snapshot_create_then_share": {
+            "name": "CreateSnapshot followed by ModifySnapshotAttribute in short window",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=CreateSnapshot OR eventName=CreateDBSnapshot OR eventName=ModifySnapshotAttribute OR eventName=ModifyDBSnapshotAttribute) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.snapshotId requestParameters.dbSnapshotIdentifier requestParameters.volumeId userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "ModifySnapshotAttribute or ModifyDBSnapshotAttribute event adds an account ID not present in config/accounts.json (external account) to the restore/shared list, within 24h of snapshot creation.",
+        "refute_criteria": "The account ID added to the snapshot share list is present in config/accounts.json (internal account), or the snapshot was immediately deleted before external access was possible.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1537"]
+      }
+    ],
+    "persistence": [
+      {
+        "id": "persist-backdoor-role",
+        "category": "persistence",
+        "hypothesis_template": "An adversary created or modified an IAM role trust policy to allow an external principal or attacker-controlled account to assume the role as a persistent backdoor.",
+        "cloudtrail_signals": [
+          { "event": "iam:CreateRole", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:UpdateAssumeRolePolicy", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:AttachRolePolicy", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "sts:AssumeRole", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:DeleteRole", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "trust_policy_modification": {
+            "name": "UpdateAssumeRolePolicy — trust policy changes",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=UpdateAssumeRolePolicy earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.roleName requestParameters.policyDocument userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "new_role_external_trust": {
+            "name": "CreateRole with external account in trust policy",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=CreateRole earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| where like(requestParameters.assumeRolePolicyDocument, \"%sts:AssumeRole%\")\n| table _time eventName requestParameters.roleName requestParameters.assumeRolePolicyDocument userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "backdoor_role_assumption": {
+            "name": "AssumeRole calls for the newly created/modified role",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=AssumeRole requestParameters.roleArn=\"[new_or_modified_role_arn]\" earliest=\"[modification_time]\" latest=\"[7d_after_modification]\"\n| table _time eventName userIdentity.arn requestParameters.roleArn requestParameters.roleSessionName sourceIPAddress errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "CreateRole or UpdateAssumeRolePolicy event where the trust policy document contains an account ID not in config/accounts.json, followed by ≥1 AssumeRole call from that external account.",
+        "refute_criteria": "All principals in the trust policy document are in config/accounts.json (internal accounts), or the role was created by a documented IaC pipeline (Terraform, CloudFormation) service account.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1136", "T1098"]
+      },
+      {
+        "id": "persist-ghost-user",
+        "category": "persistence",
+        "hypothesis_template": "An adversary created a new IAM user with console or programmatic access to maintain persistent access under a separate identity.",
+        "cloudtrail_signals": [
+          { "event": "iam:CreateUser", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:CreateLoginProfile", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:CreateAccessKey", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:AttachUserPolicy", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:DeleteUser", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "new_user_with_access": {
+            "name": "CreateUser followed by CreateLoginProfile or CreateAccessKey",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventSource=iam.amazonaws.com (eventName=CreateUser OR eventName=CreateLoginProfile OR eventName=CreateAccessKey OR eventName=AttachUserPolicy) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.userName requestParameters.policyArn userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "ghost_user_activity": {
+            "name": "API calls by newly created user after provisioning",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail userIdentity.userName=\"[new_user_name]\" earliest=\"[creation_time]\" latest=\"[7d_after_creation]\"\n| table _time eventName eventSource userIdentity.arn userIdentity.accessKeyId sourceIPAddress userAgent errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "CreateUser event not matching a known provisioning workflow, followed by CreateLoginProfile or CreateAccessKey for that user within 60 min, then API activity from the new user.",
+        "refute_criteria": "CreateUser event matches a documented automated provisioning pipeline service account in context.json with expected timing and policy attachment.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1136", "T1098.001"]
+      },
+      {
+        "id": "persist-lambda-implant",
+        "category": "persistence",
+        "hypothesis_template": "An adversary modified or created a Lambda function to implant malicious code that executes on a schedule or trigger.",
+        "cloudtrail_signals": [
+          { "event": "lambda:CreateFunction", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "lambda:UpdateFunctionCode", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "lambda:AddPermission", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "events:PutRule", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "events:PutTargets", "class": "MGT", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "lambda_code_change": {
+            "name": "Lambda CreateFunction or UpdateFunctionCode events",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=CreateFunction OR eventName=UpdateFunctionCode) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.functionName requestParameters.code.s3Bucket requestParameters.code.imageUri userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "scheduled_trigger_added": {
+            "name": "EventBridge rule + target for Lambda scheduling",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=PutRule OR eventName=PutTargets) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.name requestParameters.scheduleExpression requestParameters.targets userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "UpdateFunctionCode or CreateFunction by a principal that is not a documented CI/CD service account, or new EventBridge rule targeting a Lambda function created in the same time window.",
+        "refute_criteria": "All Lambda code changes match documented deployment pipeline service account ARNs in context.json with expected source IPs.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1546", "T1053.007"]
+      }
+    ],
+    "lateral_movement": [
+      {
+        "id": "lateral-cross-account-pivot",
+        "category": "lateral_movement",
+        "hypothesis_template": "An adversary used AssumeRole to pivot from a compromised identity in one AWS account to a role in a different account, expanding the attack surface.",
+        "cloudtrail_signals": [
+          { "event": "sts:AssumeRole", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:CreateRole", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "iam:UpdateAssumeRolePolicy", "class": "MGT", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "cross_account_assume": {
+            "name": "AssumeRole where caller account != recipient account",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventName=AssumeRole earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| where 'userIdentity.accountId'!='recipientAccountId'\n| table _time eventName userIdentity.arn userIdentity.accountId requestParameters.roleArn recipientAccountId requestParameters.roleSessionName sourceIPAddress errorCode\n| sort _time"
+          },
+          "post_pivot_activity": {
+            "name": "Activity by the assumed role session in destination account",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail \"userIdentity.arn\"=\"[assumed_role_session_arn]\" earliest=\"[assumption_time]\" latest=\"[2h_after_assumption]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time"
+          },
+          "pivot_baseline": {
+            "name": "7-day baseline — who normally assumes this cross-account role?",
+            "purpose": "refute",
+            "spl": "index=cloudtrail eventName=AssumeRole requestParameters.roleArn=\"[target_role_arn]\" earliest=\"[7d_before_event]\" latest=\"[event_time]\"\n| stats count by userIdentity.arn sourceIPAddress\n| sort -count"
+          }
+        },
+        "confirm_criteria": "AssumeRole event where userIdentity.accountId != recipientAccountId, with the assuming principal being a recently compromised or anomalous identity, and post-assumption activity in the destination account.",
+        "refute_criteria": "Cross-account assumption matches a documented service integration or CI/CD trust relationship in context.json with expected source IP.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1021.007", "T1078.004"]
+      },
+      {
+        "id": "lateral-ssm-remote-exec",
+        "category": "lateral_movement",
+        "hypothesis_template": "An adversary used AWS Systems Manager to execute commands or start interactive sessions on EC2 instances to move laterally within the environment.",
+        "cloudtrail_signals": [
+          { "event": "ssm:SendCommand", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ssm:StartSession", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ecs:ExecuteCommand", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "ec2:RunInstances", "class": "MGT", "confirm_refute": "confirm" }
+        ],
+        "spl_templates": {
+          "ssm_command_execution": {
+            "name": "SSM SendCommand or StartSession events",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=SendCommand OR eventName=StartSession OR eventName=ExecuteCommand) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.instanceIds requestParameters.documentName requestParameters.target userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "ssm_session_actor_baseline": {
+            "name": "7-day baseline for SSM usage by this actor",
+            "purpose": "refute",
+            "spl": "index=cloudtrail (eventName=SendCommand OR eventName=StartSession) userIdentity.arn=\"[actor_arn]\" earliest=\"[7d_before_event]\" latest=\"[event_time]\"\n| stats count by requestParameters.instanceIds\n| sort -count"
+          }
+        },
+        "confirm_criteria": "SendCommand or StartSession by a principal with no prior SSM usage in context.json, or SSM commands targeting instances in a different VPC or account than the actor's normal scope.",
+        "refute_criteria": "SSM session matches a documented admin maintenance window or runbook automation service account in context.json.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1021.007", "T1651"]
+      }
+    ],
+    "defense_evasion": [
+      {
+        "id": "evasion-cloudtrail-blind",
+        "category": "defense_evasion",
+        "hypothesis_template": "An adversary stopped, deleted, or modified CloudTrail logging to create a visibility gap before or during malicious activity.",
+        "cloudtrail_signals": [
+          { "event": "cloudtrail:StopLogging", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "cloudtrail:DeleteTrail", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "cloudtrail:UpdateTrail", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "cloudtrail:PutEventSelectors", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "cloudtrail:StartLogging", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "cloudtrail_modification": {
+            "name": "CloudTrail StopLogging, DeleteTrail, UpdateTrail, PutEventSelectors",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=StopLogging OR eventName=DeleteTrail OR eventName=UpdateTrail OR eventName=PutEventSelectors) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.name requestParameters.trailName requestParameters.eventSelectors userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time"
+          },
+          "activity_during_gap": {
+            "name": "Actor activity during the suppression window",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[modification_time]\" latest=\"[1h_after_modification]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time"
+          },
+          "logging_restored": {
+            "name": "Check if StartLogging was called — rapid restoration may indicate testing",
+            "purpose": "refute",
+            "spl": "index=cloudtrail eventName=StartLogging (requestParameters.name=\"[trail_name]\" OR requestParameters.trailName=\"[trail_name]\") earliest=\"[modification_time]\" latest=\"[4h_after_modification]\"\n| table _time eventName userIdentity.arn sourceIPAddress\n| sort _time"
+          }
+        },
+        "confirm_criteria": "StopLogging or DeleteTrail event not matching a documented maintenance change window in context.json, especially when followed by unusual actor activity during the logging gap.",
+        "refute_criteria": "StopLogging event is immediately followed by StartLogging within 5 min (testing pattern), or the change matches a documented change management ticket or IaC pipeline activity.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1562.008"]
+      },
+      {
+        "id": "evasion-guardduty-disable",
+        "category": "defense_evasion",
+        "hypothesis_template": "An adversary disabled or disassociated GuardDuty to prevent threat detection alerts during an active attack.",
+        "cloudtrail_signals": [
+          { "event": "guardduty:DeleteDetector", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "guardduty:DisassociateFromMasterAccount", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "guardduty:DisassociateMembers", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "guardduty:UpdateDetector", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "guardduty:CreateDetector", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "guardduty_disable": {
+            "name": "GuardDuty detector deletion or disassociation",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventSource=guardduty.amazonaws.com (eventName=DeleteDetector OR eventName=DisassociateFromMasterAccount OR eventName=DisassociateMembers OR eventName=UpdateDetector) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.detectorId requestParameters.enable userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "config_recorder_disable": {
+            "name": "AWS Config StopConfigurationRecorder or DeleteDeliveryChannel (co-occurring evasion)",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (eventName=StopConfigurationRecorder OR eventName=DeleteDeliveryChannel) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.configurationRecorderName requestParameters.deliveryChannelName userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "DeleteDetector or UpdateDetector with enable=false event from a non-security-automation principal, or disassociation of a member account from GuardDuty master account.",
+        "refute_criteria": "GuardDuty change matches a documented security tool migration or region consolidation project documented in context.json, followed by CreateDetector in the same region within 60 min.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1562.001"]
+      },
+      {
+        "id": "evasion-config-suppression",
+        "category": "defense_evasion",
+        "hypothesis_template": "An adversary stopped AWS Config recording or deleted delivery channels to prevent configuration change tracking.",
+        "cloudtrail_signals": [
+          { "event": "config:StopConfigurationRecorder", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "config:DeleteDeliveryChannel", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "config:DeleteConfigurationRecorder", "class": "MGT", "confirm_refute": "confirm" },
+          { "event": "config:StartConfigurationRecorder", "class": "MGT", "confirm_refute": "refute" }
+        ],
+        "spl_templates": {
+          "config_stop": {
+            "name": "Config recorder stopped or delivery channel deleted",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail eventSource=config.amazonaws.com (eventName=StopConfigurationRecorder OR eventName=DeleteDeliveryChannel OR eventName=DeleteConfigurationRecorder) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName requestParameters.configurationRecorderName requestParameters.deliveryChannelName userIdentity.arn sourceIPAddress errorCode\n| sort _time"
+          },
+          "config_actor_full_timeline": {
+            "name": "Full actor timeline 2h before and after Config change",
+            "purpose": "confirm",
+            "spl": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[2h_before_event]\" latest=\"[2h_after_event]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time"
+          }
+        },
+        "confirm_criteria": "StopConfigurationRecorder or DeleteDeliveryChannel by a principal that is not a documented IaC or security automation service account, especially when co-occurring with CloudTrail modification or GuardDuty disable.",
+        "refute_criteria": "Config recorder stop matches a documented account decommission or region migration, followed by StartConfigurationRecorder within the same maintenance window.",
+        "data_event_caveat": false,
+        "mitre_techniques": ["T1562.007"]
+      }
+    ]
+  }
+}
