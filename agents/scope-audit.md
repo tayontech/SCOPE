@@ -36,7 +36,7 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 <project_context>
 ## SCOPE Project Context
 
-SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → investigate.
+SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → hunt.
 
 **Credential model:** SCOPE inherits credentials from the shell environment (AWS_PROFILE, AWS_ACCESS_KEY_ID, or boto3/AWS CLI defaults). No custom credential loading. The first AWS API call (`sts:GetCallerIdentity` at Gate 1) serves as the credential check.
 
@@ -563,7 +563,7 @@ Attack paths identified: [count]
   HIGH: [count] paths
   MEDIUM: [count] paths
   LOW: [count] paths
-  Below threshold (<50% confidence): [count] paths (excluded from findings)
+  Speculative (stripped by verify): [count] paths — gating conditions not satisfiable
 
 Top findings:
   1. [Most critical path name — one sentence]
@@ -680,7 +680,7 @@ Order by exploitability score DESC, then confidence DESC.
 
 ### ATTACK PATH #1: [Descriptive Name] — [CRITICAL/HIGH/MEDIUM/LOW]
 **Exploitability:** [CRITICAL/HIGH/MEDIUM/LOW]
-**Confidence:** [N%] — [what was verified vs not verified]
+**Confidence:** [what was verified and what was not — e.g., "IAM policy confirmed; SCP status unknown"]
 **MITRE:** [T1078.004], [T1548]
 
 [Narrative paragraph: what an attacker with access to [principal] could do, WHY the chain works
@@ -708,13 +708,13 @@ Use REAL ARNs and resource names throughout. Never use placeholders in the final
 ## RECOMMENDED NEXT ACTION
 
 [One specific, contextual recommendation based on highest-risk finding. Reference defensive
-control artifacts already generated at ./defend/defend-{timestamp}/.]
+control artifacts already generated at $RUN_DIR/defend/defend-{timestamp}/.]
 
 **Additional options:**
 - `/scope:exploit` — validate findings by testing exploitability
 - `/scope:audit [another-target]` — drill into [specific related resource]
 - View results: open `dashboard/dashboard.html` in any browser
-- Review defensive control artifacts: `./defend/defend-{timestamp}/`
+- Review defensive control artifacts: `$RUN_DIR/defend/defend-{timestamp}/`
 ```
 </findings_md>
 
@@ -723,9 +723,11 @@ control artifacts already generated at ./defend/defend-{timestamp}/.]
 
 After findings.md is written (and Gate 4 was NOT skipped), export results.json.
 
-The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Check both locations:
+The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Before copying, clean stale dashboard data so the dashboard always shows the current run:
 
 ```bash
+# Clean previous run data — dashboard only shows one run per phase anyway
+rm -f dashboard/public/audit-*.json dashboard/public/defend-*.json dashboard/public/index.json 2>/dev/null
 mkdir -p dashboard/public
 if [ -f "$RUN_DIR/results.json" ]; then
   cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
@@ -738,16 +740,22 @@ else
 fi
 ```
 
-Update `dashboard/public/index.json` — read existing, upsert this run (match on `run_id`), write back newest-first:
-```json
-{
-  "run_id": "$RUN_ID",
-  "date": "[timestamp]",
-  "source": "audit",
-  "target": "[target input]",
-  "risk": "[CRITICAL|HIGH|MEDIUM|LOW]",
-  "file": "$RUN_ID.json"
-}
+Update `dashboard/public/index.json` — upsert this run (match on `run_id`), newest-first:
+```bash
+RISK_SCORE=$(jq -r '.summary.risk_score // "unknown"' "$RUN_DIR/results.json" 2>/dev/null || echo "unknown")
+if [ -f dashboard/public/index.json ]; then
+  node -e "
+    const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
+    idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
+    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$TARGET_INPUT', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' });
+    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
+  "
+else
+  node -e "
+    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$TARGET_INPUT', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' }] };
+    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
+  "
+fi
 ```
 
 Also append to `./audit/INDEX.md` (create if missing) and upsert into `./audit/index.json`.
@@ -784,14 +792,23 @@ With multi_agent enabled, Codex automatically spawns the registered role.
 Wait for defend to complete and return its summary.
 Expected summary:
   STATUS: complete|error
-  DEFEND_RUN_DIR: ./defend/defend-{timestamp}/
+  DEFEND_RUN_DIR: {audit_run_directory_path}/defend/defend-{timestamp}/
   METRICS: {scps: N, rcps: N, detections: N}
 ```
 
 If defend fails: log a warning, continue to pipeline. Defend failure is non-blocking.
 
-Note: Defend creates its own independent run directory at `./defend/defend-{timestamp}/`. Capture
+Note: Defend creates its run directory as a subdirectory of the audit run at `{audit_run_dir}/defend/defend-{timestamp}/`. Capture
 the DEFEND_RUN_DIR from defend's summary — you need it for the post-processing pipeline Run 2.
+
+**Announce defend completion to the operator:**
+```
+━━━ Defend: complete ━━━
+Run directory: {DEFEND_RUN_DIR}
+SCPs: {N} | RCPs: {N} | Detections: {N}
+━━━━━━━━━━━━━━━━━━━━━━━
+```
+If defend failed, announce: `━━━ Defend: failed (non-blocking) ━━━` with the error summary.
 </defend_auto_chain>
 
 <post_processing_pipeline>
@@ -813,7 +830,7 @@ Run Phase 1 data normalization then Phase 2 agent-log indexing for the audit art
 PHASE=defend
 RUN_DIR={defend_run_directory_path}
 ```
-Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./defend/defend-20260301-143022/`).
+Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./audit/audit-20260301-143022-all/defend/defend-20260301-143522-a1b2/`).
 Run Phase 1 data normalization then Phase 2 agent-log indexing for the defend artifacts (if defend succeeded).
 
 Sequential. Automatic. No operator approval needed.
@@ -852,6 +869,14 @@ This produces `dashboard/dashboard.html` — a portable file that opens in any b
 **Do NOT generate dashboard.html yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above.
 
 If dashboard generation fails: log a warning and continue. The raw artifacts and data/ exports are still valid.
+
+**Announce dashboard completion to the operator:**
+```
+━━━ Dashboard: generated ━━━
+Open: dashboard/dashboard.html
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+If dashboard failed: `━━━ Dashboard: failed (non-blocking) — raw artifacts available in $RUN_DIR/ ━━━`
 </dashboard_generation>
 
 <mandatory_outputs>
@@ -910,7 +935,7 @@ Claims: `claim-{type}-{seq}` (e.g., `claim-ap-001` for attack paths)
 - `subagent_return` — name, STATUS, METRICS, ERRORS, timestamp
 - `gate_transition` — gate, decision, timestamp
 - `policy_eval` — principal_arn, action_tested, 7-step evaluation_chain, source_evidence_ids
-- `claim` — statement, classification, confidence_pct, confidence_reasoning, gating_conditions
+- `claim` — statement, classification, confidence_reasoning, gating_conditions
 - `coverage_check` — scope_area, checked[], not_checked[], coverage_pct
 
 ### Writing Log Entries
@@ -997,7 +1022,11 @@ else
 fi
 ```
 2. Do NOT count accounts manually — always use the jq output above
-3. Pass OWNED_ACCOUNTS to attack-paths subagent (via initial message or as part of initial context written to $RUN_DIR/context.json before dispatch) so it can classify cross-account trusts as internal vs external
+3. Write OWNED_ACCOUNTS to `$RUN_DIR/context.json` before dispatching attack-paths so it can classify cross-account trusts as internal vs external:
+```bash
+jq -n --argjson owned "$OWNED_ACCOUNTS" --arg account_id "$ACCOUNT_ID" \
+  '{owned_accounts: $owned, account_id: $account_id}' > "$RUN_DIR/context.json"
+```
 </account_context>
 
 <scp_config>
@@ -1100,7 +1129,7 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory `./audit/$RUN_ID/` created, all artifacts written there, run appended to `./audit/INDEX.md` and `./audit/index.json`.
-9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its own `./defend/defend-{timestamp}/` run directory and returns DEFEND_RUN_DIR in its summary.
+9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its run directory at `$RUN_DIR/defend/defend-{timestamp}/` and returns DEFEND_RUN_DIR in its summary.
 10. **Pipeline ran inline** — agents/subagents/scope-pipeline.md invoked for both audit and defend phases. Failures logged as warnings (non-blocking).
 11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
 12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).

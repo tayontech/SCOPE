@@ -2,7 +2,7 @@
 name: scope-enum-rds
 description: RDS enumeration subagent — database instance discovery, public snapshot detection, IAM authentication analysis, and encryption posture. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/rds.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
 
@@ -44,19 +44,33 @@ On AccessDenied for describe-db-instances: `INSTANCE_FINDINGS="[]"`
 
 ### rds_snapshot (from describe-db-snapshots --snapshot-type manual, per region)
 
+Build the public snapshot list before extraction — `describe-db-snapshots` does NOT return
+`DBSnapshotAttributes`; that field only exists in `describe-db-snapshot-attributes` responses.
+
 ```bash
-SNAPSHOT_FINDINGS=$(echo "$RDS_SNAPSHOTS" | jq --arg region "$CURRENT_REGION" '[
+# Build public snapshot list via describe-db-snapshot-attributes (one call per manual snapshot)
+PUBLIC_SNAPSHOT_IDS="[]"
+for SNAP_ID in $(echo "$RDS_SNAPSHOTS" | jq -r '.DBSnapshots[].DBSnapshotIdentifier'); do
+  SNAP_ATTRS=$(aws rds describe-db-snapshot-attributes \
+    --db-snapshot-identifier "$SNAP_ID" \
+    --region "$CURRENT_REGION" \
+    --output json 2>&1) || continue
+  IS_PUBLIC=$(echo "$SNAP_ATTRS" | jq '[.DBSnapshotAttributesResult.DBSnapshotAttributes[]? | select(.AttributeName == "restore") | .AttributeValues[]? | select(. == "all")] | length > 0')
+  if [ "$IS_PUBLIC" = "true" ]; then
+    PUBLIC_SNAPSHOT_IDS=$(echo "$PUBLIC_SNAPSHOT_IDS" | jq --arg id "$SNAP_ID" '. + [$id]')
+  fi
+done
+```
+
+```bash
+SNAPSHOT_FINDINGS=$(echo "$RDS_SNAPSHOTS" | jq --arg region "$CURRENT_REGION" --argjson public_snapshots "$PUBLIC_SNAPSHOT_IDS" '[
   .DBSnapshots[] | {
     resource_type: "rds_snapshot",
     resource_id: .DBSnapshotIdentifier,
     arn: .DBSnapshotArn,
     region: $region,
     encrypted: .Encrypted,
-    publicly_accessible: (
-      if .DBSnapshotAttributes then
-        (.DBSnapshotAttributes[] | select(.AttributeName == "restore") | .AttributeValues | contains(["all"])) // false
-      else false end
-    ),
+    publicly_accessible: (.DBSnapshotIdentifier as $sid | $public_snapshots | any(. == $sid)),
     findings: []
   }
 ]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for rds_snapshot in $CURRENT_REGION"; STATUS="error"; }
@@ -67,21 +81,62 @@ On AccessDenied for describe-db-snapshots: `SNAPSHOT_FINDINGS="[]"`
 ### Regional Iteration
 
 ```bash
-ALL_FINDINGS="[]"
+# Remove temp files from any previous run in this RUN_DIR to avoid stale data
+rm -f "$RUN_DIR/raw/rds_instance_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/rds_region_status_"*.txt
+rm -f "$RUN_DIR/raw/rds_errors.txt"
+
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
+
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  # AWS CLI calls
-  RDS_INSTANCES=$(aws rds describe-db-instances --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBInstances AccessDenied $CURRENT_REGION"); INSTANCE_FINDINGS="[]"; }
-  RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION"); SNAPSHOT_FINDINGS="[]"; }
-  # Run extraction templates above
-  # Accumulate
-  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson inst "$INSTANCE_FINDINGS" --argjson snap "$SNAPSHOT_FINDINGS" '. + $inst + $snap')
+  (
+    REGION_STATUS="complete"
+
+    # AWS CLI calls
+    RDS_INSTANCES=$(aws rds describe-db-instances --region "$CURRENT_REGION" --output json 2>&1) || { echo "rds:DescribeDBInstances AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/rds_errors.txt"; INSTANCE_FINDINGS="[]"; REGION_STATUS="partial"; }
+    RDS_SNAPSHOTS=$(aws rds describe-db-snapshots --snapshot-type manual --region "$CURRENT_REGION" --output json 2>&1) || { echo "rds:DescribeDBSnapshots AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/rds_errors.txt"; SNAPSHOT_FINDINGS="[]"; REGION_STATUS="partial"; }
+    # Run extraction templates above (per-snapshot describe-db-snapshot-attributes inner loop runs correctly inside this subshell)
+    # Append findings to per-region temp files (no shared file writes across parallel subshells)
+    echo "$INSTANCE_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_instance_findings_$CURRENT_REGION.jsonl" 2>/dev/null
+    echo "$SNAPSHOT_FINDINGS" | jq '.[]' >> "$RUN_DIR/raw/rds_snapshot_findings_$CURRENT_REGION.jsonl" 2>/dev/null
+
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/rds_region_status_$CURRENT_REGION.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
 done
+
+# Wait for all remaining background region jobs
+wait
+
+# Collect per-region status to derive aggregate STATUS and ERRORS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/rds_region_status_$REGION.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then
+    STATUS="partial"
+    ERRORS+=("rds: region $REGION status: $RS")
+  fi
+done
+[ -f "$RUN_DIR/raw/rds_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/rds_errors.txt"
 ```
 
 ### Combine + Sort
 
 ```bash
-FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+# Merge per-region temp files into arrays after all background jobs complete (cat glob + jq -s 'add // []' handles empty/missing files safely)
+INSTANCE_MERGED=$(cat "$RUN_DIR/raw/rds_instance_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+SNAPSHOT_MERGED=$(cat "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+FINDINGS_JSON=$(jq -n --argjson inst "$INSTANCE_MERGED" --argjson snap "$SNAPSHOT_MERGED" '$inst + $snap | sort_by(.region + ":" + .arn)')
 ```
 
 ## Enumeration Workflow

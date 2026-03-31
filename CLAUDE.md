@@ -2,30 +2,35 @@
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) — AI agent set for purple team security operations against AWS accounts: resource audit → exploit playbook generation → defensive controls with SCPs and SPL detections → SOC alert investigation.
 
-The audit agent is an orchestrator that dispatches enumeration subagents in parallel. Standalone agents (exploit, investigate) reference subagents at `agents/subagents/` for verification and pipeline.
+The audit agent is an orchestrator that dispatches enumeration subagents in parallel. Standalone agents (exploit, hunt) reference subagents at `agents/subagents/` for verification and pipeline.
 
 ## Agents
 
 ```
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
-agents/scope-defend.md      Defensive controls generation (model: sonnet) — dispatched by orchestrator or invoked via /scope:defend
+agents/scope-defend.md      Defensive controls generation (model: claude-sonnet-4-6) — dispatched by orchestrator or invoked via /scope:defend
 agents/scope-exploit.md     Privilege escalation playbooks (slash command)
-agents/scope-investigate.md SOC alert investigation (slash command, memory: local)
+agents/scope-hunt.md SOC alert investigation (slash command, memory: local)
 ```
 
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
 
 ```
-agents/subagents/scope-enum-iam.md      IAM enumeration (model: haiku)
-agents/subagents/scope-enum-sts.md      STS/identity enumeration (model: haiku)
-agents/subagents/scope-enum-s3.md       S3 enumeration (model: haiku)
-agents/subagents/scope-enum-kms.md      KMS enumeration (model: haiku)
-agents/subagents/scope-enum-secrets.md  Secrets Manager enumeration (model: haiku)
-agents/subagents/scope-enum-lambda.md   Lambda enumeration (model: haiku)
-agents/subagents/scope-enum-ec2.md      EC2/VPC/EBS/ELB enumeration (model: haiku)
-agents/subagents/scope-attack-paths.md  Attack path reasoning from per-module JSON (model: sonnet)
-agents/subagents/scope-verify.md        Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
-agents/subagents/scope-pipeline.md      Post-processing middleware — data normalization then evidence indexing (read inline)
+agents/subagents/scope-enum-iam.md         IAM enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-sts.md         STS/identity enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-s3.md          S3 enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-kms.md         KMS enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-secrets.md     Secrets Manager enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-lambda.md      Lambda enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-ec2.md         EC2/VPC/EBS/ELB/SSM enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-rds.md         RDS enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-sns.md         SNS enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-sqs.md         SQS enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-apigateway.md  API Gateway enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON (model: claude-sonnet-4-6)
+agents/subagents/scope-verify.md           Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
+agents/subagents/scope-pipeline.md         Post-processing middleware — data normalization then evidence indexing (read inline)
 ```
 
 > **WARNING -- Session Model Override:**
@@ -37,7 +42,7 @@ agents/subagents/scope-pipeline.md      Post-processing middleware — data norm
 > If subagents appear to use the wrong model, check the installed `.claude/agents/*.md` file model field as a first diagnostic step.
 
 > **WARNING -- Subagent Memory Restriction:**
-> `memory:` is permitted ONLY on `scope-investigate.md`. Do NOT add `memory:` to:
+> `memory:` is permitted ONLY on `scope-hunt.md`. Do NOT add `memory:` to:
 > - Any `scope-enum-*.md` file (12 enum subagents)
 > - `scope-attack-paths.md`
 > - `scope-defend.md` (unless a future phase explicitly evaluates it)
@@ -54,19 +59,25 @@ agents/               Agent .md files — source format for all editors (flat, o
 agents/subagents/     Dispatched subagents and inline-read middleware (enum, attack-paths, verify, pipeline)
 data/                 Normalized JSON output (runtime-generated, gitignored)
 agent-logs/           Agent activity logs (runtime-generated, gitignored)
-investigate/          Investigation artifacts (runtime-generated, gitignored)
+hunt/          Hunt artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard (`dashboard.html`)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js — editor setup, generate-report.js — dashboard builder)
-.scope/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, agent logger
-.scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
+config/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, agent logger
+config/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
+
+# Runtime output structure (gitignored):
+audit/<run-id>/           Audit run — enum JSONs, results.json, findings.md
+audit/<run-id>/defend/    Defend output nested under its parent audit run
+exploit/<run-id>/         Exploit run — playbooks, results.json
+hunt/<run-id>/     Hunt artifacts
 ```
 
 ## Hooks
 
-SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hooks are shared scripts in `.scope/hooks/` with platform-specific configuration installed from settings templates in `.scope/settings/`.
+SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hook source scripts are in `config/hooks/` and settings templates in `config/settings/`.
 
-**Settings templates:** `.scope/settings/claude.settings.json` and `.scope/settings/gemini.settings.json` are the committed sources. Run `bin/install.js --local` (or `node bin/install.js`) to copy them to `.claude/settings.json` and `.gemini/settings.json` in your working directory.
+**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -85,7 +96,7 @@ Codex does not support lifecycle hooks — safety constraints are enforced throu
 |---------|-------------|
 | `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services) or inline execution (single service). Auto-chains defend after audit completes. |
 | `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `/scope:investigate` | SOC alert investigation via Splunk — guided queries, timeline building, IOC correlation |
+| `/scope:hunt [path]` | Threat hunting and alert investigation — two entry point modes: provide a SCOPE audit or exploit run directory path to enter hunt mode (reads findings, generates hypotheses, optionally queries Splunk), or invoke without a path to enter detection investigation mode (Splunk-driven, guided queries, timeline building, IOC correlation) |
 | `/scope:help` | List available commands, show usage examples |
 
 ## Data Layer
@@ -93,7 +104,7 @@ Codex does not support lifecycle hooks — safety constraints are enforced throu
 A single middleware agent runs automatically after audit, exploit, and defend:
 - **scope-pipeline** (`agents/subagents/scope-pipeline.md`) — Phase 1 normalizes raw artifacts to `./data/<phase>/<run-id>.json`, then Phase 2 validates `agent-log.jsonl` into envelopes at `./agent-logs/<phase>/<run-id>.json`
 
-Invoked by the source agent after writing artifacts — sequential and non-blocking. Investigate does not run this pipeline.
+Invoked by the source agent after writing artifacts — sequential and non-blocking. Hunt does not run this pipeline.
 
 ## Dashboard
 
@@ -129,7 +140,11 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## Agent Isolation
 
-scope-investigate is standalone — does not read audit/exploit/defend output. All other agents share data through the agent-logs/data layer.
+scope-hunt has two operating modes with different isolation properties:
+- **Detection investigation mode** (invoked without a path, or with a Splunk alert ID): standalone — does not read audit/exploit/defend output. Isolation matches v1.8 behavior.
+- **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
+
+All other agents share data through the agent-logs/data layer.
 
 ## Configuration Files
 
@@ -137,16 +152,17 @@ scope-investigate is standalone — does not read audit/exploit/defend output. A
 |------|---------|
 | `config/accounts.json` | Owned AWS account IDs — distinguishes internal vs external cross-account trusts |
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
+| `config/cloudtrail-classes.json` | CloudTrail event classification — used by exploit for stealth-ordered playbooks |
 
-All config files are optional and gitignored.
+All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.
 
 ## Memory Hygiene
 
-scope-investigate uses `memory: local` to accumulate Splunk query patterns across sessions. Memory is stored in `.claude/agent-memory-local/scope-investigate/` (project-local, covered by `.gitignore` via the `.claude/` entry).
+scope-hunt uses `memory: local` to accumulate Splunk query patterns across sessions. Memory is stored in `.claude/agent-memory-local/scope-hunt/` (project-local, covered by `.gitignore` via the `.claude/` entry).
 
 **Post-run ARN contamination check:**
 ```bash
-# Run after any scope-investigate session to verify no ARNs leaked into memory
+# Run after any scope-hunt session to verify no ARNs leaked into memory
 grep -r "arn:aws:" \
   "$HOME/.claude/agent-memory/" \
   "$(pwd)/.claude/agent-memory-local/" \
@@ -155,4 +171,4 @@ grep -r "arn:aws:" \
   || echo "OK: No ARN patterns found in agent memory"
 ```
 
-**gitignore coverage:** `.claude/` is already in `.gitignore`, which covers `.claude/agent-memory-local/scope-investigate/`. The user-global path `~/.claude/agent-memory/` is not used by SCOPE (memory scope is `local`, not `user`). If operators ever change to `memory: user`, they must verify `~/.gitignore` separately.
+**gitignore coverage:** `.claude/` is already in `.gitignore`, which covers `.claude/agent-memory-local/scope-hunt/`. The user-global path `~/.claude/agent-memory/` is not used by SCOPE (memory scope is `local`, not `user`). If operators ever change to `memory: user`, they must verify `~/.gitignore` separately.

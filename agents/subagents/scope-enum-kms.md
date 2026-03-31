@@ -2,9 +2,10 @@
 name: scope-enum-kms
 description: KMS enumeration subagent — customer-managed key discovery, key policy and grant analysis, encryption dependency mapping, and grant abuse chain detection. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/kms.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
+<!-- Token budget: ~304 lines | Before: ~3400 tokens (est) | After: ~3400 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's KMS enumeration specialist. Dispatched by scope-audit orchestrator.
 
@@ -135,37 +136,63 @@ On AccessDenied for list-grants: set `GRANTS_JSON="[]"`
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# Cleanup temp files for rerun safety
+rm -f "$RUN_DIR/raw/kms_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/kms_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  KEYS=$(aws kms list-keys --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("kms:ListKeys AccessDenied $CURRENT_REGION"); continue; }
-  for KEY_ARN in $(echo "$KEYS" | jq -r '.Keys[].KeyArn'); do
-    KEY_ID=$(echo "$KEY_ARN" | rev | cut -d'/' -f1 | rev)
-    # Describe key — skip AWS-managed keys
-    KEY_DESC=$(aws kms describe-key --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("kms:DescribeKey AccessDenied $KEY_ID"); continue; }
-    KEY_MANAGER=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.KeyManager')
-    if [ "$KEY_MANAGER" != "CUSTOMER" ]; then continue; fi
-    KEY_STATE=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.KeyState')
-    KEY_USAGE=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.KeyUsage')
-    KEY_ORIGIN=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.Origin')
+  (
+    REGION_STATUS="complete"
+    KEYS=$(aws kms list-keys --region "$CURRENT_REGION" --output json 2>&1) || { echo "kms:ListKeys AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/kms_errors.txt"; echo "error" > "$RUN_DIR/raw/kms_region_status_$CURRENT_REGION.txt"; exit 0; }
+    for KEY_ARN in $(echo "$KEYS" | jq -r '.Keys[].KeyArn'); do
+      KEY_ID=$(echo "$KEY_ARN" | rev | cut -d'/' -f1 | rev)
+      # Describe key — skip AWS-managed keys
+      KEY_DESC=$(aws kms describe-key --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1) || { echo "kms:DescribeKey AccessDenied $KEY_ID" >> "$RUN_DIR/raw/kms_errors.txt"; REGION_STATUS="partial"; continue; }
+      KEY_MANAGER=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.KeyManager')
+      if [ "$KEY_MANAGER" != "CUSTOMER" ]; then continue; fi
+      KEY_STATE=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.KeyState')
+      KEY_USAGE=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.KeyUsage')
+      KEY_ORIGIN=$(echo "$KEY_DESC" | jq -r '.KeyMetadata.Origin')
 
-    # Get rotation status
-    ROTATION=$(aws kms get-key-rotation-status --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    ROTATION_ENABLED=$(echo "$ROTATION" | jq '.KeyRotationEnabled // false' 2>/dev/null || echo "false")
+      # Get rotation status
+      ROTATION=$(aws kms get-key-rotation-status --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      ROTATION_ENABLED=$(echo "$ROTATION" | jq '.KeyRotationEnabled // false' 2>/dev/null || echo "false")
 
-    # Get key policy
-    KEY_POLICY_RAW=$(aws kms get-key-policy --key-id "$KEY_ID" --policy-name default --region "$CURRENT_REGION" --output json 2>&1)
-    if [ $? -ne 0 ]; then KEY_POLICY_RAW="{}"; ERRORS+=("kms:GetKeyPolicy AccessDenied $KEY_ID"); fi
+      # Get key policy
+      KEY_POLICY_RAW=$(aws kms get-key-policy --key-id "$KEY_ID" --policy-name default --region "$CURRENT_REGION" --output json 2>&1)
+      if [ $? -ne 0 ]; then KEY_POLICY_RAW="{}"; echo "kms:GetKeyPolicy AccessDenied $KEY_ID" >> "$RUN_DIR/raw/kms_errors.txt"; REGION_STATUS="partial"; fi
 
-    # Get grants
-    GRANTS_RAW=$(aws kms list-grants --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1)
-    if [ $? -ne 0 ]; then GRANTS_JSON="[]"; ERRORS+=("kms:ListGrants AccessDenied $KEY_ID"); else
-      # Run grant extraction template above
-      :
-    fi
+      # Get grants
+      GRANTS_RAW=$(aws kms list-grants --key-id "$KEY_ID" --region "$CURRENT_REGION" --output json 2>&1)
+      if [ $? -ne 0 ]; then GRANTS_JSON="[]"; echo "kms:ListGrants AccessDenied $KEY_ID" >> "$RUN_DIR/raw/kms_errors.txt"; REGION_STATUS="partial"; else
+        # Run grant extraction template above
+        :
+      fi
 
-    # Run kms_key extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$KEY_FINDINGS]" '. + $new')
-  done
+      # Run kms_key extraction template above, then append to temp file
+      echo "$KEY_FINDINGS" >> "$RUN_DIR/raw/kms_findings_$CURRENT_REGION.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/kms_region_status_$CURRENT_REGION.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
 done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/kms_region_status_$REGION.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
+done
+# Merge all per-key findings across all regions (O(n) — single pass after loops)
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/kms_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

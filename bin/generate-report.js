@@ -74,7 +74,7 @@ const dataIndexPath = join(projectRoot, "data", "index.json");
 const dashboardIndexPath = join(publicDir, "index.json");
 const dashboardIndexTmpPath = join(publicDir, "index.json.tmp");
 
-const runDir = process.env.RUN_DIR || process.env.DEFEND_RUN_DIR || process.env.AUDIT_RUN_DIR;
+const runDir = process.env.RUN_DIR || process.env.AUDIT_RUN_DIR;
 const currentRunId = runDir ? basename(runDir) : null;
 
 if (existsSync(dashboardIndexPath)) {
@@ -274,13 +274,34 @@ if (existsSync(join(publicDir, "index.json"))) {
     }
   }
 } else {
-  // Fallback: try results.json
-  const fallback = join(publicDir, "results.json");
-  if (existsSync(fallback)) {
-    const json = JSON.parse(readFileSync(fallback, "utf-8"));
-    const src = json.source || "audit";
-    inlineData[src] = json;
-    console.log(`[SCOPE] Inlined ${src} data from results.json`);
+  // Fallback: scan all JSON files in public/ (no index.json needed)
+  const { readdirSync } = require("fs");
+  const jsonFiles = readdirSync(publicDir).filter(f => f.endsWith(".json") && f !== "index.json");
+  if (jsonFiles.length > 0) {
+    // Group by source, pick the most recent file per source (by filename timestamp)
+    const bySource = {};
+    for (const file of jsonFiles.sort().reverse()) {
+      try {
+        const json = JSON.parse(readFileSync(join(publicDir, file), "utf-8"));
+        const src = json.source || (file.startsWith("defend") ? "defend" : "audit");
+        if (!bySource[src]) {
+          bySource[src] = { json, file };
+        }
+      } catch (_) { /* skip invalid JSON */ }
+    }
+    for (const [src, { json, file }] of Object.entries(bySource)) {
+      inlineData[src] = json;
+      console.log(`[SCOPE] Inlined ${src} data from ${file} (no index.json)`);
+    }
+  } else {
+    // Last resort: try results.json
+    const fallback = join(publicDir, "results.json");
+    if (existsSync(fallback)) {
+      const json = JSON.parse(readFileSync(fallback, "utf-8"));
+      const src = json.source || "audit";
+      inlineData[src] = json;
+      console.log(`[SCOPE] Inlined ${src} data from results.json`);
+    }
   }
 }
 

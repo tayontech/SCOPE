@@ -1,10 +1,10 @@
 #!/bin/bash
 # SCOPE Schema Validation — PostToolUse / AfterTool hook
 # Runs after Write|Edit on results.json files and dashboard public JSON files.
-# Validates required fields using jq against the canonical schemas in .scope/schemas/.
+# Validates required fields using jq against the canonical schemas in config/schemas/.
 # Returns decision: "block" with reason if required fields are missing.
 #
-# Canonical JSON Schema files are in .scope/schemas/{audit,defend,exploit}.schema.json
+# Canonical JSON Schema files are in config/schemas/{audit,defend,exploit}.schema.json
 # and can be used with any JSON Schema validator (ajv, python jsonschema, etc.) for CI.
 # This hook does lightweight jq-based validation for real-time enforcement.
 
@@ -84,7 +84,7 @@ case "$FILE_PATH" in
       REASON=$(printf '  - %s\n' "${ERRORS[@]}")
       jq -n --arg reason "$REASON" --arg file "$FILE_PATH" '{
         decision: "block",
-        reason: ("SCOPE Module Envelope Validation FAILED (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: .scope/schemas/module-envelope.schema.json")
+        reason: ("SCOPE Module Envelope Validation FAILED (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: config/schemas/module-envelope.schema.json")
       }'
     fi
     exit 0
@@ -324,11 +324,11 @@ case "$SOURCE" in
 
   exploit)
     check_field "target_arn" "principal ARN analyzed"
-    check_field "risk_score" "CRITICAL|HIGH|MEDIUM|LOW"
-    check_field "escalation_paths" "array of escalation paths"
+    check_field "summary" "exploit summary object"
+    check_field "attack_paths" "array of attack paths"
 
-    # escalation_paths items must have rank, name, steps
-    check_array_item_fields "escalation_paths" "rank,name,steps" "escalation path entries"
+    # attack_paths items must have name, steps
+    check_array_item_fields "attack_paths" "name,steps" "attack path entries"
     ;;
 
   *)
@@ -343,7 +343,7 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
   REASON=$(printf '  - %s\n' "${ERRORS[@]}")
   jq -n --arg reason "$REASON" --arg file "$FILE_PATH" --arg source "$SOURCE" '{
     decision: "block",
-    reason: ("SCOPE Schema Validation FAILED for " + $source + " results (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: .scope/schemas/" + $source + ".schema.json")
+    reason: ("SCOPE Schema Validation FAILED for " + $source + " results (" + $file + "):\n" + $reason + "\n\nFix the missing/invalid fields and rewrite. Schema reference: config/schemas/" + $source + ".schema.json")
   }'
   exit 0
 fi

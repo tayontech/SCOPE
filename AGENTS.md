@@ -1,8 +1,9 @@
+<!-- Token budget: ~198 lines | Before: ~3000 tokens (est) | After: ~3000 tokens (est) | Phase 33 2026-03-18 -->
 # SCOPE -- Cross-Platform Agent Suite
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) -- AI agent set for purple team security operations against AWS accounts: resource audit -> exploit playbook generation -> defensive controls with SCPs and SPL detections -> SOC alert investigation.
 
-The audit agent is an orchestrator that dispatches enumeration subagents in parallel. Standalone agents (exploit, investigate) reference subagents at `agents/subagents/` for verification and pipeline.
+The audit agent is an orchestrator that dispatches enumeration subagents in parallel. Standalone agents (exploit, hunt) reference subagents at `agents/subagents/` for verification and pipeline.
 
 ## Agents
 
@@ -10,23 +11,35 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 agents/scope-audit.md       AWS audit orchestrator — dispatches enum subagents in parallel
 agents/scope-defend.md      Defensive controls generation — dispatched by orchestrator or invoked directly
 agents/scope-exploit.md     Privilege escalation playbooks
-agents/scope-investigate.md SOC alert investigation
+agents/scope-hunt.md SOC alert investigation
 ```
 
 **Subagents** (`agents/subagents/` -- dispatched by orchestrator or read inline):
 
 ```
-agents/subagents/scope-enum-iam.md      IAM enumeration (model: haiku)
-agents/subagents/scope-enum-sts.md      STS/identity enumeration (model: haiku)
-agents/subagents/scope-enum-s3.md       S3 enumeration (model: haiku)
-agents/subagents/scope-enum-kms.md      KMS enumeration (model: haiku)
-agents/subagents/scope-enum-secrets.md  Secrets Manager enumeration (model: haiku)
-agents/subagents/scope-enum-lambda.md   Lambda enumeration (model: haiku)
-agents/subagents/scope-enum-ec2.md      EC2/VPC/EBS/ELB enumeration (model: haiku)
-agents/subagents/scope-attack-paths.md  Attack path reasoning from per-module JSON (model: inherit)
-agents/subagents/scope-verify.md        Unified verification -- claim ledger, AWS API validation, SPL checks (read inline)
-agents/subagents/scope-pipeline.md      Post-processing middleware -- data normalization then evidence indexing (read inline)
+agents/subagents/scope-enum-iam.md         IAM enumeration
+agents/subagents/scope-enum-sts.md         STS/identity enumeration
+agents/subagents/scope-enum-s3.md          S3 enumeration
+agents/subagents/scope-enum-kms.md         KMS enumeration
+agents/subagents/scope-enum-secrets.md     Secrets Manager enumeration
+agents/subagents/scope-enum-lambda.md      Lambda enumeration
+agents/subagents/scope-enum-ec2.md         EC2/VPC/EBS/ELB/SSM enumeration
+agents/subagents/scope-enum-rds.md         RDS enumeration
+agents/subagents/scope-enum-sns.md         SNS enumeration
+agents/subagents/scope-enum-sqs.md         SQS enumeration
+agents/subagents/scope-enum-apigateway.md  API Gateway enumeration
+agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration
+agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON
+agents/subagents/scope-verify.md           Unified verification -- claim ledger, AWS API validation, SPL checks (read inline)
+agents/subagents/scope-pipeline.md         Post-processing middleware -- data normalization then evidence indexing (read inline)
 ```
+
+**Model routing per platform** -- `install.js` assigns models during install:
+
+| Agent Type | Claude Code | Gemini CLI | Codex |
+|------------|-------------|------------|-------|
+| Enum subagents | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
+| Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 ## Architecture
 
@@ -35,13 +48,19 @@ agents/               Agent .md files -- source format for all editors (flat, on
 agents/subagents/     Dispatched subagents and inline-read middleware (enum, attack-paths, verify, pipeline)
 data/                 Normalized JSON output (runtime-generated, gitignored)
 agent-logs/           Agent activity logs (runtime-generated, gitignored)
-investigate/          Investigation artifacts (runtime-generated, gitignored)
+hunt/          Hunt artifacts (runtime-generated, gitignored)
 dashboard/            React + D3 dashboard (dashboard.html)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js -- editor setup, generate-report.js -- dashboard builder)
-.scope/hooks/         Lifecycle hooks -- safety guard, SPL lint, schema validation, artifact check, agent logger
-.scope/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
-.scope/settings/      Committed hook settings templates for Claude Code and Gemini CLI
+config/hooks/         Lifecycle hooks -- safety guard, SPL lint, schema validation, artifact check, agent logger
+config/schemas/       JSON Schema definitions for results.json (audit, defend, exploit)
+config/settings/      Committed hook settings templates for Claude Code and Gemini CLI
+
+# Runtime output structure (gitignored):
+audit/<run-id>/           Audit run -- enum JSONs, results.json, findings.md
+audit/<run-id>/defend/    Defend output nested under its parent audit run
+exploit/<run-id>/         Exploit run -- playbooks, results.json
+hunt/<run-id>/     Hunt artifacts
 ```
 
 ## Skills
@@ -74,7 +93,7 @@ node bin/install.js --codex --local   # deploys to .agents/skills/ + .codex/agen
 
 ## Context Isolation (Claude Code Only)
 
-SCOPE entry-point skills (`scope-audit`, `scope-investigate`) use `context: fork` in their Claude Code skill frontmatter. When an operator invokes `/scope:audit` or `/scope:investigate`, Claude Code runs the skill in a forked subagent context: the skill content becomes the task, the forked agent gets its own isolated context window, and results summarize back to the main conversation cleanly.
+SCOPE entry-point skills (`scope-audit`, `scope-hunt`) use `context: fork` in their Claude Code skill frontmatter. When an operator invokes `/scope:audit` or `/scope:hunt`, Claude Code runs the skill in a forked subagent context: the skill content becomes the task, the forked agent gets its own isolated context window, and results summarize back to the main conversation cleanly.
 
 **Why it exists:**
 - Verbose AWS enumeration output and Splunk query result sets stay out of the main conversation window
@@ -101,7 +120,7 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 ## Hooks
 
-**Claude Code and Gemini CLI:** Lifecycle hooks in `.scope/hooks/` enforce safety constraints at the tool level. See `.scope/settings/claude.settings.json` (Claude) or `.scope/settings/gemini.settings.json` (Gemini) for event wiring. The installer copies the appropriate template to `.claude/settings.json` or `.gemini/settings.json` during setup.
+**Claude Code and Gemini CLI:** Lifecycle hooks enforce safety constraints at the tool level. Source scripts are in `config/hooks/` and settings templates in `config/settings/`. The installer copies hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json` with absolute paths.
 
 **Codex:** No lifecycle hooks available. Safety constraints are enforced through this guidance only.
 
@@ -109,10 +128,10 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 ## Schema Enforcement
 
-Canonical JSON Schema files in `.scope/schemas/` define required fields for each phase's `results.json`:
-- `.scope/schemas/audit.schema.json` -- audit results
-- `.scope/schemas/defend.schema.json` -- defend results
-- `.scope/schemas/exploit.schema.json` -- exploit results
+Canonical JSON Schema files in `config/schemas/` define required fields for each phase's `results.json`:
+- `config/schemas/audit.schema.json` -- audit results
+- `config/schemas/defend.schema.json` -- defend results
+- `config/schemas/exploit.schema.json` -- exploit results
 
 **Claude Code / Gemini CLI:** The `scope-schema-validate.sh` hook validates every write to `results.json` or `dashboard/public/*.json` automatically.
 
@@ -140,7 +159,7 @@ edge_type must be exactly one of: priv_esc, trust, data_access, network, service
 |---------|-------------|
 | `$scope-audit <target>` | Enumerate AWS resources -- accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services). Auto-chains defend after audit completes. |
 | `$scope-exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `$scope-investigate` | SOC alert investigation via Splunk -- guided queries, timeline building, IOC correlation |
+| `$scope-hunt [path]` | Threat hunting and alert investigation -- two entry point modes: provide a SCOPE audit or exploit run directory path to enter hunt mode (reads findings, generates hypotheses, optionally queries Splunk), or invoke without a path to enter detection investigation mode (Splunk-driven, guided queries, timeline building, IOC correlation) |
 | `$scope-help` | List available commands, show usage examples |
 
 Gemini CLI operators: describe the task naturally and the model will activate the appropriate skill. The `$scope-*` prefixes above correspond to skill names in `.agents/skills/`.
@@ -150,7 +169,7 @@ Gemini CLI operators: describe the task naturally and the model will activate th
 A single middleware agent runs automatically after audit, exploit, and defend:
 - **scope-pipeline** (`agents/subagents/scope-pipeline.md`) -- Phase 1 normalizes raw artifacts to `./data/<phase>/<run-id>.json`, then Phase 2 validates `agent-log.jsonl` into envelopes at `./agent-logs/<phase>/<run-id>.json`
 
-Invoked by the source agent after writing artifacts -- sequential and non-blocking. Investigate does not run this pipeline.
+Invoked by the source agent after writing artifacts -- sequential and non-blocking. Hunt does not run this pipeline.
 
 ## Dashboard
 
@@ -186,7 +205,11 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## Agent Isolation
 
-scope-investigate is standalone -- does not read audit/exploit/defend output. All other agents share data through the agent-logs/data layer.
+scope-hunt has two operating modes with different isolation properties:
+- **Detection investigation mode** (invoked without a path, or with a Splunk alert ID): standalone -- does not read audit/exploit/defend output. Isolation matches v1.8 behavior.
+- **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
+
+All other agents share data through the agent-logs/data layer.
 
 ## Configuration Files
 
@@ -194,5 +217,6 @@ scope-investigate is standalone -- does not read audit/exploit/defend output. Al
 |------|---------|
 | `config/accounts.json` | Owned AWS account IDs -- distinguishes internal vs external cross-account trusts |
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
+| `config/cloudtrail-classes.json` | CloudTrail event classification -- used by exploit for stealth-ordered playbooks |
 
-All config files are optional and gitignored.
+All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.

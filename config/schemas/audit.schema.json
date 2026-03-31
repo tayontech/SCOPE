@@ -66,6 +66,18 @@
             "post_exploitation": { "type": "integer" },
             "lateral_movement": { "type": "integer" }
           }
+        },
+        "reachability": {
+          "type": "object",
+          "description": "Aggregate reachability stats from Part 9 analysis — computed by scope-attack-paths",
+          "properties": {
+            "principals_with_admin_reach": { "type": "integer" },
+            "principals_with_data_reach": { "type": "integer" },
+            "max_blast_radius_principal": { "type": "string" },
+            "max_blast_radius_nodes": { "type": "integer" },
+            "avg_hop_count": { "type": "number" },
+            "blocked_paths_total": { "type": "integer" }
+          }
         }
       }
     },
@@ -116,7 +128,6 @@
           },
           "description": { "type": "string" },
           "exploitability": { "type": "string" },
-          "confidence_pct": { "type": "integer", "minimum": 0, "maximum": 100 },
           "steps": { "type": "array", "items": { "type": "string" } },
           "mitre_techniques": { "type": "array", "items": { "type": "string" } },
           "detection_opportunities": { "type": "array", "items": { "type": "string" } },
@@ -133,7 +144,28 @@
         "properties": {
           "id": { "type": "string" },
           "type": { "type": "string", "enum": ["user", "role", "group"] },
-          "arn": { "type": "string" }
+          "arn": { "type": "string" },
+          "reachability": {
+            "type": "object",
+            "description": "Part 9 reachability analysis — computed by scope-attack-paths",
+            "properties": {
+              "reachable_roles": { "type": "array", "items": { "type": "string" } },
+              "reachable_data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "access_level": { "type": "string" }
+                  }
+                }
+              },
+              "max_privilege": { "type": "string", "enum": ["admin", "write", "read", "none"] },
+              "hop_count": { "type": "integer" },
+              "critical_paths": { "type": "array", "items": { "type": "object" } },
+              "blocked_paths": { "type": "array", "items": { "type": "object" } }
+            }
+          }
         }
       }
     },

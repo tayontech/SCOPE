@@ -2,9 +2,10 @@
 name: scope-enum-secrets
 description: Secrets Manager enumeration subagent — secret discovery, resource policy analysis, rotation gap detection, and KMS dependency mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/secrets.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
+<!-- Token budget: ~276 lines | Before: ~3200 tokens (est) | After: ~3200 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's Secrets Manager enumeration specialist. Dispatched by scope-audit orchestrator.
 
@@ -121,28 +122,60 @@ On AccessDenied for get-resource-policy or no resource policy: set `RESOURCE_POL
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# PERF-02: clean up per-region finding files for rerun safety
+rm -f "$RUN_DIR/raw/secrets_findings_"*.jsonl
+rm -f "$RUN_DIR/raw/secrets_region_status_"*.txt
+MAX_PARALLEL=4
+ACTIVE=0
+REGION_PIDS=()
 for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { ERRORS+=("secretsmanager:ListSecrets AccessDenied $CURRENT_REGION"); continue; }
-  for SECRET_ARN in $(echo "$SECRETS" | jq -r '.SecretList[].ARN'); do
-    SECRET_NAME=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .Name')
-    ROTATION_ENABLED=$(echo "$SECRETS" | jq --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .RotationEnabled // false')
-    LAST_ROTATED=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .LastRotatedDate // ""')
-    LAST_ACCESSED=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .LastAccessedDate // ""')
-    KMS_KEY_ID=$(echo "$SECRETS" | jq -r --arg arn "$SECRET_ARN" '.SecretList[] | select(.ARN == $arn) | .KmsKeyId // ""')
+  (
+    REGION_STATUS="complete"
+    SECRETS=$(aws secretsmanager list-secrets --region "$CURRENT_REGION" --output json 2>&1) || { echo "secretsmanager:ListSecrets AccessDenied $CURRENT_REGION" >> "$RUN_DIR/raw/secrets_errors.txt"; echo "error" > "$RUN_DIR/raw/secrets_region_status_$CURRENT_REGION.txt"; exit 0; }
+    # PERF-03: write list response once, then iterate with jq -c — no inner select() re-scans
+    SECRETS_FILE="$RUN_DIR/raw/secrets_list_$CURRENT_REGION.json"
+    echo "$SECRETS" > "$SECRETS_FILE"
+    jq -c '.SecretList[]' "$SECRETS_FILE" | while IFS= read -r SECRET_OBJ; do
+      SECRET_ARN=$(echo "$SECRET_OBJ" | jq -r '.ARN')
+      SECRET_NAME=$(echo "$SECRET_OBJ" | jq -r '.Name')
+      ROTATION_ENABLED=$(echo "$SECRET_OBJ" | jq '.RotationEnabled // false')
+      LAST_ROTATED=$(echo "$SECRET_OBJ" | jq -r '.LastRotatedDate // ""')
+      LAST_ACCESSED=$(echo "$SECRET_OBJ" | jq -r '.LastAccessedDate // ""')
+      KMS_KEY_ID=$(echo "$SECRET_OBJ" | jq -r '.KmsKeyId // ""')
 
-    # Get resource policy
-    RESOURCE_POLICY_RAW=$(aws secretsmanager get-resource-policy --secret-id "$SECRET_ARN" --region "$CURRENT_REGION" --output json 2>&1)
-    if [ $? -eq 0 ]; then
-      RESOURCE_POLICY_RAW=$(echo "$RESOURCE_POLICY_RAW" | jq -r '.ResourcePolicy // "{}"')
-    else
-      RESOURCE_POLICY_RAW="{}"
-      ERRORS+=("secretsmanager:GetResourcePolicy AccessDenied $SECRET_ARN")
-    fi
+      # Get resource policy
+      RESOURCE_POLICY_RAW=$(aws secretsmanager get-resource-policy --secret-id "$SECRET_ARN" --region "$CURRENT_REGION" --output json 2>&1)
+      if [ $? -eq 0 ]; then
+        RESOURCE_POLICY_RAW=$(echo "$RESOURCE_POLICY_RAW" | jq -r '.ResourcePolicy // "{}"')
+      else
+        RESOURCE_POLICY_RAW="{}"
+        echo "secretsmanager:GetResourcePolicy AccessDenied $SECRET_ARN" >> "$RUN_DIR/raw/secrets_errors.txt"
+        REGION_STATUS="partial"
+      fi
 
-    # Run secrets_secret extraction template above
-    ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$SECRET_FINDINGS]" '. + $new')
-  done
+      # Run secrets_secret extraction template above
+      # PERF-02: append finding to per-region file instead of O(n^2) argjson accumulation
+      echo "$SECRET_FINDINGS" >> "$RUN_DIR/raw/secrets_findings_$CURRENT_REGION.jsonl"
+    done
+    echo "$REGION_STATUS" > "$RUN_DIR/raw/secrets_region_status_$CURRENT_REGION.txt"
+  ) &
+  REGION_PIDS+=($!)
+  ACTIVE=$((ACTIVE + 1))
+  if [ "$ACTIVE" -ge "$MAX_PARALLEL" ]; then
+    wait "${REGION_PIDS[0]}"
+    REGION_PIDS=("${REGION_PIDS[@]:1}")
+    ACTIVE=$((ACTIVE - 1))
+  fi
 done
+wait
+# Collect per-region status files to derive aggregate STATUS
+STATUS="complete"
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/secrets_region_status_$REGION.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
+done
+# PERF-02: merge all region finding files into ALL_FINDINGS
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/secrets_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

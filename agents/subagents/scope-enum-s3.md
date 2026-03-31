@@ -2,9 +2,10 @@
 name: scope-enum-s3
 description: S3 enumeration subagent — bucket discovery, policy/ACL analysis, public access detection, and service integration edge mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/s3.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
+<!-- Token budget: ~302 lines | Before: ~3500 tokens (est) | After: ~3500 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's S3 enumeration specialist. Dispatched by scope-audit orchestrator.
 
@@ -125,8 +126,11 @@ On AccessDenied for get-public-access-block: set `PUBLIC_ACCESS_BLOCK_JSON='{"bl
 ```bash
 ALL_FINDINGS="[]"
 ERRORS=()
+# Cleanup temp file for rerun safety
+rm -f "$RUN_DIR/raw/s3_findings.jsonl"
 BUCKETS=$(aws s3api list-buckets --output json 2>&1) || { ERRORS+=("s3api:ListBuckets AccessDenied"); STATUS="error"; }
 for BUCKET_NAME in $(echo "$BUCKETS" | jq -r '.Buckets[].Name'); do
+  echo "[scope-enum-s3] Processing: $BUCKET_NAME"
   # Get bucket region
   LOCATION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --output json 2>&1) || { ERRORS+=("s3api:GetBucketLocation AccessDenied $BUCKET_NAME"); continue; }
   BUCKET_REGION=$(echo "$LOCATION" | jq -r '.LocationConstraint // "us-east-1"')
@@ -165,9 +169,11 @@ for BUCKET_NAME in $(echo "$BUCKETS" | jq -r '.Buckets[].Name'); do
   ACL=$(aws s3api get-bucket-acl --bucket "$BUCKET_NAME" --output json 2>&1)
   ACL_GRANTS_JSON=$(echo "$ACL" | jq '[.Grants[]? | {grantee: (.Grantee.URI // .Grantee.ID // .Grantee.DisplayName // "unknown"), permission: .Permission}]' 2>/dev/null || echo "[]")
 
-  # Run s3_bucket extraction template above
-  ALL_FINDINGS=$(echo "$ALL_FINDINGS" | jq --argjson new "[$BUCKET_FINDINGS]" '. + $new')
+  # Run s3_bucket extraction template above, then append to temp file
+  echo "$BUCKET_FINDINGS" >> "$RUN_DIR/raw/s3_findings.jsonl"
 done
+# Merge all per-bucket findings (O(n) — single pass after loop)
+ALL_FINDINGS=$(jq -s 'add // []' "$RUN_DIR/raw/s3_findings.jsonl" 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

@@ -4,6 +4,7 @@ description: Post-processing middleware — Phase 1 normalizes artifacts to ./da
 tools: Read, Write, Bash, Glob
 color: gray
 ---
+<!-- Token budget: ~1263 lines | Before: ~13500 tokens (est) | After: ~13100 tokens (est) | Phase 33 2026-03-18 -->
 
 <role>
 You are SCOPE's post-processing middleware. You run automatically after source agents write their artifacts.
@@ -23,18 +24,11 @@ You are SCOPE's post-processing middleware. You run automatically after source a
 <phase_1_data>
 ## Phase 1 — Data Normalization
 
-Read raw agent artifacts (markdown, HTML, JSON) and produce canonical structured JSON files in `./data/`.
+Read raw agent artifacts and produce canonical structured JSON in `./data/`. No operator gates, slash commands, or credential checks.
 
-**You are middleware, not a user-facing agent.** You do not have operator gates, slash commands, or credential checks.
+**Steps:** (1) Read raw artifacts from RUN_DIR; (2) extract via phase-specific normalizer; (3) wrap in common envelope schema; (4) write to `./data/<phase>/<run-id>.json`; (5) update `./data/index.json`.
 
-**Behavior:**
-1. Read the raw artifacts from the given RUN_DIR
-2. Extract structured data according to the phase-specific normalizer
-3. Wrap the extracted data in the common envelope schema
-4. Write the normalized JSON to `./data/<phase>/<run-id>.json`
-5. Update `./data/index.json` with the new run entry
-
-**On failure:** Log a warning and return. Do not stop the calling agent's run. The raw artifacts already exist — data normalization is a convenience layer, not a gating requirement.
+**On failure:** Log warning and return. Raw artifacts remain valid.
 
 <normalization_protocol>
 ## Normalization Protocol — Dispatch
@@ -84,7 +78,7 @@ If results.json is missing, set `SOURCE_ARTIFACT_MISSING=true` and produce an in
    - `defend` → `<defend_normalizer>`
    - `exploit` → `<exploit_normalizer>`
 
-   Note: Investigate does not run the post-processing pipeline — it produces investigation.md only and does not call scope-pipeline.
+   Note: Hunt does not run the post-processing pipeline — it produces investigation.md only and does not call scope-pipeline.
 
 4. Each normalizer returns a `payload` object. Wrap it in the common envelope:
    ```json
@@ -157,7 +151,6 @@ For each path block, extract:
   - remediation: items under "**Remediation:**"
   - affected_resources: ARNs referenced in the narrative
   - exploitability: from "**Exploitability:**" line
-  - confidence_pct: integer from "**Confidence:**" line
 ```
 
 **Step 2: Build graph from findings**
@@ -201,10 +194,10 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
   },
   "graph": {
     "nodes": [
-      {"id": "string", "label": "string", "type": "user | role | escalation | data | external"}
+      {"id": "string", "label": "string", "type": "user | role | group | escalation | data | external"}
     ],
     "edges": [
-      {"source": "string", "target": "string", "trust_type": "same-account | cross-account", "edge_type": "normal | priv_esc | data_access | cross_account", "severity": "critical | high | medium | low", "label": "string"}
+      {"source": "string", "target": "string", "trust_type": "same-account | cross-account", "edge_type": "priv_esc | trust | data_access | network | service | public_access | cross_account | membership", "severity": "critical | high | medium | low", "label": "string"}
     ]
   },
   "attack_paths": [
@@ -214,7 +207,6 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
       "category": "privilege_escalation | trust_misconfiguration | data_exposure | credential_risk | excessive_permission | network_exposure | persistence | post_exploitation | lateral_movement",
       "description": "string",
       "exploitability": "string — e.g., 'high — requires only iam:CreatePolicyVersion'",
-      "confidence_pct": "int — 0-100",
       "steps": ["string"],
       "mitre_techniques": ["string — e.g., T1078.004"],
       "detection_opportunities": ["string — CloudTrail eventName + SPL"],
@@ -273,7 +265,7 @@ The defend agent does not make AWS API calls, so `account_id` must be inherited 
 
 1. **From defend results.json** — if the defend agent set `account_id`, use it
 2. **From linked audit data** — check `audit_runs_analyzed` in the defend payload. For each run ID, look for `./data/audit/<run-id>.json` and extract `account_id` from the envelope. Use the first non-`"unknown"` value found.
-3. **From audit results.json in AUDIT_RUN_DIR** — if the defend run directory name or agent-log.jsonl contains a reference to an audit run directory, read that directory's `results.json` for `account_id`
+3. **From parent audit run directory** — defend runs are nested under their parent audit run (`audit/<run-id>/defend/<defend-run-id>/`). Derive the parent audit directory as the grandparent of `$RUN_DIR` (i.e., `dirname $(dirname $RUN_DIR)`) and read its `results.json` for `account_id`
 4. **Fallback** — set to `"unknown"` and log a warning
 
 ### Extraction Steps
@@ -435,46 +427,53 @@ Extract from headings and content:
 
 ```
 Target ARN: from the playbook header or introduction
-Intake mode: "audit-data" or "fresh-enumeration" — from the intake summary
-Paths found: count of "## Path" or "## Escalation Path" headings
+Paths found: count of "## Path" or "## Attack Path" headings
 Highest privilege: from the summary section — e.g., "ADMIN", "POWER_USER"
+Novel paths found: count of paths with source "novel"
+PassRole chains: count from PassRole attack surface section
 
-For each escalation path:
-  - rank: ordinal from path number
+For each attack path:
   - name: from path heading
+  - noise_score: count of steps with visibility "MGT"
+  - noise_profile: counts of each visibility class {"MGT": N, "DATA": N, "NONE": N}
+  - severity: from path severity label
+  - category: one of privilege_escalation, persistence, post_exploitation, lateral_movement
+  - source: "catalogue" or "novel"
+  - confidence_tier: null for catalogue, "GUARANTEED"|"CONDITIONAL"|"SPECULATIVE" for novel
+  - reasoning: null for catalogue, reasoning chain string for novel
+  - description: what the path achieves
   - steps: array of step objects, each containing:
     - description: what the step does
-    - cli_command: the exact AWS CLI command (from code blocks)
-    - iam_policy_json: the IAM policy document if one is provided (from JSON code blocks)
-  - mitre_techniques: T-codes referenced (note: exploit doesn't include detection, but may reference techniques)
+    - action: primary AWS API action in service:Action format
+    - visibility: CloudTrail visibility class — "MGT", "DATA", or "NONE"
+  - mitre_techniques: T-codes referenced
+  - affected_resources: principal/resource IDs involved
+  - detection_opportunities: always empty array (detection is scope-defend's domain)
+  - remediation: SCP/IAM fixes
+  - lateral_movement_chain: array of {from, to, mechanism} hops
+  - persistence_techniques: array of {technique, available, permission}
+  - exfiltration_vectors: array of {vector, available, permission, scope_estimate}
 ```
 
-**Step 2: Extract circumvention analysis**
+**Step 2: Extract PassRole graph**
 
-If present, extract the circumvention analysis section:
-- SCP bypass techniques
-- Permission boundary bypass techniques
-- Session policy considerations
+If present, extract the PassRole attack surface section:
+- caller ARN
+- nodes: array of {id, type, arn/service}
+- edges: array of {from, to, type, action, role, capabilities}
+If PassRole was skipped, set passrole_graph to null.
 
-**Step 3: Extract lateral movement**
-
-If present, extract lateral movement section:
-- Cross-account role assumptions
-- Service-linked role abuse
-- Trust chain exploitation
-- Full attack chain traces (chains from initial principal through each hop to ultimate target)
-
-**Step 4: Extract persistence analysis**
+**Step 3: Extract persistence analysis**
 
 If present, extract the persistence analysis section:
-- For each of the 7 techniques: technique name, availability (available/unavailable), required permission, permission status (CONFIRMED/LIKELY/NOT AVAILABLE)
+- For each of the 11 techniques: technique name, availability (available/unavailable), required permission, permission status (CONFIRMED/LIKELY/NOT AVAILABLE)
 - CLI commands for available techniques
 - Cleanup indicators
 
-**Step 5: Extract exfiltration analysis**
+**Step 4: Extract exfiltration analysis**
 
 If present, extract the exfiltration analysis section:
-- For each of the 6 vectors: vector name, availability, required permission, permission status
+- For each of the 10 vectors: vector name, availability, required permission, permission status
 - Enumeration commands for available vectors
 - Data reachable description and scope estimates
 
@@ -482,78 +481,57 @@ If present, extract the exfiltration analysis section:
 
 ```json
 {
-  "source_audit_run": "string | null — run ID of the audit run used for intake, null if fresh enumeration",
   "target_arn": "string — principal ARN analyzed",
-  "intake_mode": "audit-data | fresh-enumeration",
-  "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
-  "paths_found": "int",
-  "highest_priv": "string — e.g., ADMIN, POWER_USER, READ_ONLY",
-  "escalation_paths": [
+  "summary": {
+    "paths_found": "int",
+    "novel_paths_found": "int",
+    "passrole_chains": "int",
+    "persistence_techniques": "int",
+    "exfiltration_vectors": "int",
+    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
+    "highest_priv": "string — e.g., ADMIN, POWER_USER, READ_ONLY"
+  },
+  "graph": {
+    "nodes": [{"id": "string", "label": "string", "type": "string"}],
+    "edges": [{"source": "string", "target": "string", "edge_type": "string", "severity": "string"}]
+  },
+  "attack_paths": [
     {
-      "rank": "int",
       "name": "string",
+      "noise_score": "int — count of steps with visibility MGT",
+      "noise_profile": {"MGT": "int", "DATA": "int", "NONE": "int"},
+      "severity": "string",
+      "category": "privilege_escalation | persistence | post_exploitation | lateral_movement",
+      "source": "catalogue | novel",
+      "confidence_tier": "null | GUARANTEED | CONDITIONAL | SPECULATIVE",
+      "reasoning": "string | null — reasoning chain for novel paths",
+      "description": "string",
       "steps": [
         {
-          "step_number": "int",
-          "description": "string",
-          "cli_command": "string — exact AWS CLI command",
-          "iam_policy_json": "object or null — IAM policy if step attaches one"
+          "description": "string — what the step does",
+          "action": "string — AWS API action in service:Action format",
+          "visibility": "MGT | DATA | NONE"
         }
       ],
-      "mitre_techniques": ["string"]
+      "mitre_techniques": ["string"],
+      "affected_resources": ["string"],
+      "detection_opportunities": [],
+      "remediation": ["string"],
+      "lateral_movement_chain": [
+        {"from": "string", "to": "string", "mechanism": "string"}
+      ],
+      "persistence_techniques": [
+        {"technique": "string", "available": "bool", "permission": "string"}
+      ],
+      "exfiltration_vectors": [
+        {"vector": "string", "available": "bool", "permission": "string", "scope_estimate": "string | null"}
+      ]
     }
   ],
-  "circumvention_analysis": {
-    "scp_bypass": ["string — technique descriptions"],
-    "boundary_bypass": ["string"],
-    "session_policy": ["string"]
-  },
-  "lateral_movement": {
-    "cross_account": ["string — role assumption chains"],
-    "service_linked": ["string — SLR abuse paths"],
-    "trust_chain": ["string"],
-    "full_chains": [
-      {
-        "chain_number": "int",
-        "initial_principal": "string — starting ARN",
-        "steps": [
-          {
-            "step_number": "int",
-            "type": "escalation | lateral",
-            "mechanism": "string — e.g., iam:PutUserPolicy, sts:AssumeRole, Lambda execution role",
-            "target": "string — ARN of role or resource reached"
-          }
-        ],
-        "ultimate_target": "string — final resource or action"
-      }
-    ]
-  },
-  "persistence": {
-    "techniques_available": "int — count of available techniques (0-7)",
-    "techniques": [
-      {
-        "technique": "string — technique name",
-        "available": "bool",
-        "required_permission": "string — IAM permission needed",
-        "permission_status": "CONFIRMED | LIKELY | NOT_AVAILABLE",
-        "cli_command": "string | null — command if available",
-        "cleanup_indicator": "string | null — what makes this visible"
-      }
-    ]
-  },
-  "exfiltration": {
-    "vectors_available": "int — count of available vectors (0-6)",
-    "vectors": [
-      {
-        "vector": "string — vector name",
-        "available": "bool",
-        "required_permission": "string — IAM permission needed",
-        "permission_status": "CONFIRMED | LIKELY | NOT_AVAILABLE",
-        "enumeration_command": "string | null — command if available",
-        "data_reachable": "string | null — description of accessible data",
-        "scope_estimate": "string | null — size/count estimate"
-      }
-    ]
+  "passrole_graph": {
+    "caller": "string — caller ARN",
+    "nodes": [{"id": "string", "type": "string", "arn": "string", "service": "string"}],
+    "edges": [{"from": "string", "to": "string", "type": "string", "action": "string", "role": "string", "capabilities": "string"}]
   }
 }
 ```
@@ -746,31 +724,13 @@ Each entry in `./data/index.json` `runs` array:
 <phase_2_evidence>
 ## Phase 2 — Evidence Indexing
 
-Read raw evidence logs (`agent-log.jsonl`) from agent run directories, validate provenance chains, and produce canonical evidence envelopes in `./agent-logs/`.
+Read `agent-log.jsonl`, validate provenance chains, and produce evidence envelopes in `./agent-logs/`. No operator gates. Runs after Phase 1.
 
-**You are middleware, not a user-facing agent.** You do not have operator gates, slash commands, or credential checks. Phase 2 runs after Phase 1 data normalization completes.
+**Input:** PHASE name + RUN_DIR. **Output:** `./agent-logs/<phase>/<run-id>.json` + updated `./agent-logs/index.json`.
 
-**Input:** A PHASE name and a RUN_DIR path, passed by the calling agent.
-**Output:** A validated evidence envelope in `./agent-logs/<phase>/<run-id>.json` and an updated `./agent-logs/index.json`.
+**Steps:** (1) Read `$RUN_DIR/agent-log.jsonl`; (2) parse and classify by record type; (3) validate provenance chains; (4) compute summary stats; (5) wrap in envelope schema; (6) write to `./agent-logs/<phase>/<run-id>.json`; (7) update index.
 
-**Audience:** Downstream SCOPE agents. The evidence layer provides the highest-fidelity data available — claim-level provenance, coverage manifests, and API call logs. Agents consuming evidence data can answer:
-
-1. Which claims are guaranteed vs conditional?
-2. What evidence (API calls, policy evaluations) supports each claim?
-3. What exactly was queried to produce that evidence?
-4. What coverage justifies "not observed" statements?
-5. What upstream run(s) does this output depend on?
-
-**Behavior:**
-1. Read `$RUN_DIR/agent-log.jsonl` — the raw evidence log written by the source agent
-2. Parse each JSON line and classify by record type
-3. Validate provenance chains (every claim must reference source evidence)
-4. Compute summary statistics (API call counts, coverage percentages)
-5. Wrap validated evidence in the envelope schema
-6. Write to `./agent-logs/<phase>/<run-id>.json`
-7. Update `./agent-logs/index.json` with the new entry
-
-**On failure:** Log a warning and return. Do not stop the calling agent's run. If `agent-log.jsonl` is missing, write a partial-status envelope so downstream agents know evidence was expected but unavailable. **Semantic distinction: `status: failed` means the pipeline itself crashed. `status: partial` means the pipeline ran successfully but source data was incomplete.**
+**On failure:** Log warning and return. If `agent-log.jsonl` is missing, write a partial-status envelope. `status: failed` = pipeline crashed. `status: partial` = pipeline ran, source data incomplete.
 
 <evidence_schema>
 ## Evidence Record Types
@@ -856,7 +816,6 @@ Logged when the agent asserts a finding, attack path step, or conclusion.
   "timestamp": "ISO8601",
   "statement": "User alice can escalate to admin via iam:CreatePolicyVersion",
   "classification": "guaranteed",
-  "confidence_pct": 95,
   "confidence_reasoning": "Direct policy attachment confirmed via ListAttachedUserPolicies; no boundary or SCP restrictions observed",
   "gating_conditions": [],
   "source_evidence_ids": ["ev-001", "ev-002"]
@@ -870,8 +829,7 @@ Logged when the agent asserts a finding, attack path step, or conclusion.
 | timestamp | string | yes | ISO8601 |
 | statement | string | yes | Human-readable assertion |
 | classification | string | yes | One of: `guaranteed`, `conditional`, `speculative` |
-| confidence_pct | number | yes | 0-100 confidence percentage |
-| confidence_reasoning | string | yes | Why this confidence level — must be non-empty |
+| confidence_reasoning | string | yes | Why this classification — must be non-empty |
 | gating_conditions | string[] | yes | Conditions that must hold for this claim. Empty for guaranteed claims. Must have ≥1 entry for conditional claims. |
 | source_evidence_ids | string[] | yes | IDs of evidence records supporting this claim. Must have ≥1 entry. |
 
@@ -934,7 +892,6 @@ The output file `./agent-logs/<phase>/<run-id>.json` contains the validated, str
       "id": "claim-ap-001",
       "statement": "string",
       "classification": "guaranteed | conditional | speculative",
-      "confidence_pct": 95,
       "confidence_reasoning": "string",
       "gating_conditions": [],
       "source_evidence_ids": ["ev-001", "ev-002"]
@@ -1005,7 +962,7 @@ The output file `./agent-logs/<phase>/<run-id>.json` contains the validated, str
 
 When invoked, the calling agent provides two values:
 
-- **PHASE**: one of `audit`, `defend`, `exploit` (investigate does not call this middleware — it writes agent-log.jsonl directly)
+- **PHASE**: one of `audit`, `defend`, `exploit` (hunt does not call this middleware — it writes agent-log.jsonl directly)
 - **RUN_DIR**: path to the run directory containing raw artifacts
 
 ### Dispatch
@@ -1065,9 +1022,6 @@ For every `claim` record:
 
 3. **Confidence reasoning required:** `confidence_reasoning` must be a non-empty string.
    - Violation: `"Warning: claim {id} has empty confidence_reasoning — excluding"`
-
-4. **Confidence range:** `confidence_pct` must be between 0 and 100 inclusive.
-   - Violation: `"Warning: claim {id} has confidence_pct out of range — clamping to [0, 100]"`
 
 ### API Call Validation
 
@@ -1287,8 +1241,8 @@ Each entry in `./agent-logs/index.json` `runs` array:
     defend-20260301-160000.json                 # One file per defend run
   exploit/
     exploit-20260301-170000-user-alice.json     # One file per exploit run
-  investigate/
-    investigate-20260301-180000.json            # One file per investigate run
+  hunt/
+    hunt-20260301-180000.json            # One file per hunt run
 ```
 
 ### Data Hierarchy for Downstream Agents

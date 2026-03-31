@@ -15,6 +15,11 @@
   "experimental": {
     "enableAgents": true
   },
+  "tools": {
+    "shell": {
+      "inactivityTimeout": 1800000
+    }
+  },
   "hooks": {
     "BeforeTool": [
       {
@@ -22,11 +27,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-safety-guard.sh"
+            "command": "__HOOKS_DIR__/scope-safety-guard.sh"
           },
           {
             "type": "command",
-            "command": ".scope/hooks/scope-aws-output-inject.sh"
+            "command": "__HOOKS_DIR__/scope-aws-output-inject.sh"
           }
         ]
       }
@@ -37,11 +42,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-spl-lint.sh"
+            "command": "__HOOKS_DIR__/scope-spl-lint.sh"
           },
           {
             "type": "command",
-            "command": ".scope/hooks/scope-schema-validate.sh"
+            "command": "__HOOKS_DIR__/scope-schema-validate.sh"
           }
         ]
       },
@@ -50,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-agent-logger.sh"
+            "command": "__HOOKS_DIR__/scope-agent-logger.sh"
           }
         ]
       }
@@ -60,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".scope/hooks/scope-artifact-check.sh"
+            "command": "__HOOKS_DIR__/scope-artifact-check.sh"
           }
         ]
       }

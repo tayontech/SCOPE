@@ -2,9 +2,10 @@
 name: scope-enum-sts
 description: STS/Organizations enumeration subagent — caller identity verification, access key attribution, organization structure, SCP analysis, and cross-account role mapping. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/sts.json.
 tools: Bash, Read, Glob, Grep
-model: haiku
+model: claude-haiku-4-5
 maxTurns: 25
 ---
+<!-- Token budget: ~206 lines | Before: ~2100 tokens (est) | After: ~2100 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's STS/Organizations enumeration specialist. Dispatched by scope-audit orchestrator.
 

@@ -1,6 +1,9 @@
 # OS
 .DS_Store
 
+# Backups
+*.bak
+
 # Python
 __pycache__/
 *.pyc
@@ -22,9 +25,8 @@ data/
 evidence/
 agent-logs/
 audit/
-defend/
 exploit/
-investigate/
+hunt/
 
 # Dashboard
 dashboard/node_modules/

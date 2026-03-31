@@ -144,6 +144,16 @@ function normalizeForDashboard(json, indexSource) {
         (t) => t.is_wildcard
       ).length;
     }
+
+    // Fallback: if trust_relationships reports 0 wildcards, count attack paths about wildcard trusts
+    if ((s.wildcard_trust_policies ?? 0) === 0 && Array.isArray(data.attack_paths)) {
+      const wildcardPaths = data.attack_paths.filter((p) =>
+        (p.name || "").toLowerCase().includes("wildcard") ||
+        (p.description || "").toLowerCase().includes("wildcard") ||
+        (p.category || "") === "trust_misconfiguration"
+      );
+      if (wildcardPaths.length > 0) s.wildcard_trust_policies = wildcardPaths.length;
+    }
   }
 
   // Exploit-specific normalization
@@ -804,7 +814,7 @@ function PathDetail({ path }) {
                 borderLeft: `3px solid ${i === 0 ? sev.color : sev.color + "66"}`,
                 borderRadius: 6, transition: "border-color 0.2s",
               }}>
-                <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.6 }}>{step}</span>
+                <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.6, wordBreak: "break-all" }}>{step}</span>
               </div>
             </div>
           );
@@ -839,7 +849,7 @@ function PathDetail({ path }) {
               <div style={{
                 flex: 1, background: "rgba(6,182,212,0.08)", border: `1px solid rgba(6,182,212,0.2)`,
                 borderRadius: 6, padding: "8px 12px", fontSize: 12,
-                color: "#67e8f9", fontFamily: "monospace",
+                color: "#67e8f9", fontFamily: "monospace", wordBreak: "break-all",
               }}>{d}</div>
               <CopyButton text={d} />
             </div>
@@ -873,9 +883,9 @@ function PathDetail({ path }) {
               background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
               borderRadius: 6, padding: "8px 12px",
             }}>
-              <span style={{ color: COLORS.nodeUser, fontFamily: "monospace", fontSize: 11 }}>{hop.from}</span>
+              <span style={{ color: COLORS.nodeUser, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>{hop.from}</span>
               <span style={{ color: COLORS.edgeCrossAccount }}>{"\u2192"}</span>
-              <span style={{ color: COLORS.nodeRole, fontFamily: "monospace", fontSize: 11 }}>{hop.to}</span>
+              <span style={{ color: COLORS.nodeRole, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>{hop.to}</span>
               <span style={{ color: COLORS.textDim, fontSize: 10, marginLeft: "auto" }}>{hop.mechanism}</span>
             </div>
           ))}
@@ -1897,14 +1907,22 @@ function DetectionRulesList({ detections }) {
             </div>
             {rules.map((rule, i) => {
               const sevCfg = SEVERITY_CONFIG[rule.severity] || SEVERITY_CONFIG.medium;
+              const detType = rule.type || (/^\[COMPOSITE\]/i.test(rule.name) ? "composite" : /^\[ATOMIC\]/i.test(rule.name) ? "atomic" : null);
+              const displayName = rule.name?.replace(/^\[(ATOMIC|COMPOSITE)\]\s*/i, "") || rule.name;
               return (
                 <div key={i} style={{
                   background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
                   borderRadius: 8, padding: 14, marginBottom: 8,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={rule.name}>{rule.name}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={rule.name}>{displayName}</span>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      {detType && <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8,
+                        color: detType === "composite" ? "#c084fc" : "#67e8f9",
+                        background: detType === "composite" ? "rgba(192,132,252,0.15)" : "rgba(103,232,249,0.15)",
+                        textTransform: "uppercase",
+                      }}>{detType}</span>}
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8,
                         color: sevCfg.color, background: sevCfg.bg, textTransform: "uppercase",
