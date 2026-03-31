@@ -95,13 +95,7 @@ Pick the tab for your platform. Each platform reads MCP config from a different 
 
 ### Claude Code
 
-Copy the MCP configuration template:
-
-```bash
-cp .mcp.example.json .mcp.json
-```
-
-No edits needed. The `.mcp.json` file reads `SPLUNK_URL` and `SPLUNK_TOKEN` from your shell environment at startup. As a defense-in-depth measure, `.mcp.json` is listed in `.gitignore`.
+The installer generates `.mcp.json` automatically during `node bin/install.js` (Claude Code local install). If it wasn't created, run the installer again. The file reads `SPLUNK_URL` and `SPLUNK_TOKEN` from your shell environment at startup. `.mcp.json` is listed in `.gitignore`.
 
 ```json
 {
