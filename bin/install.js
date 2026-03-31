@@ -873,6 +873,27 @@ function installHooks(editor, scope) {
 }
 
 /**
+ * Deploy .mcp.json for Claude Code (project-scoped MCP server config).
+ * Gemini CLI uses mcpServers in .gemini/settings.json (already in the template).
+ */
+function installMcpConfig(editor, scope) {
+  if (editor !== 'claude') return; // Gemini has MCP in settings.json; Codex doesn't support MCP
+  if (scope !== 'local') return; // .mcp.json is project-scoped only
+
+  const srcMcp = path.join(__dirname, '..', 'config', 'settings', 'mcp.json');
+  if (!fs.existsSync(srcMcp)) return;
+
+  const destFile = path.join(process.cwd(), '.mcp.json');
+  if (fs.existsSync(destFile)) {
+    console.log('  .mcp.json already exists — skipping (edit manually to update)');
+    return;
+  }
+
+  fs.copyFileSync(srcMcp, destFile);
+  console.log('  Created .mcp.json — set SPLUNK_URL and SPLUNK_TOKEN env vars to enable Splunk MCP');
+}
+
+/**
  * Warn if stale skills exist in deprecated .gemini/skills/ path.
  * Called after unifying Gemini to .agents/skills/.
  */
@@ -928,6 +949,11 @@ function runInstall(editors, scope) {
   // Hooks: install for ALL requested editors (no collision — different config dirs)
   for (const editor of editors) {
     installHooks(editor, scope);
+  }
+
+  // MCP config: deploy .mcp.json for Claude Code (Gemini has MCP in settings.json)
+  for (const editor of editors) {
+    installMcpConfig(editor, scope);
   }
 
   // Subagent deployment — each editor has its own target dir, no collision
