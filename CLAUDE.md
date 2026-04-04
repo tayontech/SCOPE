@@ -10,7 +10,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
 agents/scope-defend.md      Defensive controls generation (model: claude-sonnet-4-6) — dispatched by orchestrator or invoked via /scope:defend
 agents/scope-exploit.md     Privilege escalation playbooks (slash command)
-agents/scope-hunt.md SOC alert investigation (slash command, memory: local)
+agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (slash command, memory: local)
 ```
 
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
@@ -96,7 +96,7 @@ Codex does not support lifecycle hooks — safety constraints are enforced throu
 |---------|-------------|
 | `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services) or inline execution (single service). Auto-chains defend after audit completes. |
 | `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `/scope:hunt [path]` | Threat hunting and alert investigation — two entry point modes: provide a SCOPE audit or exploit run directory path to enter hunt mode (reads findings, generates hypotheses, optionally queries Splunk), or invoke without a path to enter detection investigation mode (Splunk-driven, guided queries, timeline building, IOC correlation) |
+| `/scope:hunt [input]` | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing. Three entry points: alert/notable ID (investigation mode), audit/exploit run directory (hunt mode), or threat intel URL / natural language description (intel mode). |
 | `/scope:help` | List available commands, show usage examples |
 
 ## Data Layer
@@ -140,9 +140,10 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## Agent Isolation
 
-scope-hunt has two operating modes with different isolation properties:
+scope-hunt has three operating modes with different isolation properties:
 - **Detection investigation mode** (invoked without a path, or with a Splunk alert ID): standalone — does not read audit/exploit/defend output. Isolation matches v1.8 behavior.
 - **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
+- **Intel mode** (invoked with a threat intel URL or natural language threat description): fetches the URL or parses the description, extracts IOCs and TTPs, generates hypotheses beyond the report, and hunts in Splunk. Extracted identifiers are session-scoped and must not be written to MEMORY.md.
 
 All other agents share data through the agent-logs/data layer.
 
@@ -170,5 +171,7 @@ grep -r "arn:aws:" \
   && echo "WARNING: ARN found in agent memory — review and remove" \
   || echo "OK: No ARN patterns found in agent memory"
 ```
+
+**Intel mode (threat intel URL / natural language):** IOCs and extracted identifiers (IPs, ARNs, account IDs, hashes) are session-scoped — written to `context.json`, not MEMORY.md. The same cross-account contamination risk applies: threat intel from one engagement must not persist into future sessions.
 
 **gitignore coverage:** `.claude/` is already in `.gitignore`, which covers `.claude/agent-memory-local/scope-hunt/`. The user-global path `~/.claude/agent-memory/` is not used by SCOPE (memory scope is `local`, not `user`). If operators ever change to `memory: user`, they must verify `~/.gitignore` separately.

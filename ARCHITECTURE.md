@@ -9,7 +9,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 
 **Standalone agents** (slash commands — operator-triggered):
 - `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
-- `scope-hunt` — SOC alert investigation via Splunk
+- `scope-hunt` — SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (tri-mode: investigation, hunt, intel)
 
 **Operator-invoked or orchestrator-dispatched:**
 - `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
@@ -77,10 +77,22 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  detections, controls             │
     │                               └──────────────────────────────────┘
     │
-    └── /scope:hunt [path] ──►┌──────────────────────────────────┐
-                                    │  scope-hunt (dual-mode)           │
+    └── /scope:hunt [input] ──►┌──────────────────────────────────┐
+                                    │  scope-hunt (tri-mode)            │
                                     │                                   │
-                                    │  Hunt mode (path provided):       │
+                                    │  Entry point detection:           │
+                                    │  ├─ Empty / notable_id=*          │
+                                    │  │    → MODE=INVESTIGATION        │
+                                    │  ├─ path-like (dir exists)        │
+                                    │  │    → MODE=HUNT                 │
+                                    │  ├─ http(s)://                    │
+                                    │  │    → MODE=INTEL, TYPE=URL      │
+                                    │  ├─ NL heuristic match            │
+                                    │  │    → MODE=INTEL, TYPE=NL       │
+                                    │  └─ anything else                 │
+                                    │       → MODE=INVESTIGATION        │
+                                    │                                   │
+                                    │  Hunt mode (run dir provided):    │
                                     │  1. Load context.json             │
                                     │  2. Read run directory            │
                                     │     results.json, attack paths,   │
@@ -90,20 +102,31 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
                                     │  5. Write artifacts               │
                                     │  6. Update context.json           │
                                     │                                   │
-                                    │  Investigation mode (no path):    │
+                                    │  Investigation mode (no input):   │
                                     │  1. Load context.json             │
                                     │  2. Query Splunk                  │
                                     │  3. Write artifacts               │
                                     │  4. Update context.json           │
                                     │                                   │
+                                    │  Intel mode (URL / NL input):     │
+                                    │  1. Load context.json             │
+                                    │  2. Fetch URL (WebFetch) or       │
+                                    │     parse NL description          │
+                                    │  3. Extract IOCs + TTPs           │
+                                    │  4. Generate threat_intel and     │
+                                    │     intel_reasoning hypotheses    │
+                                    │  5. Query Splunk                  │
+                                    │  6. Write artifacts               │
+                                    │  7. Update context.json           │
+                                    │                                   │
                                     │  (no post-processing pipeline     │
-                                    │   in either mode)                 │
+                                    │   in any mode)                    │
                                     └──────────────────────────────────┘
 ```
 
 ## Post-Processing Pipeline
 
-Source agents (audit, exploit, defend) trigger this pipeline after writing artifacts. Hunt does not run the post-processing pipeline in either mode — if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice. In hunt mode, scope-hunt reads from an existing audit or exploit run directory but does not write back to it.
+Source agents (audit, exploit, defend) trigger this pipeline after writing artifacts. Hunt does not run the post-processing pipeline in any mode — if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice. In hunt mode, scope-hunt reads from an existing audit or exploit run directory but does not write back to it. In intel mode, extracted IOCs and TTPs are session-scoped and written only to `context.json`.
 
 ```
   $RUN_DIR/findings.md          ./data/$PHASE/$RUN_ID.json
@@ -196,7 +219,7 @@ Verification results are in-memory — scope-verify returns corrections to the c
                                               │
   ┌───────────────────────────────────────────┘
   │
-  │   scope-hunt — dual-mode isolation
+  │   scope-hunt — tri-mode isolation
   │
   │   Detection investigation mode (no path argument):
   │   • No reads from ./audit/, ./exploit/, ./agent-logs/
@@ -210,6 +233,15 @@ Verification results are in-memory — scope-verify returns corrections to the c
   │   • Reads ./hunt/context.json (environment knowledge)
   │   • Generates hypotheses from findings, queries Splunk
   │   • Resource identifiers are session-scoped — not written to MEMORY.md
+  │
+  │   Intel mode (threat intel URL or natural language input):
+  │   • No reads from ./audit/, ./exploit/, ./agent-logs/
+  │   • Reads ./hunt/context.json (environment knowledge)
+  │   • Fetches URL (WebFetch) or parses NL description
+  │   • Extracts IOCs (IPs, ARNs, hashes) and TTPs (MITRE IDs, eventNames)
+  │   • Generates threat_intel hypotheses (from report) and
+  │     intel_reasoning hypotheses (kill chain beyond the report)
+  │   • Extracted identifiers are session-scoped — not written to MEMORY.md
   └──────────────────────────────────────────────────
 ```
 
@@ -240,7 +272,7 @@ Downstream agents consume upstream output in this priority order:
 | **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 12 enum subagents + attack-paths + defend |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
-| **hunt** | `/scope:hunt [path]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json` | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in either mode) |
+| **hunt** | `/scope:hunt [input]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json`. Intel mode: WebFetch (URL) or NL parse, `./hunt/context.json`, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in any mode) |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
 | **scope-pipeline** | Read inline after artifacts | `$RUN_DIR/` raw artifacts (Phase 1), `$RUN_DIR/agent-log.jsonl` + `./data/` (Phase 2) | `./data/$PHASE/$RUN_ID.json`, `./data/index.json` (Phase 1); `./agent-logs/$PHASE/$RUN_ID.json`, `./agent-logs/index.json` (Phase 2) | — |
 
