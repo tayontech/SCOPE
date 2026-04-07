@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-safety-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-spl-lint.sh"
+          },
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-schema-validate.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-agent-logger.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-artifact-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
