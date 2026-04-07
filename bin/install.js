@@ -834,11 +834,10 @@ function main() {
  * paths so hooks resolve correctly regardless of CWD (Stop hooks fire from ~).
  */
 function installHooks(editor, scope) {
-  if (editor === 'codex') return; // Codex does not support hooks
-
   const settingsMap = {
     claude: { src: 'config/settings/claude.settings.json', dest: '.claude/settings.json', hooksDir: '.claude/hooks' },
     gemini: { src: 'config/settings/gemini.settings.json', dest: '.gemini/settings.json', hooksDir: '.gemini/hooks' },
+    codex:  { src: 'config/settings/codex.hooks.json',     dest: '.codex/hooks.json',     hooksDir: '.codex/hooks'  },
   };
   const entry = settingsMap[editor];
   const srcSettings = path.join(__dirname, '..', entry.src);
@@ -862,8 +861,8 @@ function installHooks(editor, scope) {
   }
 
   // Step 2: Write settings with absolute hook paths
-  const destDir = path.join(base, path.dirname(entry.dest));
-  const destFile = path.join(destDir, 'settings.json');
+  const destFile = path.join(base, entry.dest);
+  const destDir = path.dirname(destFile);
   let content = fs.readFileSync(srcSettings, 'utf8');
   content = content.replace(/__HOOKS_DIR__/g, path.join(base, entry.hooksDir));
 
