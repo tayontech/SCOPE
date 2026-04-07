@@ -11,7 +11,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 agents/scope-audit.md       AWS audit orchestrator — dispatches enum subagents in parallel
 agents/scope-defend.md      Defensive controls generation — dispatched by orchestrator or invoked directly
 agents/scope-exploit.md     Privilege escalation playbooks
-agents/scope-hunt.md SOC alert investigation
+agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing
 ```
 
 **Subagents** (`agents/subagents/` -- dispatched by orchestrator or read inline):
@@ -159,7 +159,7 @@ edge_type must be exactly one of: priv_esc, trust, data_access, network, service
 |---------|-------------|
 | `$scope-audit <target>` | Enumerate AWS resources -- accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services). Auto-chains defend after audit completes. |
 | `$scope-exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
-| `$scope-hunt [path]` | Threat hunting and alert investigation -- two entry point modes: provide a SCOPE audit or exploit run directory path to enter hunt mode (reads findings, generates hypotheses, optionally queries Splunk), or invoke without a path to enter detection investigation mode (Splunk-driven, guided queries, timeline building, IOC correlation) |
+| `$scope-hunt [input]` | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing -- three entry points: (1) no argument or Splunk alert/notable ID → investigation mode (Splunk-driven, guided queries, timeline building, IOC correlation); (2) audit/exploit run directory path → hunt mode (reads findings, generates hypotheses, optionally queries Splunk); (3) threat intel URL (`http://`/`https://`) or natural language threat description (APT names, MITRE T-IDs, advisory keywords, IOC strings with threat context) → intel mode (fetches URL via WebFetch, extracts IOCs and TTPs, generates hypotheses beyond the report, reasons about kill chain next steps, hunts in Splunk) |
 | `$scope-help` | List available commands, show usage examples |
 
 Gemini CLI operators: describe the task naturally and the model will activate the appropriate skill. The `$scope-*` prefixes above correspond to skill names in `.agents/skills/`.
@@ -205,9 +205,10 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## Agent Isolation
 
-scope-hunt has two operating modes with different isolation properties:
+scope-hunt has three operating modes with different isolation properties:
 - **Detection investigation mode** (invoked without a path, or with a Splunk alert ID): standalone -- does not read audit/exploit/defend output. Isolation matches v1.8 behavior.
 - **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
+- **Intel mode** (invoked with a threat intel URL or natural language threat description): fetches the URL or parses the description, extracts IOCs and TTPs, generates hypotheses beyond the report, and hunts in Splunk. Extracted identifiers (IPs, ARNs, account IDs, hashes) are session-scoped -- written to `context.json`, not MEMORY.md.
 
 All other agents share data through the agent-logs/data layer.
 
