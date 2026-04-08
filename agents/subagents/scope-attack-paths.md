@@ -287,31 +287,7 @@ jq -n \
   }' > "$RUN_DIR/results.json"
 ```
 
-2. `dashboard/public/$RUN_ID.json` — Copy for dashboard consumption:
-```bash
-RUN_ID=$(basename "$RUN_DIR")
-mkdir -p dashboard/public
-cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
-```
-
-3. Update `dashboard/public/index.json` — Upsert this run into the runs array:
-```bash
-RUN_ID=$(basename "$RUN_DIR")
-RISK_SCORE=$(jq -r '.summary.risk_score // "unknown"' "$RUN_DIR/results.json")
-if [ -f dashboard/public/index.json ]; then
-  node -e "
-    const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
-    idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
-    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' });
-    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
-  "
-else
-  node -e "
-    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' }] };
-    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
-  "
-fi
-```
+**Dashboard export is NOT done here.** The audit orchestrator handles dashboard export after verification and Gate 4 approval. Writing to `dashboard/public/` from the subagent would bypass Gate 4 skip semantics and publish unverified results.
 
 **Build SUMMARY_JSON dynamically** — compute `services_analyzed` from SERVICES_COMPLETED count (never hardcode). All fields below are **required** — the dashboard and schema validation depend on these exact field names:
 ```bash
@@ -329,7 +305,8 @@ SUMMARY_JSON=$(jq -n \
   --argjson cross_account_trusts 0 \
   --argjson users_without_mfa 0 \
   '{services_analyzed: $services_analyzed, attack_paths_total: $attack_paths_total, risk_score: $risk_score, total_users: $total_users, total_roles: $total_roles, total_policies: $total_policies, total_trust_relationships: $total_trust_relationships, critical_priv_esc_risks: $critical_priv_esc_risks, wildcard_trust_policies: $wildcard_trust_policies, cross_account_trusts: $cross_account_trusts, users_without_mfa: $users_without_mfa}')
-# Replace all zeroes and UNKNOWN with real values after analysis
+# IMPORTANT: This is a SEED — all fields MUST be replaced with real values
+# in the deterministic rebuild step below (after analysis completes).
 
 **Populating summary fields from enumeration data:**
 - `total_users`: count of IAM user objects in iam.json findings
@@ -347,7 +324,25 @@ SUMMARY_JSON=$(jq -n \
 - `wildcard_trust_policies`: count of trust relationships where `is_wildcard == true`
 - `cross_account_trusts`: count of trust relationships where `trust_type == "cross-account"`
 - `risk_score`: highest severity across all attack paths (critical > high > medium > low)
-- Other fields: derive from analysis results
+- `users_without_mfa`: count of IAM users where MFA is not enabled
+
+**Deterministic SUMMARY_JSON rebuild (MANDATORY — run after all analysis is complete, before writing results.json):**
+```bash
+SUMMARY_JSON=$(jq -n \
+  --argjson services_analyzed "$SERVICES_COUNT" \
+  --argjson attack_paths_total "$(echo "$ATTACK_PATHS_JSON" | jq 'length')" \
+  --arg risk_score "$(echo "$ATTACK_PATHS_JSON" | jq -r '[.[].severity] | if any(. == "critical") then "critical" elif any(. == "high") then "high" elif any(. == "medium") then "medium" elif any(. == "low") then "low" else "unknown" end')" \
+  --argjson total_users "$(jq '[.findings[] | select(.resource_type == "iam_user")] | length' "$RUN_DIR/iam.json" 2>/dev/null || echo 0)" \
+  --argjson total_roles "$(jq '[.findings[] | select(.resource_type == "iam_role")] | length' "$RUN_DIR/iam.json" 2>/dev/null || echo 0)" \
+  --argjson total_policies "$(jq '[.findings[] | select(.resource_type == "iam_policy")] | length' "$RUN_DIR/iam.json" 2>/dev/null || echo 0)" \
+  --argjson total_trust_relationships "$(echo "$TRUST_JSON" | jq 'length')" \
+  --argjson critical_priv_esc_risks "$(echo "$ATTACK_PATHS_JSON" | jq '[.[] | select(.severity == "critical" and .category == "privilege_escalation")] | length')" \
+  --argjson wildcard_trust_policies "$(echo "$TRUST_JSON" | jq '[.[] | select(.is_wildcard == true)] | length')" \
+  --argjson cross_account_trusts "$(echo "$TRUST_JSON" | jq '[.[] | select(.trust_type == "cross-account")] | length')" \
+  --argjson users_without_mfa "$(jq '[.findings[] | select(.resource_type == "iam_user" and .mfa_enabled == false)] | length' "$RUN_DIR/iam.json" 2>/dev/null || echo 0)" \
+  '{services_analyzed: $services_analyzed, attack_paths_total: $attack_paths_total, risk_score: $risk_score, total_users: $total_users, total_roles: $total_roles, total_policies: $total_policies, total_trust_relationships: $total_trust_relationships, critical_priv_esc_risks: $critical_priv_esc_risks, wildcard_trust_policies: $wildcard_trust_policies, cross_account_trusts: $cross_account_trusts, users_without_mfa: $users_without_mfa}')
+```
+This rebuild replaces the seed entirely — no placeholder survives to results.json.
 ```
 
 **Build GRAPH_JSON** — the graph drives the D3 force-directed visualization. Node IDs use `type:name` format (NOT raw ARNs). All 6 node types are required when applicable. Edges connect nodes and MUST be populated — an empty edges array produces a broken visualization:
@@ -444,7 +439,7 @@ ATTACK_PATHS_JSON="[...]"  # populated from analysis — MUST be an array
 #     "account_name": null,  # human-readable name from config/accounts.json if available
 #     "has_external_id": false,
 #     "has_condition": false,
-#     "risk": "CRITICAL|HIGH|MEDIUM|LOW",
+#     "risk": "critical|high|medium|low",
 #     "arn": "arn:aws:iam::123456789012:role/RoleName"
 #   }
 TRUST_JSON="[...]"  # populated from trust policy analysis
@@ -454,7 +449,7 @@ TRUST_JSON="[...]"  # populated from trust policy analysis
 ```
 STATUS: complete|partial|error
 FILE: $RUN_DIR/results.json
-METRICS: {attack_paths: N, risk_score: CRITICAL|HIGH|MEDIUM|LOW, categories: N}
+METRICS: {attack_paths: N, risk_score: critical|high|medium|low, categories: N}
 ERRORS: [any issues encountered]
 ```
 
