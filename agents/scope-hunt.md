@@ -475,7 +475,10 @@ If the fetch fails (HTTP error, timeout, unreachable): display the error verbati
 Unable to fetch $INTEL_SOURCE_URL: [error]
 Paste the report text directly, or provide an alternate URL:
 ```
-If the operator pastes text: set INTEL_TYPE=NATURAL_LANGUAGE and continue at Path B.
+If the operator pastes text:
+- Set INTEL_NL_INPUT="<operator-pasted-text>"
+- Set INTEL_TYPE=NATURAL_LANGUAGE
+- Continue at Path B (Step B1)
 
 **Step A2: Check for structured formats**
 
