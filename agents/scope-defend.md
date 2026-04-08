@@ -92,7 +92,7 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 <mandatory_outputs>
 ## Required Output Files (MANDATORY)
 
-Every defend run MUST produce ALL of the following files. Check this list before reporting completion.
+Every defend run MUST produce ALL of the following files — EXCEPT when zero attack paths are found (see zero-path exception below). Check this list before reporting completion.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|
@@ -110,6 +110,16 @@ test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/executive-summary.md" && te
 ```
 
 If ANY mandatory file is MISSING, go back and create it before proceeding. Do not report completion with missing files.
+
+**Zero-path exception:** When zero attack paths are found (all runs parsed successfully but no exploitable paths exist), the ONLY required outputs are:
+1. `results.json` — minimal structure with empty `scps`, `rcps`, `detections`, `security_controls`, `prioritization` arrays and `zero_paths: true` in summary
+2. `executive-summary.md` — clean bill of health summary
+3. `agent-log.jsonl` — provenance log
+
+Do NOT generate `technical-remediation.md` or `policies/*.json` when zero attack paths exist. The self-check is replaced by:
+```bash
+test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/executive-summary.md" && test -f "$RUN_DIR/agent-log.jsonl" && echo "ZERO-PATH RUN: ALL MANDATORY FILES PRESENT" || echo "MISSING FILES — go back and create them"
+```
 
 ### Output Coverage Gate (MANDATORY)
 
