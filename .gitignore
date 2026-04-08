@@ -15,7 +15,7 @@ __pycache__/
 .agents/
 
 .planning/
-
+.obsidian/
 
 # Engagement output (generated at runtime)
 engagements/
