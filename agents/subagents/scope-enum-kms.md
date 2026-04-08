@@ -5,7 +5,6 @@ tools: Bash, Read, Glob, Grep
 model: claude-haiku-4-5
 maxTurns: 25
 ---
-<!-- Token budget: ~304 lines | Before: ~3400 tokens (est) | After: ~3400 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's KMS enumeration specialist. Dispatched by scope-audit orchestrator.
 
@@ -13,7 +12,28 @@ You are SCOPE's KMS enumeration specialist. Dispatched by scope-audit orchestrat
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
 - ENABLED_REGIONS: comma-separated list of AWS regions to scan
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-kms: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-kms: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
+
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/kms_"*
+```
 
 ## Extraction Templates
 
@@ -134,11 +154,6 @@ On AccessDenied for list-grants: set `GRANTS_JSON="[]"`
 ### Regional Iteration
 
 ```bash
-ALL_FINDINGS="[]"
-ERRORS=()
-# Cleanup temp files for rerun safety
-rm -f "$RUN_DIR/raw/kms_findings_"*.jsonl
-rm -f "$RUN_DIR/raw/kms_region_status_"*.txt
 MAX_PARALLEL=4
 ACTIVE=0
 REGION_PIDS=()
@@ -185,14 +200,6 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   fi
 done
 wait
-# Collect per-region status files to derive aggregate STATUS
-STATUS="complete"
-for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
-  RS=$(cat "$RUN_DIR/raw/kms_region_status_$REGION.txt" 2>/dev/null || echo "error")
-  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
-done
-# Merge all per-key findings across all regions (O(n) — single pass after loops)
-ALL_FINDINGS=$(cat "$RUN_DIR/raw/kms_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
@@ -201,91 +208,7 @@ ALL_FINDINGS=$(cat "$RUN_DIR/raw/kms_findings_"*.jsonl 2>/dev/null | jq -s 'add 
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ```
 
-## Enumeration Workflow
-
-1. **Enumerate** -- Run AWS CLI calls (`kms list-keys`, `kms describe-key`, `kms get-key-policy`, `kms list-grants`, `kms get-key-rotation-status` per customer-managed key) per region, store responses in shell variables
-2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for key policies and grant extraction
-3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
-4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
-5. **Write** -- Envelope jq writes to `$RUN_DIR/kms.json`
-6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/kms.json`
-
-## Output Contract
-
-**Write this file:** `$RUN_DIR/kms.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "kms" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/kms.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-kms" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/kms.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
-**Return to orchestrator (minimal summary only):**
-```
-STATUS: complete|partial|error
-FILE: $RUN_DIR/kms.json
-METRICS: {keys: N, grants: N, findings: N}
-REGIONS_SCANNED: N/M (list all regions successfully scanned)
-REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] (list only regions where customer-managed keys were found, or "none")
-ERRORS: [list of AccessDenied or partial failures, or empty]
-```
-
-## Post-Write Validation (MANDATORY)
-
-After writing `$RUN_DIR/kms.json`, validate output against the per-service schema:
-
-```bash
-node bin/validate-enum-output.js "$RUN_DIR/kms.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] kms.json failed schema validation (exit $VALIDATION_EXIT)"
-  STATUS="error"
-fi
-```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
-
-## Error Handling
-
-- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
-- All API calls fail: set status to "error", write empty findings array, include error field in JSON
-- Rate limiting: wait 2-5 seconds, retry once, report if retry fails
-- jq template failure: STATUS: error, no recovery -- report jq stderr
-- List denied APIs in ERRORS field (e.g., `["kms:ListKeys AccessDenied us-east-1"]`)
-
-### Zero-Finding Clarification
-If `list-keys` returns an empty array (no customer-managed keys) for ALL regions and no API errors occurred, this is a VALID result -- set STATUS to "complete" with an empty findings array. Zero keys is not an error. Only set STATUS to "error" if the API calls themselves failed (AccessDenied, network error, etc.).
-
-## Module Constraints
-- Skip AWS-managed keys (KeyManager: AWS) — only enumerate customer-managed keys (KeyManager: CUSTOMER)
-- Do NOT attempt decrypt operations
-- Do NOT list key material
-
-## Enumeration Checklist
+## Service Enumeration Checklist
 
 ### Discovery
 - [ ] Customer-managed keys per region (list-keys, then describe-key -- filter to KeyManager=CUSTOMER only); iterate ENABLED_REGIONS (split on comma):
@@ -319,6 +242,117 @@ If `list-keys` returns an empty array (no customer-managed keys) for ALL regions
 - [ ] Edges: grant-based access (role:<grantee> -> data:kms:KEY_ID, edge_type: "data_access") -- note grants bypass IAM
 - [ ] Edges: encryption dependency (data:kms:KEY_ID -> data:s3:BUCKET/data:secrets:SECRET/etc., edge_type: "data_access", access_level: "read")
 - [ ] access_level: read = Decrypt/DescribeKey/ListGrants; write = Encrypt/GenerateDataKey/CreateGrant; admin = kms:* or PutKeyPolicy
+
+## Execution Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`kms list-keys`, `kms describe-key`, `kms get-key-policy`, `kms list-grants`, `kms get-key-rotation-status` per customer-managed key) per region, store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for key policies and grant extraction
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/kms.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/kms.json`
+
+After the region loop completes:
+
+```bash
+# Collect per-region status files to derive aggregate STATUS
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  RS=$(cat "$RUN_DIR/raw/kms_region_status_$REGION.txt" 2>/dev/null || echo "error")
+  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
+  if [ "$RS" = "complete" ] || [ "$RS" = "partial" ]; then
+    REGIONS_COMPLETED+=("$REGION")
+  fi
+done
+# Reconstruct REGIONS_WITH_FINDINGS from temp finding files
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  if [ -s "$RUN_DIR/raw/kms_findings_$REGION.jsonl" ]; then
+    REGIONS_WITH_FINDINGS+=("$REGION")
+  fi
+done
+# Fold temp error file into ERRORS array
+if [ -f "$RUN_DIR/raw/kms_errors.txt" ]; then
+  while IFS= read -r line; do
+    ERRORS+=("$line")
+  done < "$RUN_DIR/raw/kms_errors.txt"
+fi
+# Merge all per-key findings across all regions (O(n) — single pass after loops)
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/kms_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+TOTAL_FINDINGS=$(echo "$ALL_FINDINGS" | jq 'length' 2>/dev/null || echo "0")
+```
+
+## Output Contract
+
+**Write this file:** `$RUN_DIR/kms.json`
+Write via Bash redirect (you do NOT have Write tool access):
+```bash
+jq -n \
+  --arg module "kms" \
+  --arg account_id "$ACCOUNT_ID" \
+  --arg region "multi-region" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg status "$STATUS" \
+  --argjson findings "$FINDINGS_JSON" \
+  '{
+    module: $module,
+    account_id: $account_id,
+    region: $region,
+    timestamp: $ts,
+    status: $status,
+    findings: $findings
+  }' > "$RUN_DIR/kms.json"
+```
+
+**Append to agent log:**
+```bash
+jq -n \
+  --arg agent "scope-enum-kms" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg status "$STATUS" \
+  --arg file "$RUN_DIR/kms.json" \
+  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
+  >> "$RUN_DIR/agent-log.jsonl"
+```
+
+**Return to orchestrator (minimal summary only):**
+```
+STATUS: complete|partial|error
+FILE: $RUN_DIR/kms.json
+METRICS: {keys: N, grants: N, findings: N}
+REGIONS_SCANNED: N/M (list all regions successfully scanned)
+REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] (list only regions where customer-managed keys were found, or "none")
+ERRORS: [list of AccessDenied or partial failures, or empty]
+```
+
+## Post-Write Validation
+
+After writing `$RUN_DIR/kms.json`, validate output against the per-service schema:
+
+```bash
+node bin/validate-enum-output.js "$RUN_DIR/kms.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  ERRORS+=("[VALIDATION] kms.json failed schema validation (exit $VALIDATION_EXIT)")
+  STATUS="error"
+fi
+```
+
+Do NOT report STATUS: complete if any validation step fails.
+
+## Error Handling
+
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
+- All API calls fail: set status to "error", write empty findings array, include error field in JSON
+- Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["kms:ListKeys AccessDenied us-east-1"]`)
+
+### Zero-Finding Clarification
+If `list-keys` returns an empty array (no customer-managed keys) for ALL regions and no API errors occurred, this is a VALID result -- set STATUS to "complete" with an empty findings array. Zero keys is not an error. Only set STATUS to "error" if the API calls themselves failed (AccessDenied, network error, etc.).
+
+## Module Constraints
+- Skip AWS-managed keys (KeyManager: AWS) — only enumerate customer-managed keys (KeyManager: CUSTOMER)
+- Do NOT attempt decrypt operations
+- Do NOT list key material
 
 ## Output Path Constraint
 

@@ -1,4 +1,3 @@
-<!-- Token budget: ~198 lines | Before: ~3000 tokens (est) | After: ~3000 tokens (est) | Phase 33 2026-03-18 -->
 # SCOPE -- Cross-Platform Agent Suite
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) -- AI agent set for purple team security operations against AWS accounts: resource audit -> exploit playbook generation -> defensive controls with SCPs and SPL detections -> SOC alert investigation.
@@ -120,11 +119,18 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 ## Hooks
 
-**Claude Code and Gemini CLI:** Lifecycle hooks enforce safety constraints at the tool level. Source scripts are in `config/hooks/` and settings templates in `config/settings/`. The installer copies hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json` with absolute paths.
+Lifecycle hooks enforce safety constraints at the tool level. Source scripts are in `config/hooks/` and settings templates in `config/settings/`. The installer copies hook scripts to platform-native locations (`.claude/hooks/`, `.gemini/hooks/`, or `.codex/hooks/`) and settings to `.claude/settings.json`, `.gemini/settings.json`, or `.codex/hooks.json` with absolute paths.
 
-**Codex:** No lifecycle hooks available. Safety constraints are enforced through this guidance only.
+**Hook event names by platform:**
 
-> **CODEX SAFETY NOTE:** SCOPE agents are READ-ONLY. Do not execute any AWS operation that modifies, creates, or deletes resources. All destructive operations require explicit operator approval via the approval gate pattern documented below. Exploit generates playbooks only -- it does not execute them. Never auto-apply SCPs, security group rules, or IAM policy changes. Always present the approval block and wait for explicit Y/N confirmation.
+| Hook | Claude Code event | Gemini CLI event | Codex event |
+|------|-------------------|------------------|-------------|
+| `scope-safety-guard.sh` | PreToolUse (Bash) | BeforeTool (Bash) | PreToolUse (Bash) |
+| `scope-aws-output-inject.sh` | — (not applicable) | BeforeTool (Bash) | — (not applicable) |
+| `scope-spl-lint.sh` | PostToolUse (Write\|Edit) | AfterTool (Write\|Edit) | PostToolUse (Write\|Edit) |
+| `scope-schema-validate.sh` | PostToolUse (Write\|Edit) | AfterTool (Write\|Edit) | PostToolUse (Write\|Edit) |
+| `scope-artifact-check.sh` | Stop | AfterAgent | Stop |
+| `scope-agent-logger.sh` | PostToolUse (Bash) | AfterTool (Bash) | PostToolUse (Bash) |
 
 ## Schema Enforcement
 
@@ -135,11 +141,9 @@ Canonical JSON Schema files in `config/schemas/` define required fields for each
 
 **Claude Code / Gemini CLI:** The `scope-schema-validate.sh` hook validates every write to `results.json` or `dashboard/public/*.json` automatically.
 
-**Codex:** Before writing `results.json`, read the corresponding schema file and self-check that all required fields are present. If a field is missing, add it before writing.
-
 ## Output Quality Rules
 
-These rules apply on all platforms. Codex enforces them via this guidance (no hooks available). Claude Code and Gemini CLI additionally enforce schema rules via the `scope-schema-validate.sh` hook.
+These rules apply on all platforms. The `scope-schema-validate.sh` hook validates schema rules on write.
 
 ### Escalation Node Connectivity
 

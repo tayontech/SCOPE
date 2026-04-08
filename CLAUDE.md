@@ -77,18 +77,16 @@ hunt/<run-id>/     Hunt artifacts
 
 SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hook source scripts are in `config/hooks/` and settings templates in `config/settings/`.
 
-**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
+**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/`, `.gemini/hooks/`, or `.codex/hooks/`) and settings to `.claude/settings.json`, `.gemini/settings.json`, or `.codex/hooks.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `scope-safety-guard.sh` | PreToolUse (Bash) | Block destructive AWS operations — agents are read-only |
+| `scope-safety-guard.sh` | PreToolUse (Bash, all platforms) | Block destructive AWS operations — agents are read-only |
 | `scope-aws-output-inject.sh` | BeforeTool (Bash, Gemini-only) | Auto-inject `--output json` into AWS CLI calls missing explicit output format |
-| `scope-spl-lint.sh` | PostToolUse (Write\|Edit) | Hard-fail on SPL anti-patterns (missing index, wrong fields, transaction in composites) |
-| `scope-schema-validate.sh` | PostToolUse (Write\|Edit) | Validate results.json and dashboard JSON against phase schemas — blocks writes with missing required fields |
-| `scope-artifact-check.sh` | Stop | Verify mandatory artifacts exist before agent completes |
-| `scope-agent-logger.sh` | PostToolUse (Bash, async) | Auto-log AWS CLI calls to agent-log.jsonl |
-
-Codex does not support lifecycle hooks — safety constraints are enforced through AGENTS.md guidance only.
+| `scope-spl-lint.sh` | PostToolUse (Write\|Edit, all platforms) | Hard-fail on SPL anti-patterns (missing index, wrong fields, transaction in composites) |
+| `scope-schema-validate.sh` | PostToolUse (Write\|Edit, all platforms) | Validate results.json and dashboard JSON against phase schemas — blocks writes with missing required fields |
+| `scope-artifact-check.sh` | Stop (all platforms) | Verify mandatory artifacts exist before agent completes |
+| `scope-agent-logger.sh` | PostToolUse (Bash, async, all platforms) | Auto-log AWS CLI calls to agent-log.jsonl |
 
 ## Slash Commands
 
