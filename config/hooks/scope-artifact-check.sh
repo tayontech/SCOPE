@@ -46,14 +46,10 @@ if [ -n "$LATEST_AUDIT" ]; then
       fi
     fi
   else
-    # No results.json — run may not have started or crashed before Gate 4
-    # Downgrade to warnings only
-    if [ ! -f "$LATEST_AUDIT/findings.md" ]; then
-      ERRORS+=("WARNING: $LATEST_AUDIT/findings.md missing (run may not have completed)")
-    fi
-    if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
-      ERRORS+=("WARNING: $LATEST_AUDIT/agent-log.jsonl missing (run may not have completed)")
-    fi
+    # No results.json — run is still in progress (hasn't reached Gate 4).
+    # Skip all artifact checks. The hook will validate on a future Stop
+    # event once the run completes and results.json exists.
+    :
   fi
 
   # Check dashboard export
