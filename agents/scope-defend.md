@@ -2074,6 +2074,8 @@ jq -n \
   --argjson detections "$DETECTIONS_ARRAY" \
   --argjson controls "$CONTROLS_ARRAY" \
   --argjson prioritization "$PRIORITIZATION_ARRAY" \
+  --arg run_status "$STATUS" \
+  --argjson run_errors "${COVERAGE_ERRORS:-[]}" \
   --argjson scps_count "$SCPS_COUNT" \
   --argjson rcps_count "$RCPS_COUNT" \
   --argjson detections_count "$DETECTIONS_COUNT" \
@@ -2122,6 +2124,8 @@ jq -n \
         }
       ]
     },
+    status: $run_status,
+    errors: $run_errors,
     scps: $scps,
     rcps: $rcps,
     detections: $detections,
@@ -2140,22 +2144,21 @@ RUN_ID=$(basename "$RUN_DIR")
 mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
-# PIPELINE_STATUS is set by scope-pipeline.md after it runs — do NOT default it here.
-# The dashboard index entry written now will be updated by the pipeline with the final status.
-# Use 'pending' as a placeholder so the index always has a valid value until pipeline completes.
-PIPELINE_STATUS="pending"
+# The pipeline manages ./data/ and ./agent-logs/ indexes, NOT dashboard/public/index.json.
+# Set status to the run's actual STATUS (complete or partial) — this is the final value.
+DASHBOARD_STATUS="$STATUS"
 
 # Update dashboard index — runs[] only, no latest* fields
 if [ -f dashboard/public/index.json ]; then
   node -e "
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
     idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
-    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$PIPELINE_STATUS', file: '$RUN_ID.json' });
+    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$DASHBOARD_STATUS', file: '$RUN_ID.json' });
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 else
   node -e "
-    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$PIPELINE_STATUS', file: '$RUN_ID.json' }] };
+    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$DASHBOARD_STATUS', file: '$RUN_ID.json' }] };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
   "
 fi
