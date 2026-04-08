@@ -353,7 +353,7 @@ Threat intel mode — parsing natural language description
 
 - **MODE=INTEL** → continue to `<threat_intel_intake>`, then `<hypothesis_engine>` (INTEL branch), then `<mcp_detection>`
 - **MODE=HUNT** → continue to `<hunt_mode_intake>` (next section), then `<mcp_detection>`
-- **MODE=INVESTIGATION** → proceed directly to `<mcp_detection>` (existing flow, unchanged)
+- **MODE=INVESTIGATION** → proceed to `<mcp_detection>` (connection check + alert intake) → `<input_parsing>` → `<hypothesis_engine>` (INVESTIGATION branch) → `<investigation_loop>`
 </entry_point_detection>
 
 <hunt_mode_intake>
@@ -1055,7 +1055,7 @@ Read `./hunt/context.json`. If it exists and parses successfully, display the co
 
 **Step 2: Display MCP result and prompt for alert intake.**
 
-Display the MCP result (CONNECTED or MANUAL), the context summary, then prompt for alert intake per the `<alert_intake>` section.
+Display the MCP result (CONNECTED or MANUAL), the context summary, then prompt for alert intake per the `<alert_intake>` section. After alert intake completes and `<input_parsing>` produces `investigation_context`, proceed to `<hypothesis_engine>` (INVESTIGATION branch) before entering the `<investigation_loop>`.
 
 **Hunt mode note:** If MODE=HUNT and MCP_MODE=MANUAL, Splunk is not required. Proceed with the findings loaded in `<hunt_mode_intake>` — the agent can produce a hypothesis report from audit/exploit output alone. State this to the analyst:
 
@@ -1333,7 +1333,7 @@ CONTEXT MATCHES
 ```
 
 ```
-Proceeding to investigation. First step: [brief one-line description of Step 1, chosen by reasoning framework]
+Proceeding to hypothesis formation, then investigation. First step: [brief one-line description of Step 1, chosen by reasoning framework]
 ```
 
 For Modes A, B, and D, display this confirmation block and proceed immediately (no additional analyst input required before the first step, since the data is structured). For Mode C, this is shown as the confirmation prompt — wait for analyst approval.
