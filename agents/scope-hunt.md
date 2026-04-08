@@ -1439,13 +1439,13 @@ Run this query? → approve / skip [reason] / pivot: [specify angle]
 Wait for analyst response. Do not execute, proceed, or display anything until the analyst responds.
 
 **5a. On approve + MCP_MODE=CONNECTED**
-Call `working_tool` with the query. Display results as a formatted event table. Add findings to `investigation_findings` accumulator.
+Call `working_tool` with the query. Display results as a formatted event table. Add findings to `investigation_findings` accumulator. Store all event rows returned by the query in `raw_events` for this step entry (see accumulator schema below).
 
 **5b. On approve + MCP_MODE=MANUAL**
 ```
 Run this in Splunk and paste the results here.
 ```
-Wait for the analyst to paste results. Parse the pasted output. Display as formatted event table. Add findings to `investigation_findings` accumulator.
+Wait for the analyst to paste results. Parse the pasted output. Display as formatted event table. Add findings to `investigation_findings` accumulator. Store all parsed event rows in `raw_events` for this step entry.
 
 **5c. On skip**
 ```
@@ -1582,9 +1582,12 @@ investigation_findings:
     result_summary: "[what was found — event count, key events, key field values]"
     key_finding: "[single most important takeaway from this step, or null]"
     hypothesis_verdict: confirms | refutes | inconclusive | not_tested
+    raw_events: [list of event objects returned by the query, or [] if skipped or zero results]
 ```
 
 `not_tested` is used when: the step was skipped, no active hypothesis was set, or the step's query did not directly test the hypothesis.
+
+`raw_events` stores the actual event rows returned by each approved and executed query (all fields in the result table). For skipped steps or steps returning zero results, `raw_events` is an empty list. This field is the source for the evidence timeline table and the post-investigation learning extraction pipeline — not `result_summary`.
 
 This accumulator is the source for the final output summary. Do not re-query to build the summary — read from this structure.
 
@@ -1995,7 +1998,7 @@ If no context was loaded (first investigation), omit this section entirely.
 | [_time] | [eventName] | [actor ARN or userName + identity type] | [sourceIPAddress] | [relevant requestParameters or responseElements — keep concise] |
 ```
 
-Build this table from the `investigation_findings` accumulator — include all events that were actually returned by executed queries, sorted by _time ascending. Rules:
+Build this table from the `investigation_findings` accumulator — use `raw_events` from each step entry as the source for event rows. Include all events from steps where `status=approved` and `raw_events` is non-empty, sorted by _time ascending. Rules:
 
 - Include only events from queries that were approved and executed (not skipped steps)
 - Sort strictly by _time ascending across all steps — the table is a unified timeline, not grouped by step
@@ -2130,14 +2133,14 @@ Learning runs when ALL of the following are true:
 
 ### Extraction Steps
 
-Process the `investigation_findings` accumulator and query results to extract environmental knowledge:
+Process the `investigation_findings` accumulator to extract environmental knowledge. For entity extraction (steps 1 and 2 below), read from `investigation_findings[].raw_events` — the stored event rows for each approved step. Do not re-query Splunk; all necessary field values are in `raw_events`.
 
-**1. Network entities** — Extract all IPs observed in query results:
+**1. Network entities** — Extract all IPs observed in `investigation_findings[].raw_events` (from the `sourceIPAddress` field of each event object):
 - Classify each against existing `context.json` entries: known CIDR, known VPN range, known external IP, or novel
 - For novel IPs: propose a classification (internal, external, VPN, unknown) based on IP range and investigation context
 - Record which investigation this IP was seen in
 
-**2. Principal baselines** — Extract all users/roles observed:
+**2. Principal baselines** — Extract all users/roles observed in `investigation_findings[].raw_events` (from the `userIdentity.arn`, `userIdentity.userName`, and related fields of each event object):
 - For existing baselines in `context.json`: merge observed actions, source IPs, regions into the baseline (union, deduplicate)
 - For new principals: create a baseline entry from observed behavior in this investigation
 - Record typical hours (UTC) if event timestamps are available
