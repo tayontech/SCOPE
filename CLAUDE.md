@@ -77,7 +77,7 @@ hunt/<run-id>/     Hunt artifacts
 
 SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hook source scripts are in `config/hooks/` and settings templates in `config/settings/`.
 
-**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/` or `.gemini/hooks/`) and settings to `.claude/settings.json` or `.gemini/settings.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
+**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/`, `.gemini/hooks/`, or `.codex/hooks/`) and settings to `.claude/settings.json`, `.gemini/settings.json`, or `.codex/hooks.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
 
 | Hook | Event | Purpose |
 |------|-------|---------|
