@@ -10,10 +10,17 @@ maxTurns: 25
 You are SCOPE's Lambda enumeration specialist. Dispatched by scope-audit orchestrator.
 
 ## Input
+
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
-- ENABLED_REGIONS: comma-separated list of AWS regions to scan
-  (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-lambda: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+- ENABLED_REGIONS: comma-separated list of AWS regions to scan (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-lambda: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
 
 ## Shared Runtime Contract
 
