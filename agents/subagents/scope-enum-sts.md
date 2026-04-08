@@ -101,7 +101,7 @@ FINDINGS_JSON=$(echo "[]" | jq \
   '($caller + $org + $scp) | sort_by(.arn)')
 ```
 
-## Enumeration Workflow
+## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`sts get-caller-identity`, `organizations describe-organization`, `organizations list-policies`, `organizations describe-policy`), store responses in shell variables
 2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above
@@ -150,7 +150,7 @@ METRICS: {session_tokens: N, assumed_roles: N, findings: N}
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
+## Post-Write Validation
 
 After writing `$RUN_DIR/sts.json`, validate output against the per-service schema:
 
@@ -183,7 +183,7 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT request tokens beyond caller identity
 - If cross-account probe attempt succeeds, do NOT proceed with the assumed credentials — only record the trust path as live
 
-## Enumeration Checklist
+## Service Enumeration Checklist
 
 ### Discovery
 - [ ] Caller identity: ARN, Account, UserId (GetCallerIdentity)
