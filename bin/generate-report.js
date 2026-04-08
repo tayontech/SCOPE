@@ -182,13 +182,8 @@ if (existsSync(join(publicDir, "index.json"))) {
     if (existsSync(filePath)) {
       try {
         const json = JSON.parse(readFileSync(filePath, "utf-8"));
-        // Backfill defend account_id from audit data
-        if (!json.account_id && src === "defend") {
-          const auditData = inlineData["audit"];
-          if (auditData?.account_id) {
-            json.account_id = auditData.account_id;
-          }
-        }
+        // Note: defend account_id backfill is done in a second pass below
+        // (after all sources are loaded) to avoid order-dependence.
         // Edge backfill: derive graph edges from IAM trust policies when edges are empty
         if (src === "audit" && json.graph && Array.isArray(json.graph.edges) && json.graph.edges.length === 0) {
           const edges = [];
@@ -305,6 +300,12 @@ if (existsSync(join(publicDir, "index.json"))) {
       console.log(`[SCOPE] Inlined ${src} data from results.json`);
     }
   }
+}
+
+// Second pass: backfill defend account_id from audit data (order-independent)
+if (inlineData["defend"] && !inlineData["defend"].account_id && inlineData["audit"]?.account_id) {
+  inlineData["defend"].account_id = inlineData["audit"].account_id;
+  console.log(`[SCOPE] Backfilled defend account_id from audit data: ${inlineData["audit"].account_id}`);
 }
 
 if (Object.keys(inlineData).length === 0) {

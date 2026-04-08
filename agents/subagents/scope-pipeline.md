@@ -101,7 +101,11 @@ If results.json is missing, set `SOURCE_ARTIFACT_MISSING=true` and produce an in
    python3 -c "import json,sys; json.load(open('$DATA_FILE'))" 2>/dev/null \
      || echo "Warning: write-after-verify failed for $DATA_FILE — setting status to unverifiable"
    ```
-   If verification fails (file unreadable or not valid JSON), set `DATA_STATUS="unverifiable"`. The index entry MUST still be written with `status: failed` — the operator must see that the attempt was made.
+   If verification fails (file unreadable or not valid JSON), set `DATA_STATUS="unverifiable"`. Re-write the normalized JSON with the updated status field so disk and index stay in sync:
+   ```bash
+   jq --arg status "failed" '.status = $status' "$DATA_FILE" > "$DATA_FILE.tmp" && mv "$DATA_FILE.tmp" "$DATA_FILE" 2>/dev/null || true
+   ```
+   The index entry MUST still be written with `status: failed` — the operator must see that the attempt was made.
 
 7. Update `./data/index.json` per `<index_management>` (upsert+cull+atomic-write)
 
@@ -132,16 +136,17 @@ If `$RUN_DIR/results.json` exists and contains `"source": "audit"` (or no `sourc
 Extract from headings and content:
 
 ```
-Risk summary: regex match "## RISK SUMMARY: (\d+) -- (CRITICAL|HIGH|MEDIUM|LOW)"
+Risk summary: regex match "## RISK SUMMARY: (\d+) -[-—] (CRITICAL|HIGH|MEDIUM|LOW|critical|high|medium|low)"
   → account_id = group 1
-  → risk_score = group 2
+  → risk_score = group 2 (lowercase — normalize to lowercase if uppercase)
 
 Target: extract from run directory name or findings header
 Audit mode: extract from findings header if present ("audit")
 
 Services analyzed: count unique "### SERVICE:" headings
 
-Attack paths: regex match all "### ATTACK PATH #(\d+): (.+?) -- (CRITICAL|HIGH|MEDIUM|LOW)"
+Attack paths: regex match all "### ATTACK PATH #(\d+): (.+?) -[-—] (CRITICAL|HIGH|MEDIUM|LOW|critical|high|medium|low)"
+  (normalize severity to lowercase)
 For each path block, extract:
   - name, severity from header
   - steps: numbered list items under "**Exploit steps:**" (format: `1. \`aws cli command\``)
@@ -176,7 +181,7 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
     "wildcard_trust_policies": "int",
     "cross_account_trusts": "int",
     "users_without_mfa": "int",
-    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
+    "risk_score": "critical | high | medium | low",
     "services_analyzed": "int",
     "top_findings": ["string — one-line summary of each critical/high finding"],
     "paths_by_category": {
@@ -196,7 +201,7 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
       {"id": "string", "label": "string", "type": "user | role | group | escalation | data | external"}
     ],
     "edges": [
-      {"source": "string", "target": "string", "trust_type": "same-account | cross-account", "edge_type": "priv_esc | trust | data_access | network | service | public_access | cross_account | membership", "severity": "critical | high | medium | low", "label": "string"}
+      {"source": "string", "target": "string", "trust_type": "same-account | cross-account | service | wildcard | federated", "edge_type": "priv_esc | trust | data_access | network | service | public_access | cross_account | membership", "severity": "critical | high | medium | low", "label": "string"}
     ]
   },
   "attack_paths": [
@@ -234,11 +239,11 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
       "role_id": "string — e.g., role:AdminRole",
       "role_arn": "string — full IAM ARN",
       "principal": "string — trusted principal ARN or *",
-      "trust_type": "same-account | cross-account | service",
+      "trust_type": "same-account | cross-account | service | wildcard | federated",
       "is_wildcard": "bool",
       "has_external_id": "bool",
       "has_mfa_condition": "bool",
-      "risk": "CRITICAL | HIGH | MEDIUM | LOW",
+      "risk": "critical | high | medium | low",
       "is_internal": "bool | null — true if trusted account is in owned-accounts set, false if external, null for service/wildcard trusts",
       "account_name": "string | null — name from accounts.json for internal accounts, null for external/service/wildcard"
     }
@@ -302,7 +307,8 @@ For each `$RUN_DIR/policies/*.json`:
     "detections_generated": "int",
     "controls_recommended": "int",
     "quick_wins": "int — count of items with effort=low",
-    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW"
+    "risk_score": "critical | high | medium | low",
+    "zero_paths": "bool — true when no attack paths found"
   },
   "audit_runs_analyzed": ["string — run IDs that were consumed"],
   "attack_paths_aggregated": {
@@ -487,7 +493,7 @@ If present, extract the exfiltration analysis section:
     "passrole_chains": "int",
     "persistence_techniques": "int",
     "exfiltration_vectors": "int",
-    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
+    "risk_score": "critical | high | medium | low",
     "highest_priv": "string — e.g., ADMIN, POWER_USER, READ_ONLY"
   },
   "graph": {
@@ -627,7 +633,12 @@ After writing each normalized JSON file, validate:
 4. **JSON is valid:** the written file is parseable JSON (read it back and verify)
 5. **Index consistency:** the index entry's `data_file` path matches the actual written file
 
-If validation fails, set status to `partial` or `failed` accordingly and log a warning. Do not block the calling agent.
+If validation fails, set status to `partial` or `failed` accordingly, rewrite the normalized JSON file with the updated status, update the index entry to match, and log a warning. Do not block the calling agent.
+
+```bash
+# Re-patch status in the already-written file to keep disk and index in sync
+jq --arg status "$NEW_STATUS" '.status = $status' "$DATA_FILE" > "$DATA_FILE.tmp" && mv "$DATA_FILE.tmp" "$DATA_FILE" 2>/dev/null || true
+```
 
 This is the only verification Phase 1 performs. It does NOT run the full scope-verify protocol (no SPL lints, no attack path satisfiability checks, no remediation safety rules). Those are the calling agent's responsibility.
 </data_verification>

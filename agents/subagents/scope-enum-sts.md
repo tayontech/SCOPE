@@ -53,7 +53,7 @@ CALLER_FINDINGS=$(echo "$STS_IDENTITY" | jq --arg account_id "$ACCOUNT_ID" '[
 ### sts_org (from DescribeOrganization)
 
 ```bash
-ORG_FINDINGS=$(echo "$ORG_DATA" | jq '[
+ORG_FINDINGS=$(echo "$ORG_DATA" | jq --argjson member_accounts_json "${MEMBER_ACCOUNTS:-null}" '[
   {
     resource_type: "sts_org",
     resource_id: .Organization.Id,
@@ -65,7 +65,7 @@ ORG_FINDINGS=$(echo "$ORG_DATA" | jq '[
     ),
     findings: []
   }
-]' --argjson member_accounts_json "${MEMBER_ACCOUNTS:-null}" 2>/dev/null) || { echo "[ERROR] jq extraction failed for sts_org"; STATUS="error"; }
+]' 2>/dev/null) || { echo "[ERROR] jq extraction failed for sts_org"; STATUS="error"; }
 ```
 
 On AccessDenied for DescribeOrganization: `ORG_FINDINGS="[]"`
@@ -184,6 +184,8 @@ VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
   ERRORS+=("[VALIDATION] sts.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
+  # Re-patch status in the already-written file to keep disk and return in sync
+  jq --arg status "$STATUS" '.status = $status' "$RUN_DIR/sts.json" > "$RUN_DIR/sts.json.tmp" && mv "$RUN_DIR/sts.json.tmp" "$RUN_DIR/sts.json"
 fi
 ```
 

@@ -1939,7 +1939,7 @@ if [ -n "$OVERALL_RISK" ]; then
   RISK_SCORE=$(echo "$OVERALL_RISK" | tr '[:upper:]' '[:lower:]')
 elif [ -f "$AUDIT_RUN_DIR/results.json" ]; then
   # Fall back to reading from audit results.json
-  RISK_SCORE=$(jq -r '.summary.risk // .risk // "medium"' "$AUDIT_RUN_DIR/results.json" | tr '[:upper:]' '[:lower:]')
+  RISK_SCORE=$(jq -r '.summary.risk_score // "medium"' "$AUDIT_RUN_DIR/results.json" | tr '[:upper:]' '[:lower:]')
 else
   # Final fallback: derive from attack path severity distribution
   # Use highest severity among all parsed attack paths
@@ -2099,7 +2099,7 @@ jq -n \
     executive_summary: {
       risk_posture: "<overall risk posture assessment>",
       category_breakdown: [
-        { "category": "<category name>", "count": "<number of paths>", "severity": "critical | high | medium | low" }
+        { "category": "<category name>", "count": 0, "severity": "critical | high | medium | low" }
       ],
       quick_wins: [
         { "rank": 1, "action": "<action description>", "impact": "<business impact statement>" }

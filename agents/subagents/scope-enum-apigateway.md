@@ -348,6 +348,8 @@ VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
   ERRORS+=("[VALIDATION] apigateway.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
+  # Re-patch status in the already-written file to keep disk and return in sync
+  jq --arg status "$STATUS" '.status = $status' "$RUN_DIR/apigateway.json" > "$RUN_DIR/apigateway.json.tmp" && mv "$RUN_DIR/apigateway.json.tmp" "$RUN_DIR/apigateway.json"
 fi
 ```
 

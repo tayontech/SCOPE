@@ -178,11 +178,11 @@
           "role_id": { "type": "string" },
           "role_arn": { "type": "string" },
           "principal": { "type": "string" },
-          "trust_type": { "type": "string", "enum": ["same-account", "cross-account", "service"] },
+          "trust_type": { "type": "string", "enum": ["same-account", "cross-account", "service", "wildcard", "federated"] },
           "is_wildcard": { "type": "boolean" },
           "has_external_id": { "type": "boolean" },
           "has_mfa_condition": { "type": "boolean" },
-          "risk": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
+          "risk": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
           "is_internal": { "type": ["boolean", "null"] },
           "account_name": { "type": ["string", "null"] }
         }
