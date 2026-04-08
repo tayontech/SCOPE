@@ -784,7 +784,21 @@ When storing `active_hypothesis` for a selected HYPO-03 hypothesis (HYPO-04), po
 
 Use the MITRE T-ID → CloudTrail Event Family table (already in this section, MODE=HUNT AUDIT branch) to map each `mitre_id` to a category and set of eventNames. Also include any `cloudtrail_events` extracted directly from the report prose.
 
-If a MITRE ID is not in the table: use the `adversary_goal` mapping table from the MODE=INVESTIGATION branch to look up eventName coverage by alert_type. If no mapping exists: use the ID as a label and note that no CloudTrail eventName mapping is available.
+If a MITRE ID is not found in the main T-ID → CloudTrail Event Family table, check the following supplemental MITRE-ID-keyed table before falling back:
+
+| T-ID | Technique | CloudTrail eventNames | Adversary Goal |
+|---|---|---|---|
+| T1059 | Command and scripting interpreter | InvokeFunction, StartSession (SSM) | Code execution |
+| T1537 | Transfer data to cloud account | CopyObject, PutObject cross-account | Data exfiltration |
+| T1485 | Data destruction | DeleteObject, DeleteBucket, DeleteTable | Impact |
+| T1490 | Inhibit system recovery | DisableRule (EventBridge), DeleteBackup | Impact |
+| T1087 | Account discovery | ListUsers, ListRoles, ListGroups | Reconnaissance |
+| T1580 | Cloud infrastructure discovery | DescribeInstances, ListBuckets, DescribeFunctions | Reconnaissance |
+| T1567 | Exfiltration over web service | GetObject to public endpoint, PutBucketPolicy (public) | Data exfiltration |
+
+Lookup order: check main table first, then supplemental table, then fall back to label-only.
+
+If a MITRE ID is not in either table: use the ID as a label, set CloudTrail eventNames to null, note that no CloudTrail eventName mapping is available for this technique, and generate the hypothesis using the ID and technique name directly.
 
 #### Step 2: Generate threat_intel hypotheses (one per TTP)
 
