@@ -13,7 +13,28 @@ You are SCOPE's S3 enumeration specialist. Dispatched by scope-audit orchestrato
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
 - ENABLED_REGIONS: comma-separated list of AWS regions to scan
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-s3: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-s3: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
+
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/s3_"*
+```
 
 ## Extraction Templates
 
@@ -125,7 +146,6 @@ On AccessDenied for get-public-access-block: set `PUBLIC_ACCESS_BLOCK_JSON='{"bl
 
 ```bash
 ALL_FINDINGS="[]"
-ERRORS=()
 # Cleanup temp file for rerun safety
 rm -f "$RUN_DIR/raw/s3_findings.jsonl"
 BUCKETS=$(aws s3api list-buckets --output json 2>&1) || { ERRORS+=("s3api:ListBuckets AccessDenied"); STATUS="error"; }
@@ -182,87 +202,7 @@ ALL_FINDINGS=$(jq -s 'add // []' "$RUN_DIR/raw/s3_findings.jsonl" 2>/dev/null ||
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.arn)')
 ```
 
-## Enumeration Workflow
-
-1. **Enumerate** -- Run AWS CLI calls (`s3api list-buckets` globally, then per-bucket: `get-bucket-location`, `get-bucket-policy`, `get-public-access-block`, `get-bucket-versioning`, `get-bucket-encryption`, `get-bucket-logging`, `get-bucket-acl`), store responses in shell variables
-2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for bucket policies
-3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
-4. **Combine + Sort** -- Final jq step merges all bucket findings, sorts by `arn` (global service), derives summary counts from array lengths
-5. **Write** -- Envelope jq writes to `$RUN_DIR/s3.json`
-6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/s3.json`
-
-## Output Contract
-
-**Write this file:** `$RUN_DIR/s3.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "s3" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "global" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/s3.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-s3" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/s3.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
-**Return to orchestrator (minimal summary only):**
-```
-STATUS: complete|partial|error
-FILE: $RUN_DIR/s3.json
-METRICS: {buckets: N, public_buckets: N, findings: N}
-REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] (list bucket regions where resources were found, or "none")
-ERRORS: [list of AccessDenied or partial failures, or empty]
-```
-
-## Post-Write Validation (MANDATORY)
-
-After writing `$RUN_DIR/s3.json`, validate output against the per-service schema:
-
-```bash
-node bin/validate-enum-output.js "$RUN_DIR/s3.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] s3.json failed schema validation (exit $VALIDATION_EXIT)"
-  STATUS="error"
-fi
-```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
-
-## Error Handling
-
-- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
-- All API calls fail: set status to "error", write empty findings array, include error field in JSON
-- Rate limiting: wait 2-5 seconds, retry once, report if retry fails
-- jq template failure: STATUS: error, no recovery -- report jq stderr
-- List denied APIs in ERRORS field (e.g., `["s3api:ListBuckets AccessDenied"]`)
-
-## Module Constraints
-- Do NOT read object contents — enumerate metadata only
-- Do NOT list all objects in every bucket — check bucket configuration only
-- Do NOT download files
-
-## Enumeration Checklist
+## Service Enumeration Checklist
 
 ### Discovery
 - [ ] All buckets: call `aws s3api list-buckets --output json` once globally (no --region flag) to get all bucket names
@@ -296,6 +236,86 @@ Do NOT report STATUS: complete if any validation step fails.
 - [ ] Edges: cross-account (ext:arn:aws:iam::<id>:root -> data:s3:BUCKET_NAME, trust_type: "cross-account")
 - [ ] Edges: Lambda trigger (data:s3:BUCKET_NAME -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "s3_trigger")
 - [ ] access_level: read = Get*/List* only; write = Put*/Delete*; admin = s3:* or management actions
+
+## Execution Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`s3api list-buckets` globally, then per-bucket: `get-bucket-location`, `get-bucket-policy`, `get-public-access-block`, `get-bucket-versioning`, `get-bucket-encryption`, `get-bucket-logging`, `get-bucket-acl`), store responses in shell variables
+2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for bucket policies
+3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
+4. **Combine + Sort** -- Final jq step merges all bucket findings, sorts by `arn` (global service), derives summary counts from array lengths
+5. **Write** -- Envelope jq writes to `$RUN_DIR/s3.json`
+6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/s3.json`
+
+## Output Contract
+
+**Write this file:** `$RUN_DIR/s3.json`
+Write via Bash redirect (you do NOT have Write tool access):
+```bash
+jq -n \
+  --arg module "s3" \
+  --arg account_id "$ACCOUNT_ID" \
+  --arg region "global" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg status "$STATUS" \
+  --argjson findings "$FINDINGS_JSON" \
+  '{
+    module: $module,
+    account_id: $account_id,
+    region: $region,
+    timestamp: $ts,
+    status: $status,
+    findings: $findings
+  }' > "$RUN_DIR/s3.json"
+```
+
+**Append to agent log:**
+```bash
+jq -n \
+  --arg agent "scope-enum-s3" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg status "$STATUS" \
+  --arg file "$RUN_DIR/s3.json" \
+  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
+  >> "$RUN_DIR/agent-log.jsonl"
+```
+
+**Return to orchestrator (minimal summary only):**
+```
+STATUS: complete|partial|error
+FILE: $RUN_DIR/s3.json
+METRICS: {buckets: N, public_buckets: N, findings: N}
+REGIONS_SCANNED: N/M
+REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] or "none"
+ERRORS: [list of AccessDenied or partial failures, or empty]
+```
+
+## Post-Write Validation
+
+After writing `$RUN_DIR/s3.json`, validate output against the per-service schema:
+
+```bash
+node bin/validate-enum-output.js "$RUN_DIR/s3.json"
+VALIDATION_EXIT=$?
+if [ "$VALIDATION_EXIT" -ne 0 ]; then
+  ERRORS+=("[VALIDATION] s3.json failed schema validation (exit $VALIDATION_EXIT)")
+  STATUS="error"
+fi
+```
+
+Do NOT report STATUS: complete if any validation step fails.
+
+## Error Handling
+
+- AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data, set status to "partial"
+- All API calls fail: set status to "error", write empty findings array, include error field in JSON
+- Rate limiting: wait 2-5 seconds, retry once, report if retry fails
+- jq template failure: STATUS: error, no recovery -- report jq stderr
+- List denied APIs in ERRORS field (e.g., `["s3api:ListBuckets AccessDenied"]`)
+
+## Module Constraints
+- Do NOT read object contents — enumerate metadata only
+- Do NOT list all objects in every bucket — check bucket configuration only
+- Do NOT download files
 
 ## Output Path Constraint
 
