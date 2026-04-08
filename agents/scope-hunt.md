@@ -682,6 +682,17 @@ First investigation step: [brief preview from reasoning_framework]
    a. Use `detection_opportunities[]` directly if non-empty — these are the CloudTrail signals.
    b. If `detection_opportunities[]` is empty or sparse (fewer than 2 entries): supplement using the MITRE T-ID fallback mapping below.
    c. Extract `affected_resources[]` as ARN anchors for Splunk queries.
+   d. Derive `adversary_goal` from the attack path's `category` field using the following mapping:
+
+| `attack_path.category` | `adversary_goal` label |
+|---|---|
+| `privilege_escalation` | Privilege escalation |
+| `lateral_movement` | Lateral movement |
+| `persistence` | Persistence |
+| `data_exfiltration` | Data exfiltration |
+| `defense_evasion` | Defense evasion |
+| `reconnaissance` | Reconnaissance |
+| (any other value) | [use category value directly] |
 
 #### MITRE T-ID to CloudTrail Event Family Fallback
 
@@ -703,6 +714,7 @@ HYPOTHESIS [N]
   Source:             Audit path — [attack_path.name]
   Severity:           [attack_path.severity]
   Category:           [attack_path.category]
+  Adversary goal:     [derived from category mapping — e.g., Privilege escalation]
   Statement:          "If [attack_path.name] was exploited, we expect to see [detection_opportunities[0]] and [detection_opportunities[1]] in CloudTrail."
   Affected resources: [affected_resources[] — ARNs]
   CloudTrail signals:
@@ -711,6 +723,8 @@ HYPOTHESIS [N]
     - [steps[].action values if structured]
   MITRE:              [mitre_techniques[]]
 ```
+
+When storing `active_hypothesis` for a selected HYPO-02 hypothesis (HYPO-04), populate `adversary_goal` with the label derived from the category mapping above.
 
 ---
 
@@ -725,6 +739,7 @@ HYPOTHESIS [N]
    - `visibility=MGT` or `visibility=DATA` → observable steps (produce CloudTrail events — hunt for these)
    - `visibility=NONE` → unobservable steps (no CloudTrail evidence expected — note explicitly)
 3. `noise_score` informs hunt strategy context: low noise paths are harder to detect; CloudTrail absence is less conclusive for low-noise paths.
+4. Derive `adversary_goal` from the attack path's `category` field using the same category → label mapping defined in the HYPO-02 branch (privilege_escalation → Privilege escalation, lateral_movement → Lateral movement, persistence → Persistence, data_exfiltration → Data exfiltration, defense_evasion → Defense evasion, reconnaissance → Reconnaissance; any other value → use category value directly).
 
 **Key design rule:** The hypothesis statement must explicitly state the count of unobservable steps. If half the steps are NONE, the analyst must know that absence of evidence is not evidence of absence for those steps.
 
@@ -735,6 +750,7 @@ HYPOTHESIS [N]
   Source:           Exploit path — [attack_path.name]
   Confidence:       [confidence_tier]
   Noise level:      [noise_score / noise_profile]
+  Adversary goal:   [derived from category mapping — e.g., Privilege escalation]
   Target:           [target_arn from results.json]
   Statement:        "If [target_arn] executed [attack_path.name], we expect CloudTrail to show [observable_steps_count] observable events. [unobservable_count] steps will leave no CloudTrail trace."
   Observable steps (hunt for these):
@@ -745,6 +761,8 @@ HYPOTHESIS [N]
   Exfiltration signals:  [exfiltration_vectors[].vector where available=true]
   Lateral movement:      [lateral_movement_chain[] from/to/mechanism]
 ```
+
+When storing `active_hypothesis` for a selected HYPO-03 hypothesis (HYPO-04), populate `adversary_goal` with the label derived from the category mapping above.
 
 ---
 
