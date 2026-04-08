@@ -183,13 +183,10 @@ After writing `$RUN_DIR/sts.json`, validate output against the per-service schem
 node bin/validate-enum-output.js "$RUN_DIR/sts.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] sts.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] sts.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 - AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data
