@@ -8,14 +8,35 @@ maxTurns: 25
 
 You are SCOPE's RDS enumeration specialist. You are dispatched by the scope-audit orchestrator.
 
-## Input (provided by orchestrator in your initial message)
+## Input
 
 - RUN_DIR: path to the active run directory
 - TARGET: ARN, service name, or "--all"
 - ACCOUNT_ID: from Gate 1 credential check
 - ENABLED_REGIONS: comma-separated list of AWS regions to scan
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-rds: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-rds: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
+
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/rds_"*
+```
 
 ## Extraction Templates
 
@@ -81,12 +102,6 @@ On AccessDenied for describe-db-snapshots: `SNAPSHOT_FINDINGS="[]"`
 ### Regional Iteration
 
 ```bash
-# Remove temp files from any previous run in this RUN_DIR to avoid stale data
-rm -f "$RUN_DIR/raw/rds_instance_findings_"*.jsonl
-rm -f "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl
-rm -f "$RUN_DIR/raw/rds_region_status_"*.txt
-rm -f "$RUN_DIR/raw/rds_errors.txt"
-
 MAX_PARALLEL=4
 ACTIVE=0
 REGION_PIDS=()
@@ -119,7 +134,6 @@ done
 wait
 
 # Collect per-region status to derive aggregate STATUS and ERRORS
-STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/rds_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then
@@ -139,7 +153,37 @@ SNAPSHOT_MERGED=$(cat "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl 2>/dev/null |
 FINDINGS_JSON=$(jq -n --argjson inst "$INSTANCE_MERGED" --argjson snap "$SNAPSHOT_MERGED" '$inst + $snap | sort_by(.region + ":" + .arn)')
 ```
 
-## Enumeration Workflow
+## Service Enumeration Checklist
+
+This is a regional service. Iterate ENABLED_REGIONS (split on comma):
+  For each region in ENABLED_REGIONS:
+    aws rds describe-db-instances --region $REGION --output json 2>&1
+    If AccessDenied or error on a region:
+      Log: "[PARTIAL] rds $REGION: {error message}"
+      Retry once after 2-5 seconds
+      If retry also fails: log "[SKIP] rds $REGION: skipping after retry" and continue to next region
+Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
+
+### Discovery
+- [ ] DB instances per region: `describe-db-instances` — instance ID, engine, publicly_accessible flag, VPC, security groups, IAM auth enabled, storage encryption, deletion protection
+- [ ] Manual snapshots per region: `describe-db-snapshots --snapshot-type manual` — PubliclyAccessible attribute, size, encrypted
+- [ ] DB subnet groups and parameter groups (metadata only — names and descriptions)
+
+### Per-Resource Checks
+- [ ] Flag instances with `PubliclyAccessible: true` — HIGH finding
+- [ ] Flag instances with `StorageEncrypted: false` — MEDIUM finding
+- [ ] Flag instances with `IAMDatabaseAuthenticationEnabled: true` — enumerate which IAM roles have `rds-db:connect` permission (cross-reference with IAM findings if available)
+- [ ] Flag snapshots with `PubliclyAccessible: true` — CRITICAL finding (public data exposure)
+- [ ] Flag instances with `DeletionProtection: false` where instance appears production-grade (engine version, MultiAZ, size)
+- [ ] Note KMS key ARN encrypting each instance (feeds attack-paths KMS chain analysis)
+- [ ] Flag security groups on RDS instances allowing port 3306 or 5432 from `0.0.0.0/0`
+
+### Graph Data
+- [ ] Nodes: `{id: "data:rds:DB_INSTANCE_ID", label: "DB_INSTANCE_ID", type: "data"}` for each instance
+- [ ] Edges: IAM role → RDS node when `rds-db:connect` permission found (`edge_type: "data_access"`, `access_level: "write"`)
+- [ ] Edges: KMS key → RDS node when encryption dependency exists (`edge_type: "data_access"`, `access_level: "read"`, `label: "encrypts"`)
+
+## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`rds describe-db-instances`, `rds describe-db-snapshots --snapshot-type manual`) per region, store responses in shell variables
 2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above
@@ -158,7 +202,7 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "multi-region" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
+  --arg status "$STATUS" \
   --argjson findings "$FINDINGS_JSON" \
   '{
     module: $module,
@@ -191,21 +235,16 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where RDS instances were f
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
-
-After writing `$RUN_DIR/rds.json`, validate output against the per-service schema:
+## Post-Write Validation
 
 ```bash
 node bin/validate-enum-output.js "$RUN_DIR/rds.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] rds.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] rds.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
@@ -221,36 +260,6 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT read database contents, query logs, or parameter values
 - Do NOT call rds:RestoreDBInstanceFromDBSnapshot or any write operations
 - Skip AWS-managed snapshots (use --snapshot-type manual for public snapshot check)
-
-## Enumeration Checklist
-
-This is a regional service. Iterate ENABLED_REGIONS (split on comma):
-  For each region in ENABLED_REGIONS:
-    aws rds describe-db-instances --region $REGION --output json 2>&1
-    If AccessDenied or error on a region:
-      Log: "[PARTIAL] rds $REGION: {error message}"
-      Retry once after 2-5 seconds
-      If retry also fails: log "[SKIP] rds $REGION: skipping after retry" and continue to next region
-Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-
-### Discovery
-- [ ] DB instances per region: `describe-db-instances` — instance ID, engine, publicly_accessible flag, VPC, security groups, IAM auth enabled, storage encryption, deletion protection
-- [ ] Manual snapshots per region: `describe-db-snapshots --snapshot-type manual` — PubliclyAccessible attribute, size, encrypted
-- [ ] DB subnet groups and parameter groups (metadata only — names and descriptions)
-
-### Per-Resource Checks
-- [ ] Flag instances with `PubliclyAccessible: true` — HIGH finding
-- [ ] Flag instances with `StorageEncrypted: false` — MEDIUM finding
-- [ ] Flag instances with `IAMDatabaseAuthenticationEnabled: true` — enumerate which IAM roles have `rds-db:connect` permission (cross-reference with IAM findings if available)
-- [ ] Flag snapshots with `PubliclyAccessible: true` — CRITICAL finding (public data exposure)
-- [ ] Flag instances with `DeletionProtection: false` where instance appears production-grade (engine version, MultiAZ, size)
-- [ ] Note KMS key ARN encrypting each instance (feeds attack-paths KMS chain analysis)
-- [ ] Flag security groups on RDS instances allowing port 3306 or 5432 from `0.0.0.0/0`
-
-### Graph Data
-- [ ] Nodes: `{id: "data:rds:DB_INSTANCE_ID", label: "DB_INSTANCE_ID", type: "data"}` for each instance
-- [ ] Edges: IAM role → RDS node when `rds-db:connect` permission found (`edge_type: "data_access"`, `access_level: "write"`)
-- [ ] Edges: KMS key → RDS node when encryption dependency exists (`edge_type: "data_access"`, `access_level: "read"`, `label: "encrypts"`)
 
 ## Output Path Constraint
 
