@@ -352,14 +352,14 @@ Threat intel mode — parsing natural language description
 ### Routing
 
 - **MODE=INTEL** → continue to `<threat_intel_intake>`, then `<hypothesis_engine>` (INTEL branch), then `<mcp_detection>`
-- **MODE=HUNT** → continue to `<hunt_mode_intake>` (next section), then `<mcp_detection>`
+- **MODE=HUNT** → continue to `<hunt_mode_intake>` → `<hypothesis_engine>` (HUNT branch) → `<mcp_detection>`
 - **MODE=INVESTIGATION** → proceed to `<mcp_detection>` (connection check + alert intake) → `<input_parsing>` → `<hypothesis_engine>` (INVESTIGATION branch) → `<investigation_loop>`
 </entry_point_detection>
 
 <hunt_mode_intake>
 ## Hunt Mode Intake — Read Audit or Exploit Run Directory
 
-Only reached when MODE=HUNT. Reads the provided run directory, validates it, and surfaces findings as context before any investigation begins. Does NOT generate hypotheses — that is Phase 40 work. This phase only reads and displays.
+Only reached when MODE=HUNT. Reads the provided run directory, validates it, and surfaces findings as context before any investigation begins. This section prepares context for the hypothesis engine, which runs immediately after intake completes.
 
 ### Step 1: Validate the Run Directory
 
@@ -444,7 +444,9 @@ RUN DIRECTORY LOADED
 
 ### After Hunt Mode Intake
 
-Proceed to `<mcp_detection>` regardless of Splunk availability. In hunt mode, Splunk is optional:
+Proceed to `<hypothesis_engine>` (HUNT branch). The hypothesis engine generates hunt hypotheses from the loaded attack paths. After hypothesis selection, proceed to `<mcp_detection>`.
+
+In hunt mode, Splunk is optional:
 - If CONNECTED: queries will validate hypotheses against CloudTrail
 - If MANUAL: proceed with findings from run directory, generate a hypothesis report from audit/exploit output alone without querying Splunk
 
