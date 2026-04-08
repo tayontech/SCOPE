@@ -483,6 +483,15 @@ oneoff_paths = {name for name, count in path_occurrences.items() if count == 1}
 **Systemic paths** (2+ runs) → generate org-wide SCP/RCP, attach at Root or Workload OU level.
 **One-off paths** (1 run) → generate account-specific SCP attached to that specific account.
 
+**Multi-account variable collection (multi-run mode only):**
+```python
+# Collect distinct account IDs across all parsed runs
+accounts_analyzed = list(dict.fromkeys(
+    run.account_id for run in all_runs if run.account_id and run.account_id != "unknown"
+))
+# accounts_analyzed is used in results_export as ACCOUNTS_ANALYZED JSON array
+```
+
 **Intake summary (logged before proceeding):**
 ```
 Found [N] unique attack paths across [M] audit runs.
@@ -2007,8 +2016,11 @@ QUICK_WINS_COUNT=$(echo "$PRIORITIZATION_ARRAY" | jq '[.[] | select(.effort == "
 # Extract account_id from audit results.json or findings.md (must be 12-digit number, not 'unknown')
 # Extract audit_runs_analyzed from consumed audit run directories
 
+# In multi-run mode: ACCOUNTS_ANALYZED is the JSON array of all account IDs (e.g., '["123456789012","234567890123"]')
+# In autonomous mode: ACCOUNTS_ANALYZED is empty array '[]' — single account only; account_id covers it
 jq -n \
   --arg account_id "$ACCOUNT_ID" \
+  --argjson accounts_analyzed "${ACCOUNTS_ANALYZED:-[]}" \
   --arg source "defend" \
   --arg region "global" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -2026,6 +2038,7 @@ jq -n \
   --argjson quick_wins_count "$QUICK_WINS_COUNT" \
   '{
     account_id: $account_id,
+    accounts_analyzed: (if ($accounts_analyzed | length) > 1 then $accounts_analyzed else [] end),
     source: $source,
     region: $region,
     timestamp: $ts,

@@ -9,7 +9,15 @@
     "account_id": {
       "type": "string",
       "pattern": "^\\d{12}$",
-      "description": "12-digit AWS account ID — inherited from consumed audit run(s)"
+      "description": "12-digit AWS account ID — primary account (first or only audit run consumed)"
+    },
+    "accounts_analyzed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^\\d{12}$"
+      },
+      "description": "All AWS account IDs analyzed in this defend run — present only when multi-run mode spans multiple accounts"
     },
     "source": {
       "const": "defend"
