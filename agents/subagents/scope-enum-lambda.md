@@ -223,7 +223,7 @@ ALL_FINDINGS=$(cat "$RUN_DIR/raw/lambda_findings_"*.jsonl 2>/dev/null | jq -s 'a
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ```
 
-## Enumeration Workflow
+## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`lambda list-functions`, `lambda get-policy`, `lambda get-function-url-config` per function) per region, store responses in shell variables
 2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for resource policies and env var secret detection
@@ -275,7 +275,7 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where functions were found
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
+## Post-Write Validation
 
 After writing `$RUN_DIR/lambda.json`, validate output against the per-service schema:
 
@@ -303,7 +303,7 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT invoke Lambda functions — enumeration only
 - Do NOT read function environment variable VALUES — flag existence of variables matching secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_) but never output their values
 
-## Enumeration Checklist
+## Service Enumeration Checklist
 
 ### Discovery
 - [ ] All functions per region (list-functions); iterate ENABLED_REGIONS (split on comma):
