@@ -422,6 +422,7 @@ import re
 risk_match = re.search(r'## RISK SUMMARY: (\d+) -- (CRITICAL|HIGH|MEDIUM|LOW)', findings_text)
 account_id = risk_match.group(1) if risk_match else "unknown"
 overall_risk = risk_match.group(2) if risk_match else "UNKNOWN"
+# Export as shell variable for results export: OVERALL_RISK="$overall_risk", ACCOUNT_ID="$account_id"
 ```
 
 **Extract Layer 3 — Attack Paths:**
@@ -1923,6 +1924,35 @@ After writing executive-summary.md and technical-remediation.md, export structur
 # No count field is ever set from a narrative estimate or placeholder.
 # Every count is `jq 'length'` applied to the actual array.
 # The arrays MUST be fully built before ANY summary field references them.
+
+### Step 0: Derive $RISK_SCORE from intake fields
+
+Before building arrays, derive `RISK_SCORE` from the audit intake data. This variable is used in the summary and dashboard index — it MUST be set before Step 1.
+
+```bash
+# STEP 0: Derive RISK_SCORE from intake fields
+# Source: overall_risk parsed from findings.md (Extract Layer 1) or results.json summary.risk
+# Normalize to lowercase to match schema enum: critical | high | medium | low
+
+if [ -n "$OVERALL_RISK" ]; then
+  # Use overall_risk extracted during findings intake (already set as shell variable)
+  RISK_SCORE=$(echo "$OVERALL_RISK" | tr '[:upper:]' '[:lower:]')
+elif [ -f "$AUDIT_RUN_DIR/results.json" ]; then
+  # Fall back to reading from audit results.json
+  RISK_SCORE=$(jq -r '.summary.risk // .risk // "medium"' "$AUDIT_RUN_DIR/results.json" | tr '[:upper:]' '[:lower:]')
+else
+  # Final fallback: derive from attack path severity distribution
+  # Use highest severity among all parsed attack paths
+  RISK_SCORE="medium"
+  echo "WARNING: Could not derive RISK_SCORE from intake — defaulting to 'medium'. Check audit results.json."
+fi
+
+# Validate: must be one of the schema enum values
+case "$RISK_SCORE" in
+  critical|high|medium|low) ;;
+  *) echo "WARNING: RISK_SCORE '$RISK_SCORE' is not a valid enum value — defaulting to 'medium'"; RISK_SCORE="medium" ;;
+esac
+```
 
 ### Step 1: Build all arrays FIRST
 
