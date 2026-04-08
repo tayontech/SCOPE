@@ -458,7 +458,7 @@ payload.attack_paths[]             — Full attack path array with machine-reada
   .affected_resources[]            — Node IDs from graph (for resource context)
 payload.graph.nodes[]              — All enumerated resources (for resource inventory)
 payload.graph.edges[]              — Relationships and attack edges
-  .edge_type                       — "priv_esc" | "data_access" | "cross_account" | "normal"
+  .edge_type                       — "assumes" | "escalates" | "accesses" | "exfiltrates" | "persists" | "pivots" | "discovers" | "lateral_move"
   .severity                        — Edge-level risk
 ```
 
