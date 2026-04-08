@@ -2110,8 +2110,10 @@ RUN_ID=$(basename "$RUN_DIR")
 mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
-# Determine pipeline status — default to 'complete' (set by pipeline if it ran)
-PIPELINE_STATUS="${PIPELINE_STATUS:-complete}"
+# PIPELINE_STATUS is set by scope-pipeline.md after it runs — do NOT default it here.
+# The dashboard index entry written now will be updated by the pipeline with the final status.
+# Use 'pending' as a placeholder so the index always has a valid value until pipeline completes.
+PIPELINE_STATUS="pending"
 
 # Update dashboard index — runs[] only, no latest* fields
 if [ -f dashboard/public/index.json ]; then
