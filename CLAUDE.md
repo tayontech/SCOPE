@@ -88,8 +88,6 @@ SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool
 | `scope-artifact-check.sh` | Stop | Verify mandatory artifacts exist before agent completes |
 | `scope-agent-logger.sh` | PostToolUse (Bash, async) | Auto-log AWS CLI calls to agent-log.jsonl |
 
-Codex does not support lifecycle hooks — safety constraints are enforced through AGENTS.md guidance only.
-
 ## Slash Commands
 
 | Command | Description |
