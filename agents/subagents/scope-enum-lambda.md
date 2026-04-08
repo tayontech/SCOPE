@@ -15,6 +15,20 @@ You are SCOPE's Lambda enumeration specialist. Dispatched by scope-audit orchest
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
   If not provided: log "[WARN] scope-enum-lambda: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
 
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/lambda_"*
+```
+
 ## Extraction Templates
 
 ### Trust Classification Shared Snippet
@@ -135,7 +149,6 @@ ENV_SECRET_NAMES_JSON=$(echo "$FUNC_CONFIG" | jq '[
 
 ```bash
 ALL_FINDINGS="[]"
-ERRORS=()
 # PERF-02: clean up per-region finding files for rerun safety
 rm -f "$RUN_DIR/raw/lambda_findings_"*.jsonl
 rm -f "$RUN_DIR/raw/lambda_region_status_"*.txt
