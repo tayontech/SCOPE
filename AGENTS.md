@@ -122,6 +122,17 @@ On Gemini CLI and Codex, this sequential file-based handoff IS the full context 
 
 Lifecycle hooks enforce safety constraints at the tool level. Source scripts are in `config/hooks/` and settings templates in `config/settings/`. The installer copies hook scripts to platform-native locations (`.claude/hooks/`, `.gemini/hooks/`, or `.codex/hooks/`) and settings to `.claude/settings.json`, `.gemini/settings.json`, or `.codex/hooks.json` with absolute paths.
 
+**Hook event names by platform:**
+
+| Hook | Claude Code event | Gemini CLI event | Codex event |
+|------|-------------------|------------------|-------------|
+| `scope-safety-guard.sh` | PreToolUse (Bash) | BeforeTool (Bash) | PreToolUse (Bash) |
+| `scope-aws-output-inject.sh` | — (not applicable) | BeforeTool (Bash) | — (not applicable) |
+| `scope-spl-lint.sh` | PostToolUse (Write\|Edit) | AfterTool (Write\|Edit) | PostToolUse (Write\|Edit) |
+| `scope-schema-validate.sh` | PostToolUse (Write\|Edit) | AfterTool (Write\|Edit) | PostToolUse (Write\|Edit) |
+| `scope-artifact-check.sh` | Stop | AfterAgent | Stop |
+| `scope-agent-logger.sh` | PostToolUse (Bash) | AfterTool (Bash) | PostToolUse (Bash) |
+
 ## Schema Enforcement
 
 Canonical JSON Schema files in `config/schemas/` define required fields for each phase's `results.json`:
