@@ -144,7 +144,7 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "global" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
+  --arg status "$STATUS" \
   --argjson findings "$FINDINGS_JSON" \
   '{
     module: $module,
