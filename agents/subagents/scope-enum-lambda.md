@@ -223,6 +223,46 @@ ALL_FINDINGS=$(cat "$RUN_DIR/raw/lambda_findings_"*.jsonl 2>/dev/null | jq -s 'a
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ```
 
+## Service Enumeration Checklist
+
+### Discovery
+- [ ] All functions per region (list-functions); iterate ENABLED_REGIONS (split on comma):
+  For each region in ENABLED_REGIONS:
+    aws lambda list-functions --region $REGION --output json 2>&1
+    If AccessDenied or error on a region:
+      Log: "[PARTIAL] lambda $REGION: {error message}"
+      Retry once after 2-5 seconds
+      If retry also fails: log "[SKIP] lambda $REGION: skipping after retry" and continue to next region
+  Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
+- [ ] Per-function: execution role ARN, runtime, last modified, VPC config, layers, timeout, memory
+- [ ] Per-function: resource-based policy (get-policy); ResourceNotFoundException = no policy, not an error
+- [ ] Per-function: environment variable names -- flag existence of names matching PASSWORD, SECRET, KEY, TOKEN, API_KEY, DB_, CREDENTIALS, AUTH (never output values)
+- [ ] All layers in account (list-layers, list-layer-versions)
+- [ ] Event source mappings (list-event-source-mappings)
+
+### Per-Resource Checks
+- [ ] Execution role with iam:* or AdministratorAccess: CRITICAL -- Methods 23-25, 45 target
+- [ ] Deprecated runtime: flag as security risk
+- [ ] Function URL enabled: flag as direct invocation path (no IAM auth by default)
+- [ ] Resource policy Principal:*: CRITICAL -- publicly invocable function
+- [ ] Resource policy cross-account invoke: HIGH -- external account can invoke
+- [ ] lambda:UpdateFunctionCode in resource policy: flag as code injection vector
+- [ ] lambda:AddPermission in resource policy: flag -- allows modifying resource policy itself
+- [ ] Environment variables with secret-pattern names: flag existence only, never values
+- [ ] Layers from external account ARNs: flag cross-account layer injection risk
+- [ ] Layers shared cross-account (layer policy allows external accounts): flag
+- [ ] Event sources from external accounts: flag cross-account trigger chains
+- [ ] DLQ not configured on critical functions: flag
+
+### Graph Data
+- [ ] Nodes: data:lambda:FUNCTION_NAME (type: "data") for each function
+- [ ] Edges: execution role (data:lambda:FUNCTION_NAME -> role:ROLE_NAME, trust_type: "service", label: "exec_role")
+- [ ] Edges: resource policy external (ext:arn:aws:iam::<id>:root -> data:lambda:FUNCTION_NAME, trust_type: "cross-account")
+- [ ] Edges: public invoke (ext:internet -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "read")
+- [ ] Edges: code injection priv_esc if principal has UpdateFunctionCode on function with admin role
+- [ ] Edges: event source triggers (data:<svc>:<id> -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "triggers")
+- [ ] access_level: read = InvokeFunction only; write = UpdateFunctionCode or UpdateFunctionConfiguration
+
 ## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`lambda list-functions`, `lambda get-policy`, `lambda get-function-url-config` per function) per region, store responses in shell variables
@@ -242,7 +282,7 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "multi-region" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
+  --arg status "$STATUS" \
   --argjson findings "$FINDINGS_JSON" \
   '{
     module: $module,
@@ -283,13 +323,10 @@ After writing `$RUN_DIR/lambda.json`, validate output against the per-service sc
 node bin/validate-enum-output.js "$RUN_DIR/lambda.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] lambda.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] lambda.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
@@ -302,46 +339,6 @@ Do NOT report STATUS: complete if any validation step fails.
 ## Module Constraints
 - Do NOT invoke Lambda functions — enumeration only
 - Do NOT read function environment variable VALUES — flag existence of variables matching secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_) but never output their values
-
-## Service Enumeration Checklist
-
-### Discovery
-- [ ] All functions per region (list-functions); iterate ENABLED_REGIONS (split on comma):
-  For each region in ENABLED_REGIONS:
-    aws lambda list-functions --region $REGION --output json 2>&1
-    If AccessDenied or error on a region:
-      Log: "[PARTIAL] lambda $REGION: {error message}"
-      Retry once after 2-5 seconds
-      If retry also fails: log "[SKIP] lambda $REGION: skipping after retry" and continue to next region
-  Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-- [ ] Per-function: execution role ARN, runtime, last modified, VPC config, layers, timeout, memory
-- [ ] Per-function: resource-based policy (get-policy); ResourceNotFoundException = no policy, not an error
-- [ ] Per-function: environment variable names -- flag existence of names matching PASSWORD, SECRET, KEY, TOKEN, API_KEY, DB_, CREDENTIALS, AUTH (never output values)
-- [ ] All layers in account (list-layers, list-layer-versions)
-- [ ] Event source mappings (list-event-source-mappings)
-
-### Per-Resource Checks
-- [ ] Execution role with iam:* or AdministratorAccess: CRITICAL -- Methods 23-25, 45 target
-- [ ] Deprecated runtime: flag as security risk
-- [ ] Function URL enabled: flag as direct invocation path (no IAM auth by default)
-- [ ] Resource policy Principal:*: CRITICAL -- publicly invocable function
-- [ ] Resource policy cross-account invoke: HIGH -- external account can invoke
-- [ ] lambda:UpdateFunctionCode in resource policy: flag as code injection vector
-- [ ] lambda:AddPermission in resource policy: flag -- allows modifying resource policy itself
-- [ ] Environment variables with secret-pattern names: flag existence only, never values
-- [ ] Layers from external account ARNs: flag cross-account layer injection risk
-- [ ] Layers shared cross-account (layer policy allows external accounts): flag
-- [ ] Event sources from external accounts: flag cross-account trigger chains
-- [ ] DLQ not configured on critical functions: flag
-
-### Graph Data
-- [ ] Nodes: data:lambda:FUNCTION_NAME (type: "data") for each function
-- [ ] Edges: execution role (data:lambda:FUNCTION_NAME -> role:ROLE_NAME, trust_type: "service", label: "exec_role")
-- [ ] Edges: resource policy external (ext:arn:aws:iam::<id>:root -> data:lambda:FUNCTION_NAME, trust_type: "cross-account")
-- [ ] Edges: public invoke (ext:internet -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "read")
-- [ ] Edges: code injection priv_esc if principal has UpdateFunctionCode on function with admin role
-- [ ] Edges: event source triggers (data:<svc>:<id> -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "triggers")
-- [ ] access_level: read = InvokeFunction only; write = UpdateFunctionCode or UpdateFunctionConfiguration
 
 ## Output Path Constraint
 
