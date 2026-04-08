@@ -275,7 +275,10 @@ if (existsSync(join(publicDir, "index.json"))) {
   }
 } else {
   // Fallback: scan all JSON files in public/ (no index.json needed)
-  const jsonFiles = readdirSync(publicDir).filter(f => f.endsWith(".json") && f !== "index.json");
+  if (!existsSync(publicDir)) {
+    console.log("No dashboard/public/ directory found — skipping data inlining.");
+  }
+  const jsonFiles = existsSync(publicDir) ? readdirSync(publicDir).filter(f => f.endsWith(".json") && f !== "index.json") : [];
   if (jsonFiles.length > 0) {
     // Group by source, pick the most recent file per source (by filename timestamp)
     const bySource = {};
