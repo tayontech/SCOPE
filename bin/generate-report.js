@@ -275,7 +275,6 @@ if (existsSync(join(publicDir, "index.json"))) {
   }
 } else {
   // Fallback: scan all JSON files in public/ (no index.json needed)
-  const { readdirSync } = require("fs");
   const jsonFiles = readdirSync(publicDir).filter(f => f.endsWith(".json") && f !== "index.json");
   if (jsonFiles.length > 0) {
     // Group by source, pick the most recent file per source (by filename timestamp)

@@ -212,6 +212,7 @@ for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/lambda_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
+[ -f "$RUN_DIR/raw/lambda_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/lambda_errors.txt"
 # PERF-02: merge all region finding files into ALL_FINDINGS
 ALL_FINDINGS=$(cat "$RUN_DIR/raw/lambda_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```

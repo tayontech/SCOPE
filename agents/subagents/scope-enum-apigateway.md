@@ -245,6 +245,7 @@ for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/apigw_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
+[ -f "$RUN_DIR/raw/apigw_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/apigw_errors.txt"
 # Merge REST and v2 findings separately, then combine (O(n) — single pass after loops)
 REST_FINDINGS=$(cat "$RUN_DIR/raw/apigw_rest_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 V2_FINDINGS=$(cat "$RUN_DIR/raw/apigw_v2_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")

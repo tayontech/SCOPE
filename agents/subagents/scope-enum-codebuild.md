@@ -116,7 +116,7 @@ for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   fi
 done
 # Merge all per-region finding files (O(n) — single pass after loops)
-ALL_FINDINGS=$(cat "$RUN_DIR/raw/codebuild_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/codebuild_findings_"*.jsonl 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort

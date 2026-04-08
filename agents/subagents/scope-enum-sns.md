@@ -169,6 +169,7 @@ for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/sns_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
 done
+[ -f "$RUN_DIR/raw/sns_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/sns_errors.txt"
 # Merge all per-topic findings across all regions (O(n) — single pass after loops)
 ALL_FINDINGS=$(cat "$RUN_DIR/raw/sns_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
 ```

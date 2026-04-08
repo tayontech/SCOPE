@@ -480,19 +480,12 @@ if [ ${#VALIDATION_WARNINGS[@]} -gt 0 ]; then
   printf '  %s\n' "${VALIDATION_WARNINGS[@]}"
   echo ""
   echo "These warnings indicate module data quality issues that may degrade attack-path quality."
-  echo "Review the warnings above before proceeding."
-  echo ""
-  echo "  continue — proceed to attack-paths with available data"
-  echo "  skip     — skip attack-paths and jump to findings.md generation"
-  echo ""
-  echo "Enter your choice (continue/skip):"
+  echo "Warnings will be shown alongside the Gate 3 summary — no additional prompt required."
 else
   echo ""
   echo "All modules passed validation."
 fi
 ```
-
-If VALIDATION_WARNINGS is non-empty, display the warnings before the existing Gate 3 approval prompt so the operator sees data quality issues alongside the module summary. The operator must type 'continue' to proceed to attack-paths or 'skip' to skip attack-paths. If VALIDATION_WARNINGS is empty, display a clean "All modules passed validation" message (no prompt needed).
 </module_validation>
 
 <attack_paths_dispatch>
@@ -723,20 +716,14 @@ control artifacts already generated at $RUN_DIR/defend/defend-{timestamp}/.]
 
 After findings.md is written (and Gate 4 was NOT skipped), export results.json.
 
-The attack-paths subagent wrote `results.json`. It may be in `$RUN_DIR/` or in the data pipeline output at `data/audit/*/`. Before copying, clean stale dashboard data so the dashboard always shows the current run:
+The attack-paths subagent wrote `results.json` to `$RUN_DIR/`. Copy it to the dashboard public directory:
 
 ```bash
-# Clean previous run data — dashboard only shows one run per phase anyway
-rm -f dashboard/public/audit-*.json dashboard/public/defend-*.json dashboard/public/index.json 2>/dev/null
 mkdir -p dashboard/public
 if [ -f "$RUN_DIR/results.json" ]; then
   cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
-elif PIPELINE_RESULTS=$(find data/audit -name "results.json" -newer "$RUN_DIR/agent-log.jsonl" 2>/dev/null | head -1) && [ -n "$PIPELINE_RESULTS" ]; then
-  echo "[INFO] results.json found in pipeline output: $PIPELINE_RESULTS"
-  cp "$PIPELINE_RESULTS" "dashboard/public/$RUN_ID.json"
-  cp "$PIPELINE_RESULTS" "$RUN_DIR/results.json"
 else
-  echo "[ERROR] results.json not found in $RUN_DIR or data/audit/"
+  echo "[ERROR] results.json not found in $RUN_DIR — results export skipped"
 fi
 ```
 
@@ -772,7 +759,11 @@ test -f "dashboard/public/$RUN_ID.json" && echo "Dashboard export OK" || echo "W
 <defend_auto_chain>
 ## Defend Auto-Chain
 
-After findings.md and results.json are written, automatically dispatch the defend agent as a subagent:
+After findings.md and results.json are written, automatically dispatch the defend agent as a subagent.
+
+**Gate 4 skip exception:** If Gate 4 was skipped (GATE4_SKIP=true), do not dispatch defend. Log that defend was skipped because Gate 4 was skipped, and advise the operator to run `/scope:defend` manually against the run directory if a defensive analysis is needed later.
+
+If GATE4_SKIP is not set or is false, dispatch defend as follows:
 
 ```
 Dispatch scope-defend as a subagent with this initial message:

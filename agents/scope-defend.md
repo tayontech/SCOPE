@@ -92,7 +92,7 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 <mandatory_outputs>
 ## Required Output Files (MANDATORY)
 
-Every defend run MUST produce ALL of the following files. Check this list before reporting completion.
+Every defend run MUST produce ALL of the following files — EXCEPT when zero attack paths are found (see zero-path exception below). Check this list before reporting completion.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|
@@ -110,6 +110,16 @@ test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/executive-summary.md" && te
 ```
 
 If ANY mandatory file is MISSING, go back and create it before proceeding. Do not report completion with missing files.
+
+**Zero-path exception:** When zero attack paths are found (all runs parsed successfully but no exploitable paths exist), the ONLY required outputs are:
+1. `results.json` — minimal structure with empty `scps`, `rcps`, `detections`, `security_controls`, `prioritization` arrays and `zero_paths: true` in summary
+2. `executive-summary.md` — clean bill of health summary
+3. `agent-log.jsonl` — provenance log
+
+Do NOT generate `technical-remediation.md` or `policies/*.json` when zero attack paths exist. The self-check is replaced by:
+```bash
+test -f "$RUN_DIR/results.json" && test -f "$RUN_DIR/executive-summary.md" && test -f "$RUN_DIR/agent-log.jsonl" && echo "ZERO-PATH RUN: ALL MANDATORY FILES PRESENT" || echo "MISSING FILES — go back and create them"
+```
 
 ### Output Coverage Gate (MANDATORY)
 
@@ -137,11 +147,14 @@ After generating all artifacts but BEFORE writing results.json, verify proportio
 
 **On threshold failure:**
 1. Go back and generate additional controls for the specific uncovered attack paths
-2. After retry: if thresholds are STILL not met, set STATUS: partial and include in ERRORS:
-   `[COVERAGE] No SCP for attack path: {path description}`
-   `[COVERAGE] Detection count {N} below threshold {M} for {attack_paths_count} attack paths`
+2. After retry: if thresholds are STILL not met, write results.json with `"status": "partial"` and a populated `errors` array. Set these shell variables before the results export step:
+   ```bash
+   STATUS="partial"
+   COVERAGE_ERRORS='["[COVERAGE] No SCP for attack path: {path description}", "[COVERAGE] Detection count {N} below threshold {M} for {attack_paths_count} attack paths"]'
+   ```
+   Then include `"status": $STATUS` and `"errors": $COVERAGE_ERRORS` as top-level fields in the results.json jq template.
 3. Do NOT block completion if the only failed gate is RCP and Organizations access was unavailable
-4. Write results.json with STATUS: partial and the coverage gap details in the errors field
+4. For normal (full coverage) runs: `STATUS="complete"` and `COVERAGE_ERRORS='[]'`
 </mandatory_outputs>
 
 <post_processing_pipeline>
@@ -329,7 +342,7 @@ This is the most critical section of the defend skill. Parse audit findings, det
 When invoked by scope-audit with `AUDIT_RUN_DIR` set:
 
 1. Read findings directly from `$AUDIT_RUN_DIR/findings.md`
-2. Read structured data from `$AUDIT_RUN_DIR/results.json` (preferred, but may be absent if operator skipped Gate 4 — fall back to findings.md only)
+2. Read structured data from `$AUDIT_RUN_DIR/results.json` — always present when defend is invoked via auto-chain (audit Gate 4 skip prevents defend dispatch; see AUDT-02). If results.json is unexpectedly absent in standalone mode, fall back to findings.md only and log a warning.
 3. Read evidence from `$AUDIT_RUN_DIR/agent-log.jsonl` (if available)
 4. Treat all attack paths as one-off (single run) — generate account-specific controls. Skip cross-run aggregation entirely; all `systemic/one-off` fields in output will be `one-off`
 5. Skip Steps -1 through 3 below — go directly to SCP generation with the single run's data
@@ -409,6 +422,7 @@ import re
 risk_match = re.search(r'## RISK SUMMARY: (\d+) -- (CRITICAL|HIGH|MEDIUM|LOW)', findings_text)
 account_id = risk_match.group(1) if risk_match else "unknown"
 overall_risk = risk_match.group(2) if risk_match else "UNKNOWN"
+# Export as shell variable for results export: OVERALL_RISK="$overall_risk", ACCOUNT_ID="$account_id"
 ```
 
 **Extract Layer 3 — Attack Paths:**
@@ -445,7 +459,7 @@ payload.attack_paths[]             — Full attack path array with machine-reada
   .affected_resources[]            — Node IDs from graph (for resource context)
 payload.graph.nodes[]              — All enumerated resources (for resource inventory)
 payload.graph.edges[]              — Relationships and attack edges
-  .edge_type                       — "priv_esc" | "data_access" | "cross_account" | "normal"
+  .edge_type                       — "assumes" | "escalates" | "accesses" | "exfiltrates" | "persists" | "pivots" | "discovers" | "lateral_move"
   .severity                        — Edge-level risk
 ```
 
@@ -482,6 +496,15 @@ oneoff_paths = {name for name, count in path_occurrences.items() if count == 1}
 
 **Systemic paths** (2+ runs) → generate org-wide SCP/RCP, attach at Root or Workload OU level.
 **One-off paths** (1 run) → generate account-specific SCP attached to that specific account.
+
+**Multi-account variable collection (multi-run mode only):**
+```python
+# Collect distinct account IDs across all parsed runs
+accounts_analyzed = list(dict.fromkeys(
+    run.account_id for run in all_runs if run.account_id and run.account_id != "unknown"
+))
+# accounts_analyzed is used in results_export as ACCOUNTS_ANALYZED JSON array
+```
 
 **Intake summary (logged before proceeding):**
 ```
@@ -1902,6 +1925,35 @@ After writing executive-summary.md and technical-remediation.md, export structur
 # Every count is `jq 'length'` applied to the actual array.
 # The arrays MUST be fully built before ANY summary field references them.
 
+### Step 0: Derive $RISK_SCORE from intake fields
+
+Before building arrays, derive `RISK_SCORE` from the audit intake data. This variable is used in the summary and dashboard index — it MUST be set before Step 1.
+
+```bash
+# STEP 0: Derive RISK_SCORE from intake fields
+# Source: overall_risk parsed from findings.md (Extract Layer 1) or results.json summary.risk
+# Normalize to lowercase to match schema enum: critical | high | medium | low
+
+if [ -n "$OVERALL_RISK" ]; then
+  # Use overall_risk extracted during findings intake (already set as shell variable)
+  RISK_SCORE=$(echo "$OVERALL_RISK" | tr '[:upper:]' '[:lower:]')
+elif [ -f "$AUDIT_RUN_DIR/results.json" ]; then
+  # Fall back to reading from audit results.json
+  RISK_SCORE=$(jq -r '.summary.risk // .risk // "medium"' "$AUDIT_RUN_DIR/results.json" | tr '[:upper:]' '[:lower:]')
+else
+  # Final fallback: derive from attack path severity distribution
+  # Use highest severity among all parsed attack paths
+  RISK_SCORE="medium"
+  echo "WARNING: Could not derive RISK_SCORE from intake — defaulting to 'medium'. Check audit results.json."
+fi
+
+# Validate: must be one of the schema enum values
+case "$RISK_SCORE" in
+  critical|high|medium|low) ;;
+  *) echo "WARNING: RISK_SCORE '$RISK_SCORE' is not a valid enum value — defaulting to 'medium'"; RISK_SCORE="medium" ;;
+esac
+```
+
 ### Step 1: Build all arrays FIRST
 
 Build every array in full before computing any count. Use the generated artifacts from this session:
@@ -2007,8 +2059,11 @@ QUICK_WINS_COUNT=$(echo "$PRIORITIZATION_ARRAY" | jq '[.[] | select(.effort == "
 # Extract account_id from audit results.json or findings.md (must be 12-digit number, not 'unknown')
 # Extract audit_runs_analyzed from consumed audit run directories
 
+# In multi-run mode: ACCOUNTS_ANALYZED is the JSON array of all account IDs (e.g., '["123456789012","234567890123"]')
+# In autonomous mode: ACCOUNTS_ANALYZED is empty array '[]' — single account only; account_id covers it
 jq -n \
   --arg account_id "$ACCOUNT_ID" \
+  --argjson accounts_analyzed "${ACCOUNTS_ANALYZED:-[]}" \
   --arg source "defend" \
   --arg region "global" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -2026,6 +2081,7 @@ jq -n \
   --argjson quick_wins_count "$QUICK_WINS_COUNT" \
   '{
     account_id: $account_id,
+    accounts_analyzed: (if ($accounts_analyzed | length) > 1 then $accounts_analyzed else [] end),
     source: $source,
     region: $region,
     timestamp: $ts,
@@ -2084,8 +2140,10 @@ RUN_ID=$(basename "$RUN_DIR")
 mkdir -p dashboard/public
 cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
 
-# Determine pipeline status — default to 'complete' (set by pipeline if it ran)
-PIPELINE_STATUS="${PIPELINE_STATUS:-complete}"
+# PIPELINE_STATUS is set by scope-pipeline.md after it runs — do NOT default it here.
+# The dashboard index entry written now will be updated by the pipeline with the final status.
+# Use 'pending' as a placeholder so the index always has a valid value until pipeline completes.
+PIPELINE_STATUS="pending"
 
 # Update dashboard index — runs[] only, no latest* fields
 if [ -f dashboard/public/index.json ]; then

@@ -248,7 +248,7 @@ done
 [ -f "$RUN_DIR/raw/ec2_errors.txt" ] && while IFS= read -r line; do ERRORS+=("$line"); done < "$RUN_DIR/raw/ec2_errors.txt"
 
 # Merge all per-region findings files after all background jobs complete
-ALL_FINDINGS=$(cat "$RUN_DIR/raw/ec2_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+ALL_FINDINGS=$(cat "$RUN_DIR/raw/ec2_findings_"*.jsonl 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
 ```
 
 ### Combine + Sort
