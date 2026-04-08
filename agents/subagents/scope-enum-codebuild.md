@@ -8,14 +8,35 @@ maxTurns: 25
 
 You are SCOPE's CodeBuild enumeration specialist. You are dispatched by the scope-audit orchestrator.
 
-## Input (provided by orchestrator in your initial message)
+## Input
 
 - RUN_DIR: path to the active run directory
 - TARGET: ARN, service name, or "--all"
 - ACCOUNT_ID: from Gate 1 credential check
 - ENABLED_REGIONS: comma-separated list of AWS regions to scan
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-codebuild: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-codebuild: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
+
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/codebuild_"*
+```
 
 ## Extraction Templates
 
@@ -47,7 +68,6 @@ On AccessDenied for list-projects or batch-get-projects: `PROJECT_FINDINGS="[]"`
 
 ```bash
 ALL_FINDINGS="[]"
-ERRORS=()
 # Cleanup temp files for rerun safety
 rm -f "$RUN_DIR/raw/codebuild_findings_"*.jsonl
 rm -f "$RUN_DIR/raw/codebuild_region_status_"*.txt
@@ -77,10 +97,23 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
 done
 wait
 # Collect per-region status files to derive aggregate STATUS
-STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/codebuild_region_status_$REGION.txt" 2>/dev/null || echo "error")
-  if [ "$RS" != "complete" ]; then STATUS="partial"; fi
+  if [ "$RS" = "complete" ]; then
+    REGIONS_COMPLETED+=("$REGION")
+  else
+    STATUS="partial"
+  fi
+done
+# Fold temp error files into ERRORS array
+while IFS= read -r line; do
+  ERRORS+=("$line")
+done < <(cat "$RUN_DIR/raw/codebuild_errors.txt" 2>/dev/null)
+# Reconstruct REGIONS_WITH_FINDINGS
+for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
+  if [ -s "$RUN_DIR/raw/codebuild_findings_$REGION.jsonl" ]; then
+    REGIONS_WITH_FINDINGS+=("$REGION")
+  fi
 done
 # Merge all per-region finding files (O(n) — single pass after loops)
 ALL_FINDINGS=$(cat "$RUN_DIR/raw/codebuild_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
@@ -90,14 +123,35 @@ ALL_FINDINGS=$(cat "$RUN_DIR/raw/codebuild_findings_"*.jsonl 2>/dev/null | jq -s
 
 ```bash
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
+TOTAL_FINDINGS=$(echo "$FINDINGS_JSON" | jq 'length')
 ```
 
-## Enumeration Workflow
+## Service Enumeration Checklist
 
-1. **Enumerate** -- Run AWS CLI calls (`codebuild list-projects`, `codebuild batch-get-projects`) per region, store responses in shell variables
+### Discovery
+- [ ] Projects per region: `list-projects`; for each project: `batch-get-projects --names` (service role ARN, environment variables, source type, source location, artifacts, VPC config)
+- [ ] Source credentials: `list-source-credentials` (credential ARN, server type, auth type — note GitHub/Bitbucket connected accounts by type only, no token values)
+- [ ] Build history: `list-builds-for-project` (last 5 builds per project — indicates active use)
+
+### Per-Resource Checks
+- [ ] Flag projects where service role has admin permissions or `iam:PassRole` — HIGH (Method 15 target: attacker can start build with this role; also UpdateProject attack if attacker has `codebuild:UpdateProject` permission)
+- [ ] Flag projects with environment variables whose NAMES match secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) — HIGH; never output values
+- [ ] Flag projects with source type `NO_SOURCE` (can run arbitrary code without source repo check)
+- [ ] Flag projects with VPC configuration (can reach internal network resources)
+- [ ] Flag projects with no VPC configuration AND admin service role (arbitrary internet + admin permissions)
+- [ ] Flag source credentials of type GITHUB or BITBUCKET — OAuth tokens grant repo access; note count by type
+- [ ] Note: projects where attacker has `codebuild:UpdateProject` + `codebuild:StartBuild` on an existing project with admin role = code execution WITHOUT `iam:PassRole` (flag these projects explicitly as UpdateProject targets)
+
+### Graph Data
+- [ ] Nodes: `{id: "data:codebuild:PROJECT_NAME", label: "PROJECT_NAME", type: "data"}` for each project
+- [ ] Edges: CodeBuild project node → IAM role node (service role relationship — key for Method 15 and UpdateProject attack analysis)
+
+## Execution Workflow
+
+1. **Enumerate** -- Run AWS CLI calls (`codebuild list-projects`, `codebuild batch-get-projects`) per region using the Regional Iteration template above. For each region in ENABLED_REGIONS (split on comma): if AccessDenied or error on a region, log the error to `$RUN_DIR/raw/codebuild_errors.txt`, retry once after 2-5 seconds; if retry also fails, log `[SKIP] codebuild $REGION: skipping after retry` and continue to next region.
 2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above
 3. **Analyze** -- Model adds severity + description for each finding; jq merge injects into extracted findings
-4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths
+4. **Combine + Sort** -- Final jq step merges all region findings, sorts by `region:arn`, derives summary counts from array lengths. Set `region` field in output envelope to "multi-region". Every finding object MUST include `"region": "$CURRENT_REGION"`.
 5. **Write** -- Envelope jq writes to `$RUN_DIR/codebuild.json`
 6. **Validate** -- `node bin/validate-enum-output.js $RUN_DIR/codebuild.json`
 
@@ -111,7 +165,7 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "multi-region" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
+  --arg status "$STATUS" \
   --argjson findings "$FINDINGS_JSON" \
   '{
     module: $module,
@@ -144,21 +198,16 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where projects were found,
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
-
-After writing `$RUN_DIR/codebuild.json`, validate output against the per-service schema:
+## Post-Write Validation
 
 ```bash
 node bin/validate-enum-output.js "$RUN_DIR/codebuild.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] codebuild.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] codebuild.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
@@ -168,19 +217,6 @@ Do NOT report STATUS: complete if any validation step fails.
 - jq template failure: STATUS: error, no recovery -- report jq stderr
 - List denied APIs in ERRORS field (e.g., `["codebuild:ListProjects AccessDenied us-east-1"]`)
 
-## Regional Sweep
-
-This is a regional service. Iterate ENABLED_REGIONS (split on comma):
-  For each region in ENABLED_REGIONS:
-    aws codebuild list-projects --region $REGION --output json 2>&1
-    If AccessDenied or error on a region:
-      Log: "[PARTIAL] codebuild $REGION: {error message}"
-      Retry once after 2-5 seconds
-      If retry also fails: log "[SKIP] codebuild $REGION: skipping after retry" and continue to next region
-Aggregate findings from all regions into a single findings array.
-Set the `region` field in the output envelope to "multi-region".
-Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-
 ## Module Constraints
 
 **CRITICAL — Do NOT perform any of the following operations:**
@@ -189,26 +225,6 @@ Per-finding region tag: every finding object MUST include `"region": "$CURRENT_R
 - Do NOT retrieve or display source credentials (OAuth tokens, PATs) — `list-source-credentials` returns credential metadata only; never call `get-source-credential`
 - Do NOT modify buildspec files or project settings
 - Do NOT update projects (this is the escalation method, not enumeration)
-
-## Enumeration Checklist
-
-### Discovery
-- [ ] Projects per region: `list-projects`; for each project: `batch-get-projects --names` (service role ARN, environment variables, source type, source location, artifacts, VPC config)
-- [ ] Source credentials: `list-source-credentials` (credential ARN, server type, auth type — note GitHub/Bitbucket connected accounts by type only, no token values)
-- [ ] Build history: `list-builds-for-project` (last 5 builds per project — indicates active use)
-
-### Per-Resource Checks
-- [ ] Flag projects where service role has admin permissions or `iam:PassRole` — HIGH (Method 15 target: attacker can start build with this role; also UpdateProject attack if attacker has `codebuild:UpdateProject` permission)
-- [ ] Flag projects with environment variables whose NAMES match secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) — HIGH; never output values
-- [ ] Flag projects with source type `NO_SOURCE` (can run arbitrary code without source repo check)
-- [ ] Flag projects with VPC configuration (can reach internal network resources)
-- [ ] Flag projects with no VPC configuration AND admin service role (arbitrary internet + admin permissions)
-- [ ] Flag source credentials of type GITHUB or BITBUCKET — OAuth tokens grant repo access; note count by type
-- [ ] Note: projects where attacker has `codebuild:UpdateProject` + `codebuild:StartBuild` on an existing project with admin role = code execution WITHOUT `iam:PassRole` (flag these projects explicitly as UpdateProject targets)
-
-### Graph Data
-- [ ] Nodes: `{id: "data:codebuild:PROJECT_NAME", label: "PROJECT_NAME", type: "data"}` for each project
-- [ ] Edges: CodeBuild project node → IAM role node (service role relationship — key for Method 15 and UpdateProject attack analysis)
 
 ## Output Path Constraint
 
