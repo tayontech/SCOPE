@@ -101,6 +101,31 @@ FINDINGS_JSON=$(echo "[]" | jq \
   '($caller + $org + $scp) | sort_by(.arn)')
 ```
 
+## Service Enumeration Checklist
+
+### Discovery
+- [ ] Caller identity: ARN, Account, UserId (GetCallerIdentity)
+- [ ] Caller type: IAM user (`:user/`), assumed role (`:assumed-role/`), root (`:root`), federated user
+- [ ] Access key attribution: account ownership for any specific key under investigation
+- [ ] Organization structure: org ID, master account, member accounts, OU hierarchy (AccessDenied is EXPECTED on non-management accounts — log "[INFO] Organizations API unavailable (non-management account)" and continue. Do NOT count this as a partial failure or set STATUS=partial — the STS module is complete when GetCallerIdentity and federation/session data succeed, regardless of Organizations access.)
+- [ ] Service Control Policies: list and describe each SCP, extract deny statements
+- [ ] Resource Control Policies: list if available (2024+ feature)
+- [ ] Merge live SCPs with config/scps/*.json pre-loaded SCPs; tag source as "live", "config", or "config+live"
+- [ ] Cross-account roles: roles whose AssumeRolePolicyDocument contains external principals
+
+### Per-Resource Checks
+- [ ] Root caller: flag as CRITICAL if GetCallerIdentity returns `:root` ARN
+- [ ] Wildcard trust (Principal: "*"): CRITICAL finding
+- [ ] Cross-account trust without ExternalId condition: flag; use accounts.json to classify internal vs external
+- [ ] Broad account root trust (Principal: arn:aws:iam::ACCOUNT:root): HIGH if external account
+- [ ] SCPs with broad Deny statements: note which actions are blocked at the org level
+- [ ] SCP coverage gaps: accounts or OUs not covered by any restrictive SCP
+
+### Graph Data
+- [ ] Nodes: external account nodes (ext:arn:aws:iam::<id>:root), owned=true/false from accounts.json
+- [ ] Edges: cross-account trust (source: ext node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
+- [ ] Source node type for caller: match actual caller type — user:<name>, role:<role-name>, user:root — do not hardcode
+
 ## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`sts get-caller-identity`, `organizations describe-organization`, `organizations list-policies`, `organizations describe-policy`), store responses in shell variables
@@ -182,31 +207,6 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT attempt to assume roles — enumeration only
 - Do NOT request tokens beyond caller identity
 - If cross-account probe attempt succeeds, do NOT proceed with the assumed credentials — only record the trust path as live
-
-## Service Enumeration Checklist
-
-### Discovery
-- [ ] Caller identity: ARN, Account, UserId (GetCallerIdentity)
-- [ ] Caller type: IAM user (`:user/`), assumed role (`:assumed-role/`), root (`:root`), federated user
-- [ ] Access key attribution: account ownership for any specific key under investigation
-- [ ] Organization structure: org ID, master account, member accounts, OU hierarchy (AccessDenied is EXPECTED on non-management accounts — log "[INFO] Organizations API unavailable (non-management account)" and continue. Do NOT count this as a partial failure or set STATUS=partial — the STS module is complete when GetCallerIdentity and federation/session data succeed, regardless of Organizations access.)
-- [ ] Service Control Policies: list and describe each SCP, extract deny statements
-- [ ] Resource Control Policies: list if available (2024+ feature)
-- [ ] Merge live SCPs with config/scps/*.json pre-loaded SCPs; tag source as "live", "config", or "config+live"
-- [ ] Cross-account roles: roles whose AssumeRolePolicyDocument contains external principals
-
-### Per-Resource Checks
-- [ ] Root caller: flag as CRITICAL if GetCallerIdentity returns `:root` ARN
-- [ ] Wildcard trust (Principal: "*"): CRITICAL finding
-- [ ] Cross-account trust without ExternalId condition: flag; use accounts.json to classify internal vs external
-- [ ] Broad account root trust (Principal: arn:aws:iam::ACCOUNT:root): HIGH if external account
-- [ ] SCPs with broad Deny statements: note which actions are blocked at the org level
-- [ ] SCP coverage gaps: accounts or OUs not covered by any restrictive SCP
-
-### Graph Data
-- [ ] Nodes: external account nodes (ext:arn:aws:iam::<id>:root), owned=true/false from accounts.json
-- [ ] Edges: cross-account trust (source: ext node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
-- [ ] Source node type for caller: match actual caller type — user:<name>, role:<role-name>, user:root — do not hardcode
 
 ## Output Path Constraint
 
