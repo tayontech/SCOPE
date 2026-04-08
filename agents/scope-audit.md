@@ -480,19 +480,12 @@ if [ ${#VALIDATION_WARNINGS[@]} -gt 0 ]; then
   printf '  %s\n' "${VALIDATION_WARNINGS[@]}"
   echo ""
   echo "These warnings indicate module data quality issues that may degrade attack-path quality."
-  echo "Review the warnings above before proceeding."
-  echo ""
-  echo "  continue — proceed to attack-paths with available data"
-  echo "  skip     — skip attack-paths and jump to findings.md generation"
-  echo ""
-  echo "Enter your choice (continue/skip):"
+  echo "Warnings will be shown alongside the Gate 3 summary — no additional prompt required."
 else
   echo ""
   echo "All modules passed validation."
 fi
 ```
-
-If VALIDATION_WARNINGS is non-empty, display the warnings before the existing Gate 3 approval prompt so the operator sees data quality issues alongside the module summary. The operator must type 'continue' to proceed to attack-paths or 'skip' to skip attack-paths. If VALIDATION_WARNINGS is empty, display a clean "All modules passed validation" message (no prompt needed).
 </module_validation>
 
 <attack_paths_dispatch>
