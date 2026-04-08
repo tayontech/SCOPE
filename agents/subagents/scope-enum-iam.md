@@ -656,6 +656,38 @@ jq -s 'add | sort_by(.arn)' \
 # ---- END FALLBACK PATH ----
 ```
 
+## Service Enumeration Checklist
+
+### Discovery
+- [ ] All IAM users (name, ARN, CreateDate, MFA devices, login profile, access keys)
+- [ ] All IAM roles — skip any RoleName starting with "AWSServiceRole"
+- [ ] All IAM groups (members, attached and inline policies)
+- [ ] All customer-managed policies attached to any principal (default version document only)
+- [ ] Federation providers: SAML providers, OIDC providers
+- [ ] Account password policy settings
+- [ ] Credential report (if accessible)
+
+### Per-Resource Checks
+- [ ] MFA enabled on users with console access (LoginProfile set); flag absent MFA as HIGH
+- [ ] Access key age: flag keys older than 90 days as HIGH
+- [ ] Users with both console access and programmatic access keys: flag as increased attack surface
+- [ ] Wildcard trust policies (Principal: "*" or Principal.AWS: "*"): flag as CRITICAL
+- [ ] Cross-account trust without sts:ExternalId condition: flag; classify as internal (in accounts.json) or external
+- [ ] Permission boundaries present on high-privilege roles: flag absent boundary on admin roles
+- [ ] Overly broad inline or managed policies granting iam:* or admin access: CRITICAL
+- [ ] Role trust policy principal type: AWS user/role/root, Service, Federated
+- [ ] Assumption chains: A assumes B assumes C — flag cross-account links in chain
+
+### Enrichment Fields (New — GAAD path provides these for free)
+- [ ] Inline policy documents per user/role/group (inline_policies field)
+- [ ] Attached managed policy documents (default version) per principal (attached_policy_documents field)
+- [ ] RoleLastUsed data per role (role_last_used field — last_used_date + region)
+
+### Graph Data
+- [ ] Nodes: user:<name>, role:<name> (skip AWSServiceRole-prefixed), svc:<service>.amazonaws.com, esc:iam:<Action>
+- [ ] Edges: trust relationships (same-account, cross-account internal/external, service), escalation paths (priv_esc), group memberships
+- [ ] Severity: admin/full access = CRITICAL; write on IAM/STS/Lambda = HIGH; read on sensitive data = MEDIUM; read-only non-sensitive = LOW
+
 ## Execution Workflow
 
 1. **Gate 0** — Try GAAD (`get-account-authorization-details --filter User Role Group LocalManagedPolicy`); on AccessDenied switch to fallback per-resource path
@@ -737,38 +769,6 @@ Do NOT report STATUS: complete if any validation step fails.
 - Skip roles where RoleName starts with "AWSServiceRole" — service-linked roles are not valid targets
 - Do NOT simulate all possible permission combinations — focus on high-value actions: iam:PassRole, iam:CreateRole, iam:AttachRolePolicy, sts:AssumeRole, iam:PutUserPolicy, iam:PutRolePolicy, iam:CreatePolicyVersion
 - Do NOT enumerate every policy version — only the default version document
-
-## Service Enumeration Checklist
-
-### Discovery
-- [ ] All IAM users (name, ARN, CreateDate, MFA devices, login profile, access keys)
-- [ ] All IAM roles — skip any RoleName starting with "AWSServiceRole"
-- [ ] All IAM groups (members, attached and inline policies)
-- [ ] All customer-managed policies attached to any principal (default version document only)
-- [ ] Federation providers: SAML providers, OIDC providers
-- [ ] Account password policy settings
-- [ ] Credential report (if accessible)
-
-### Per-Resource Checks
-- [ ] MFA enabled on users with console access (LoginProfile set); flag absent MFA as HIGH
-- [ ] Access key age: flag keys older than 90 days as HIGH
-- [ ] Users with both console access and programmatic access keys: flag as increased attack surface
-- [ ] Wildcard trust policies (Principal: "*" or Principal.AWS: "*"): flag as CRITICAL
-- [ ] Cross-account trust without sts:ExternalId condition: flag; classify as internal (in accounts.json) or external
-- [ ] Permission boundaries present on high-privilege roles: flag absent boundary on admin roles
-- [ ] Overly broad inline or managed policies granting iam:* or admin access: CRITICAL
-- [ ] Role trust policy principal type: AWS user/role/root, Service, Federated
-- [ ] Assumption chains: A assumes B assumes C — flag cross-account links in chain
-
-### Enrichment Fields (New — GAAD path provides these for free)
-- [ ] Inline policy documents per user/role/group (inline_policies field)
-- [ ] Attached managed policy documents (default version) per principal (attached_policy_documents field)
-- [ ] RoleLastUsed data per role (role_last_used field — last_used_date + region)
-
-### Graph Data
-- [ ] Nodes: user:<name>, role:<name> (skip AWSServiceRole-prefixed), svc:<service>.amazonaws.com, esc:iam:<Action>
-- [ ] Edges: trust relationships (same-account, cross-account internal/external, service), escalation paths (priv_esc), group memberships
-- [ ] Severity: admin/full access = CRITICAL; write on IAM/STS/Lambda = HIGH; read on sensitive data = MEDIUM; read-only non-sensitive = LOW
 
 ## Output Path Constraint
 
