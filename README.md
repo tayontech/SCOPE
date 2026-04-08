@@ -110,11 +110,11 @@ The dashboard visualizes:
 
 SCOPE runs on three AI coding platforms with the same agent definitions:
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| **Claude Code** | Full support | Lifecycle hooks, model routing, memory |
-| **Gemini CLI** | Full support | Hooks via settings templates |
-| **Codex CLI** | Supported | Safety enforced via AGENTS.md (no hook support) |
+| Platform | Status | Hooks Config | Notes |
+|----------|--------|-------------|-------|
+| **Claude Code** | Full support | `.claude/settings.json` | Lifecycle hooks, model routing, memory |
+| **Gemini CLI** | Full support | `.gemini/settings.json` | Lifecycle hooks, model routing |
+| **Codex CLI** | Full support | `.codex/hooks.json` | Lifecycle hooks, model routing |
 
 ### Agent Architecture
 
