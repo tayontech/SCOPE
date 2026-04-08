@@ -13,6 +13,18 @@ You are SCOPE's IAM enumeration specialist. Dispatched by scope-audit orchestrat
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
 - Note: IAM is a global service — ENABLED_REGIONS is not applicable and is ignored if received
 
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+```
+
 ## Extraction Templates
 
 ### Trust Classification Shared Snippet
