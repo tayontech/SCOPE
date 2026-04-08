@@ -181,7 +181,7 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
     "wildcard_trust_policies": "int",
     "cross_account_trusts": "int",
     "users_without_mfa": "int",
-    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
+    "risk_score": "critical | high | medium | low",
     "services_analyzed": "int",
     "top_findings": ["string — one-line summary of each critical/high finding"],
     "paths_by_category": {
@@ -201,7 +201,7 @@ The graph is built from findings.md data. The pipeline does NOT need to handle H
       {"id": "string", "label": "string", "type": "user | role | group | escalation | data | external"}
     ],
     "edges": [
-      {"source": "string", "target": "string", "trust_type": "same-account | cross-account", "edge_type": "priv_esc | trust | data_access | network | service | public_access | cross_account | membership", "severity": "critical | high | medium | low", "label": "string"}
+      {"source": "string", "target": "string", "trust_type": "same-account | cross-account | service | wildcard | federated", "edge_type": "priv_esc | trust | data_access | network | service | public_access | cross_account | membership", "severity": "critical | high | medium | low", "label": "string"}
     ]
   },
   "attack_paths": [
@@ -493,7 +493,7 @@ If present, extract the exfiltration analysis section:
     "passrole_chains": "int",
     "persistence_techniques": "int",
     "exfiltration_vectors": "int",
-    "risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
+    "risk_score": "critical | high | medium | low",
     "highest_priv": "string — e.g., ADMIN, POWER_USER, READ_ONLY"
   },
   "graph": {
@@ -633,7 +633,12 @@ After writing each normalized JSON file, validate:
 4. **JSON is valid:** the written file is parseable JSON (read it back and verify)
 5. **Index consistency:** the index entry's `data_file` path matches the actual written file
 
-If validation fails, set status to `partial` or `failed` accordingly and log a warning. Do not block the calling agent.
+If validation fails, set status to `partial` or `failed` accordingly, rewrite the normalized JSON file with the updated status, update the index entry to match, and log a warning. Do not block the calling agent.
+
+```bash
+# Re-patch status in the already-written file to keep disk and index in sync
+jq --arg status "$NEW_STATUS" '.status = $status' "$DATA_FILE" > "$DATA_FILE.tmp" && mv "$DATA_FILE.tmp" "$DATA_FILE" 2>/dev/null || true
+```
 
 This is the only verification Phase 1 performs. It does NOT run the full scope-verify protocol (no SPL lints, no attack path satisfiability checks, no remediation safety rules). Those are the calling agent's responsibility.
 </data_verification>
