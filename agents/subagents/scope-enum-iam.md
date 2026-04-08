@@ -741,19 +741,14 @@ ERRORS: [list of AccessDenied or partial failures, or empty]
 
 ## Post-Write Validation
 
-After writing `$RUN_DIR/iam.json`, validate output against the per-service schema:
-
 ```bash
 node bin/validate-enum-output.js "$RUN_DIR/iam.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] iam.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] iam.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
