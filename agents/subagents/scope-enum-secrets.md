@@ -10,10 +10,32 @@ maxTurns: 25
 You are SCOPE's Secrets Manager enumeration specialist. Dispatched by scope-audit orchestrator.
 
 ## Input
+
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
 - ENABLED_REGIONS: comma-separated list of AWS regions to scan
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-secrets: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-secrets: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
+
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/secrets_"*
+```
 
 ## Extraction Templates
 
@@ -121,10 +143,7 @@ On AccessDenied for get-resource-policy or no resource policy: set `RESOURCE_POL
 
 ```bash
 ALL_FINDINGS="[]"
-ERRORS=()
 # PERF-02: clean up per-region finding files for rerun safety
-rm -f "$RUN_DIR/raw/secrets_findings_"*.jsonl
-rm -f "$RUN_DIR/raw/secrets_region_status_"*.txt
 MAX_PARALLEL=4
 ACTIVE=0
 REGION_PIDS=()
@@ -169,7 +188,6 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
 done
 wait
 # Collect per-region status files to derive aggregate STATUS
-STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/secrets_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
@@ -184,7 +202,40 @@ ALL_FINDINGS=$(cat "$RUN_DIR/raw/secrets_findings_"*.jsonl 2>/dev/null | jq -s '
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ```
 
-## Enumeration Workflow
+## Service Enumeration Checklist
+
+### Discovery
+- [ ] All secrets per region (list-secrets); iterate ENABLED_REGIONS (split on comma):
+  For each region in ENABLED_REGIONS:
+    aws secretsmanager list-secrets --region $REGION --output json 2>&1
+    If AccessDenied or error on a region:
+      Log: "[PARTIAL] secretsmanager $REGION: {error message}"
+      Retry once after 2-5 seconds
+      If retry also fails: log "[SKIP] secretsmanager $REGION: skipping after retry" and continue to next region
+  Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
+- [ ] Per-secret: describe-secret for rotation status, LastRotatedDate, LastAccessedDate, KMS key ARN, VersionIdsToStages
+- [ ] Per-secret: resource policy (get-resource-policy)
+- [ ] Tags: look for naming patterns suggesting high-value content (password, key, token, credential, db)
+
+### Per-Resource Checks
+- [ ] Rotation disabled: flag as finding
+- [ ] Last rotated >90 days ago: flag as HIGH
+- [ ] Last accessed never or >180 days ago: flag as potentially unused secret
+- [ ] KMS key used: DefaultEncryptionKey (aws/secretsmanager) vs customer-managed -- flag if using default
+- [ ] Resource policy Principal:*: CRITICAL
+- [ ] Resource policy cross-account principal: HIGH -- external account can access secret
+- [ ] GetSecretValue granted without conditions: flag as "money action" exposed broadly
+- [ ] PutSecretValue without conditions: flag as potential backdoor path
+- [ ] Condition checks: note aws:SourceVpc, aws:SourceVpce, aws:PrincipalOrgID -- reduce risk, do not eliminate
+
+### Graph Data
+- [ ] Nodes: data:secrets:SECRET_NAME (type: "data") for each secret
+- [ ] Edges: IAM-based access (user:<name>/role:<name> -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: read|write|admin)
+- [ ] Edges: cross-account resource policy (ext:arn:aws:iam::<id>:root -> data:secrets:SECRET_NAME, trust_type: "cross-account")
+- [ ] Edges: KMS dependency (data:kms:KEY_ID -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: "read")
+- [ ] access_level: read = GetSecretValue/DescribeSecret/ListSecrets; write = PutSecretValue/UpdateSecret/CreateSecret; admin = secretsmanager:* or DeleteSecret+PutResourcePolicy
+
+## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`secretsmanager list-secrets`, `secretsmanager get-resource-policy` per secret) per region, store responses in shell variables
 2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification for resource policies
@@ -203,7 +254,7 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "multi-region" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
+  --arg status "$STATUS" \
   --argjson findings "$FINDINGS_JSON" \
   '{
     module: $module,
@@ -236,7 +287,7 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where secrets were found, 
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
+## Post-Write Validation
 
 After writing `$RUN_DIR/secrets.json`, validate output against the per-service schema:
 
@@ -244,12 +295,11 @@ After writing `$RUN_DIR/secrets.json`, validate output against the per-service s
 node bin/validate-enum-output.js "$RUN_DIR/secrets.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] secrets.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] secrets.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
 
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
 Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
@@ -264,39 +314,6 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT read secret values — enumerate metadata only (SecretARN, name, rotation status, last accessed)
 - Do NOT call GetSecretValue
 - Flag secrets that haven't rotated in >90 days (not >30 days -- use 90-day threshold)
-
-## Enumeration Checklist
-
-### Discovery
-- [ ] All secrets per region (list-secrets); iterate ENABLED_REGIONS (split on comma):
-  For each region in ENABLED_REGIONS:
-    aws secretsmanager list-secrets --region $REGION --output json 2>&1
-    If AccessDenied or error on a region:
-      Log: "[PARTIAL] secretsmanager $REGION: {error message}"
-      Retry once after 2-5 seconds
-      If retry also fails: log "[SKIP] secretsmanager $REGION: skipping after retry" and continue to next region
-  Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-- [ ] Per-secret: describe-secret for rotation status, LastRotatedDate, LastAccessedDate, KMS key ARN, VersionIdsToStages
-- [ ] Per-secret: resource policy (get-resource-policy)
-- [ ] Tags: look for naming patterns suggesting high-value content (password, key, token, credential, db)
-
-### Per-Resource Checks
-- [ ] Rotation disabled: flag as finding
-- [ ] Last rotated >90 days ago: flag as HIGH
-- [ ] Last accessed never or >180 days ago: flag as potentially unused secret
-- [ ] KMS key used: DefaultEncryptionKey (aws/secretsmanager) vs customer-managed -- flag if using default
-- [ ] Resource policy Principal:*: CRITICAL
-- [ ] Resource policy cross-account principal: HIGH -- external account can access secret
-- [ ] GetSecretValue granted without conditions: flag as "money action" exposed broadly
-- [ ] PutSecretValue without conditions: flag as potential backdoor path
-- [ ] Condition checks: note aws:SourceVpc, aws:SourceVpce, aws:PrincipalOrgID -- reduce risk, do not eliminate
-
-### Graph Data
-- [ ] Nodes: data:secrets:SECRET_NAME (type: "data") for each secret
-- [ ] Edges: IAM-based access (user:<name>/role:<name> -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: read|write|admin)
-- [ ] Edges: cross-account resource policy (ext:arn:aws:iam::<id>:root -> data:secrets:SECRET_NAME, trust_type: "cross-account")
-- [ ] Edges: KMS dependency (data:kms:KEY_ID -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: "read")
-- [ ] access_level: read = GetSecretValue/DescribeSecret/ListSecrets; write = PutSecretValue/UpdateSecret/CreateSecret; admin = secretsmanager:* or DeleteSecret+PutResourcePolicy
 
 ## Output Path Constraint
 
