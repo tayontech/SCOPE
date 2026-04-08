@@ -656,7 +656,7 @@ jq -s 'add | sort_by(.arn)' \
 # ---- END FALLBACK PATH ----
 ```
 
-## Enumeration Workflow
+## Execution Workflow
 
 1. **Gate 0** — Try GAAD (`get-account-authorization-details --filter User Role Group LocalManagedPolicy`); on AccessDenied switch to fallback per-resource path
 2. **Enumerate** — GAAD primary: single bulk call + per-group member calls + per-user credential-state. Fallback: per-resource list+detail loops with temp-file append pattern
@@ -707,7 +707,7 @@ METRICS: {users: N, roles: N, groups: N, policies: N, findings: N}
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
+## Post-Write Validation
 
 After writing `$RUN_DIR/iam.json`, validate output against the per-service schema:
 
@@ -738,7 +738,7 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT simulate all possible permission combinations — focus on high-value actions: iam:PassRole, iam:CreateRole, iam:AttachRolePolicy, sts:AssumeRole, iam:PutUserPolicy, iam:PutRolePolicy, iam:CreatePolicyVersion
 - Do NOT enumerate every policy version — only the default version document
 
-## Enumeration Checklist
+## Service Enumeration Checklist
 
 ### Discovery
 - [ ] All IAM users (name, ARN, CreateDate, MFA devices, login profile, access keys)
