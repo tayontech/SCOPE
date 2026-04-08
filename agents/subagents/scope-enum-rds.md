@@ -147,9 +147,9 @@ done
 ### Combine + Sort
 
 ```bash
-# Merge per-region temp files into arrays after all background jobs complete (cat glob + jq -s 'add // []' handles empty/missing files safely)
-INSTANCE_MERGED=$(cat "$RUN_DIR/raw/rds_instance_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
-SNAPSHOT_MERGED=$(cat "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl 2>/dev/null | jq -s 'add // []' 2>/dev/null || echo "[]")
+# Merge per-region temp files into arrays after all background jobs complete (cat glob + jq -s '.' wraps object stream into array without merging keys)
+INSTANCE_MERGED=$(cat "$RUN_DIR/raw/rds_instance_findings_"*.jsonl 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
+SNAPSHOT_MERGED=$(cat "$RUN_DIR/raw/rds_snapshot_findings_"*.jsonl 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
 FINDINGS_JSON=$(jq -n --argjson inst "$INSTANCE_MERGED" --argjson snap "$SNAPSHOT_MERGED" '$inst + $snap | sort_by(.region + ":" + .arn)')
 ```
 
