@@ -342,7 +342,7 @@ This is the most critical section of the defend skill. Parse audit findings, det
 When invoked by scope-audit with `AUDIT_RUN_DIR` set:
 
 1. Read findings directly from `$AUDIT_RUN_DIR/findings.md`
-2. Read structured data from `$AUDIT_RUN_DIR/results.json` (preferred, but may be absent if operator skipped Gate 4 — fall back to findings.md only)
+2. Read structured data from `$AUDIT_RUN_DIR/results.json` — always present when defend is invoked via auto-chain (audit Gate 4 skip prevents defend dispatch; see AUDT-02). If results.json is unexpectedly absent in standalone mode, fall back to findings.md only and log a warning.
 3. Read evidence from `$AUDIT_RUN_DIR/agent-log.jsonl` (if available)
 4. Treat all attack paths as one-off (single run) — generate account-specific controls. Skip cross-run aggregation entirely; all `systemic/one-off` fields in output will be `one-off`
 5. Skip Steps -1 through 3 below — go directly to SCP generation with the single run's data
