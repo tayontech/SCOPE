@@ -433,7 +433,7 @@ ATTACK_PATHS_JSON="[...]"  # populated from analysis — MUST be an array
 #     "role_arn": "arn:aws:iam::123456789012:role/RoleName",
 #     "role_name": "RoleName",
 #     "trust_principal": "arn:aws:iam::999999999999:root",
-#     "trust_type": "cross-account|same-account|service|federated",
+#     "trust_type": "cross-account|same-account|service|federated|wildcard",
 #     "is_wildcard": false,
 #     "is_internal": true,   # true if trust_principal account ID is in OWNED_ACCOUNTS; false if external; null for service/federated trusts
 #     "account_name": null,  # human-readable name from config/accounts.json if available
