@@ -13,6 +13,18 @@ You are SCOPE's STS/Organizations enumeration specialist. Dispatched by scope-au
 - RUN_DIR, TARGET, ACCOUNT_ID (provided by orchestrator)
 - Note: STS is a global service — ENABLED_REGIONS is not applicable and is ignored if received
 
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+```
+
 ## Extraction Templates
 
 ### sts_caller (from GetCallerIdentity)
