@@ -765,7 +765,11 @@ test -f "dashboard/public/$RUN_ID.json" && echo "Dashboard export OK" || echo "W
 <defend_auto_chain>
 ## Defend Auto-Chain
 
-After findings.md and results.json are written, automatically dispatch the defend agent as a subagent:
+After findings.md and results.json are written, automatically dispatch the defend agent as a subagent.
+
+**Gate 4 skip exception:** If Gate 4 was skipped (GATE4_SKIP=true), do not dispatch defend. Log that defend was skipped because Gate 4 was skipped, and advise the operator to run `/scope:defend` manually against the run directory if a defensive analysis is needed later.
+
+If GATE4_SKIP is not set or is false, dispatch defend as follows:
 
 ```
 Dispatch scope-defend as a subagent with this initial message:
