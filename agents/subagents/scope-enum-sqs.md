@@ -8,14 +8,35 @@ maxTurns: 25
 
 You are SCOPE's SQS enumeration specialist. You are dispatched by the scope-audit orchestrator.
 
-## Input (provided by orchestrator in your initial message)
+## Input
 
 - RUN_DIR: path to the active run directory
 - TARGET: ARN, service name, or "--all"
 - ACCOUNT_ID: from Gate 1 credential check
 - ENABLED_REGIONS: comma-separated list of AWS regions to scan
   (e.g., "us-east-1,us-east-2,us-west-2,eu-west-1")
-  If not provided: log "[WARN] scope-enum-sqs: ENABLED_REGIONS not set, defaulting to us-east-1" and proceed with ENABLED_REGIONS="us-east-1". Include this warning in the ERRORS field of the return summary so it surfaces at Gate 3. Partial data (one region) is better than no data.
+
+```bash
+if [ -z "${ENABLED_REGIONS:-}" ]; then
+  ENABLED_REGIONS="us-east-1"
+  ERRORS+=("[WARN] scope-enum-sqs: ENABLED_REGIONS not set, defaulting to us-east-1")
+  STATUS="partial"
+fi
+```
+
+## Shared Runtime Contract
+
+```bash
+mkdir -p "$RUN_DIR/raw"
+
+STATUS="complete"
+ERRORS=()
+REGIONS_COMPLETED=()
+REGIONS_WITH_FINDINGS=()
+TOTAL_FINDINGS=0
+
+rm -f "$RUN_DIR/raw/sqs_"*
+```
 
 ## Extraction Templates
 
@@ -118,7 +139,6 @@ On AccessDenied for list-queues or get-queue-attributes: `QUEUE_FINDINGS="[]"`
 
 ```bash
 ALL_FINDINGS="[]"
-ERRORS=()
 # Cleanup temp files for rerun safety
 rm -f "$RUN_DIR/raw/sqs_findings_"*.jsonl
 rm -f "$RUN_DIR/raw/sqs_region_status_"*.txt
@@ -146,7 +166,6 @@ for CURRENT_REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
 done
 wait
 # Collect per-region status files to derive aggregate STATUS
-STATUS="complete"
 for REGION in $(echo "$ENABLED_REGIONS" | tr ',' ' '); do
   RS=$(cat "$RUN_DIR/raw/sqs_region_status_$REGION.txt" 2>/dev/null || echo "error")
   if [ "$RS" != "complete" ]; then STATUS="partial"; fi
@@ -161,7 +180,35 @@ ALL_FINDINGS=$(cat "$RUN_DIR/raw/sqs_findings_"*.jsonl 2>/dev/null | jq -s 'add 
 FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ```
 
-## Enumeration Workflow
+## Service Enumeration Checklist
+
+This is a regional service. Iterate ENABLED_REGIONS (split on comma):
+  For each region in ENABLED_REGIONS:
+    aws sqs list-queues --region $REGION --output json 2>&1
+    If AccessDenied or error on a region:
+      Log: "[PARTIAL] sqs $REGION: {error message}"
+      Retry once after 2-5 seconds
+      If retry also fails: log "[SKIP] sqs $REGION: skipping after retry" and continue to next region
+Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
+
+### Discovery
+- [ ] Queues per region: `list-queues`, then `get-queue-attributes --attribute-names All` for each — Policy, KmsMasterKeyId, SseType, VisibilityTimeout, RedrivePolicy, QueueArn, FifoQueue
+- [ ] Queue URL to queue name mapping for all queues
+
+### Per-Resource Checks
+- [ ] Flag queues with resource policy containing `Principal: "*"` — CRITICAL (public send/receive access)
+- [ ] Flag queues with cross-account principals in resource policy — HIGH (data exfiltration or message injection)
+- [ ] Flag queues with no `KmsMasterKeyId` (SseType absent or DISABLED) — messages unencrypted at rest
+- [ ] Flag queues with no dead-letter queue (`RedrivePolicy` absent) — unprocessed messages silently dropped, potential data loss
+- [ ] Note SQS → Lambda event source mappings (Lambda module holds these; SQS should emit queue nodes for cross-reference)
+- [ ] Flag FIFO queues without content-based deduplication (`ContentBasedDeduplication: false`) — data integrity risk
+
+### Graph Data
+- [ ] Nodes: `{id: "data:sqs:QUEUE_NAME", label: "QUEUE_NAME", type: "data"}` for each queue
+- [ ] Edges: Lambda function → SQS queue node when event source mapping exists from Lambda module cross-reference (`edge_type: "data_access"`, `access_level: "read"`, `label: "consumes"`)
+- [ ] Edges: External account → SQS queue when cross-account policy principal found (`edge_type: "data_access"`, `trust_type: "cross-account"`)
+
+## Execution Workflow
 
 1. **Enumerate** -- Run AWS CLI calls (`sqs list-queues`, `sqs get-queue-attributes --attribute-names All` per queue) per region, store responses in shell variables
 2. **Extract** -- Run prescriptive jq extraction templates from Extraction Templates above, including trust classification
@@ -180,7 +227,7 @@ jq -n \
   --arg account_id "$ACCOUNT_ID" \
   --arg region "multi-region" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "complete" \
+  --arg status "$STATUS" \
   --argjson findings "$FINDINGS_JSON" \
   '{
     module: $module,
@@ -213,21 +260,16 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where queues were found, o
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation (MANDATORY)
-
-After writing `$RUN_DIR/sqs.json`, validate output against the per-service schema:
+## Post-Write Validation
 
 ```bash
 node bin/validate-enum-output.js "$RUN_DIR/sqs.json"
 VALIDATION_EXIT=$?
 if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  echo "[VALIDATION] sqs.json failed schema validation (exit $VALIDATION_EXIT)"
+  ERRORS+=("[VALIDATION] sqs.json failed schema validation (exit $VALIDATION_EXIT)")
   STATUS="error"
 fi
 ```
-
-If STATUS is now "error", set ERRORS to include the `[VALIDATION]` message above.
-Do NOT report STATUS: complete if any validation step fails.
 
 ## Error Handling
 
@@ -243,34 +285,6 @@ Do NOT report STATUS: complete if any validation step fails.
 - Do NOT send messages to any queue
 - Do NOT modify queue attributes, policies, or permissions
 - Do NOT purge queues
-
-## Enumeration Checklist
-
-This is a regional service. Iterate ENABLED_REGIONS (split on comma):
-  For each region in ENABLED_REGIONS:
-    aws sqs list-queues --region $REGION --output json 2>&1
-    If AccessDenied or error on a region:
-      Log: "[PARTIAL] sqs $REGION: {error message}"
-      Retry once after 2-5 seconds
-      If retry also fails: log "[SKIP] sqs $REGION: skipping after retry" and continue to next region
-Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-
-### Discovery
-- [ ] Queues per region: `list-queues`, then `get-queue-attributes --attribute-names All` for each — Policy, KmsMasterKeyId, SseType, VisibilityTimeout, RedrivePolicy, QueueArn, FifoQueue
-- [ ] Queue URL to queue name mapping for all queues
-
-### Per-Resource Checks
-- [ ] Flag queues with resource policy containing `Principal: "*"` — CRITICAL (public send/receive access)
-- [ ] Flag queues with cross-account principals in resource policy — HIGH (data exfiltration or message injection)
-- [ ] Flag queues with no `KmsMasterKeyId` (SseType absent or DISABLED) — messages unencrypted at rest
-- [ ] Flag queues with no dead-letter queue (`RedrivePolicy` absent) — unprocessed messages silently dropped, potential data loss
-- [ ] Note SQS → Lambda event source mappings (Lambda module holds these; SQS should emit queue nodes for cross-reference)
-- [ ] Flag FIFO queues without content-based deduplication (`ContentBasedDeduplication: false`) — data integrity risk
-
-### Graph Data
-- [ ] Nodes: `{id: "data:sqs:QUEUE_NAME", label: "QUEUE_NAME", type: "data"}` for each queue
-- [ ] Edges: Lambda function → SQS queue node when event source mapping exists from Lambda module cross-reference (`edge_type: "data_access"`, `access_level: "read"`, `label: "consumes"`)
-- [ ] Edges: External account → SQS queue when cross-account policy principal found (`edge_type: "data_access"`, `trust_type: "cross-account"`)
 
 ## Output Path Constraint
 
