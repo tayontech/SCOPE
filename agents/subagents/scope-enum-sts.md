@@ -5,7 +5,6 @@ tools: Bash, Read, Glob, Grep
 model: claude-haiku-4-5
 maxTurns: 25
 ---
-<!-- Token budget: ~206 lines | Before: ~2100 tokens (est) | After: ~2100 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's STS/Organizations enumeration specialist. Dispatched by scope-audit orchestrator.
 

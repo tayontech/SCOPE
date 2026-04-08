@@ -1,4 +1,3 @@
-<!-- Token budget: ~198 lines | Before: ~3000 tokens (est) | After: ~3000 tokens (est) | Phase 33 2026-03-18 -->
 # SCOPE -- Cross-Platform Agent Suite
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) -- AI agent set for purple team security operations against AWS accounts: resource audit -> exploit playbook generation -> defensive controls with SCPs and SPL detections -> SOC alert investigation.

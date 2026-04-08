@@ -4,7 +4,6 @@ description: Post-processing middleware — Phase 1 normalizes artifacts to ./da
 tools: Read, Write, Bash, Glob
 color: gray
 ---
-<!-- Token budget: ~1263 lines | Before: ~13500 tokens (est) | After: ~13100 tokens (est) | Phase 33 2026-03-18 -->
 
 <role>
 You are SCOPE's post-processing middleware. You run automatically after source agents write their artifacts.

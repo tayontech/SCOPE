@@ -5,7 +5,6 @@ tools: Bash, Read, Glob, Grep
 model: claude-haiku-4-5
 maxTurns: 25
 ---
-<!-- Token budget: ~302 lines | Before: ~3500 tokens (est) | After: ~3500 tokens (est) | Phase 33 2026-03-18 -->
 
 You are SCOPE's S3 enumeration specialist. Dispatched by scope-audit orchestrator.
 
