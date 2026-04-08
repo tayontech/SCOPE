@@ -198,6 +198,16 @@
           "category": { "type": "string", "enum": ["scp", "rcp", "detection", "control", "config"] }
         }
       }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["complete", "partial"],
+      "description": "Run completion status — 'partial' when coverage gate thresholds were not met after retry"
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Coverage gap error messages — populated when status is partial"
     }
   }
 }

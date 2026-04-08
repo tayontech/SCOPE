@@ -147,11 +147,14 @@ After generating all artifacts but BEFORE writing results.json, verify proportio
 
 **On threshold failure:**
 1. Go back and generate additional controls for the specific uncovered attack paths
-2. After retry: if thresholds are STILL not met, set STATUS: partial and include in ERRORS:
-   `[COVERAGE] No SCP for attack path: {path description}`
-   `[COVERAGE] Detection count {N} below threshold {M} for {attack_paths_count} attack paths`
+2. After retry: if thresholds are STILL not met, write results.json with `"status": "partial"` and a populated `errors` array. Set these shell variables before the results export step:
+   ```bash
+   STATUS="partial"
+   COVERAGE_ERRORS='["[COVERAGE] No SCP for attack path: {path description}", "[COVERAGE] Detection count {N} below threshold {M} for {attack_paths_count} attack paths"]'
+   ```
+   Then include `"status": $STATUS` and `"errors": $COVERAGE_ERRORS` as top-level fields in the results.json jq template.
 3. Do NOT block completion if the only failed gate is RCP and Organizations access was unavailable
-4. Write results.json with STATUS: partial and the coverage gap details in the errors field
+4. For normal (full coverage) runs: `STATUS="complete"` and `COVERAGE_ERRORS='[]'`
 </mandatory_outputs>
 
 <post_processing_pipeline>
