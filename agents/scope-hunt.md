@@ -842,6 +842,32 @@ Select a hypothesis (1-[N], A, or B [number]):
 
 This display makes explicit what came from the report and what the agent inferred — operators must be able to distinguish fact from inference.
 
+#### Step 6: Build investigation_context from intel_parsed
+
+Intel mode does not have a specific alert event — construct `investigation_context` from the parsed intel so the investigation loop and SPL query templates have the required fields:
+
+- **`alert_type`**: set to `intel_parsed.ttps.mitre_ids[0]` formatted as `"[ID] — [technique name]"` (e.g., `"T1078 — Valid Accounts"`). If no MITRE IDs were extracted, use `intel_parsed.ttps.cloudtrail_events[0]`. If both are empty, use `"Threat Intel Hunt"`.
+- **`event_time`**: current timestamp (intel mode is a proactive hunt — no specific event time).
+- **`time_range_earliest`**: 30 days before current time (intel hunts span a wide lookback window by default).
+- **`time_range_latest`**: current time.
+- **`source_ip`**: first entry of `intel_parsed.iocs.ips` if non-empty; otherwise `null`.
+- **`user_arn`**: first entry of `intel_parsed.iocs.arns` if non-empty; otherwise `null`.
+- **`missing_fields`**: list any fields that could not be derived from `intel_parsed`.
+- **`notes`**: `"Threat intel hunt — [intel_parsed.summary]"`.
+
+Display the constructed context before proceeding:
+
+```
+INVESTIGATION CONTEXT (derived from threat intel)
+Alert type:     [alert_type]
+Time range:     [time_range_earliest] to [time_range_latest] (30-day lookback)
+Source IP:      [source_ip | "none extracted"]
+Principal:      [user_arn | "none extracted"]
+Notes:          Threat intel hunt — [intel_parsed.summary]
+```
+
+After displaying, auto-proceed to hypothesis selection (HYPO-04).
+
 #### Step 5: Route to operator selection
 
 Pass all generated hypotheses to the existing `Operator Selection (HYPO-04)` block. No changes to HYPO-04 are needed — the `active_hypothesis` format is compatible.
