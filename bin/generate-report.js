@@ -13,7 +13,7 @@
 //   2. Reads the built HTML, JS, and CSS from dist/
 //   3. Reads all JSON data from dashboard/public/ (via index.json)
 //   4. Inlines everything into a single dashboard.html
-//   5. Writes to the specified output path (default: $RUN_DIR/dashboard.html or ./dashboard.html)
+//   5. Writes to the specified output path (default: $RUN_DIR/dashboard.html or ./<run-id>-dashboard.html)
 
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, unlinkSync } from "node:fs";
@@ -362,7 +362,14 @@ if (!outputPath) {
   if (runDir && existsSync(runDir)) {
     outputPath = join(runDir, "dashboard.html");
   } else {
-    outputPath = join(dashboardDir, "dashboard.html");
+    // Derive filename from the latest run ID to avoid overwriting prior dashboards.
+    // Each run gets its own dashboard file (e.g., audit-20260408-123456-all-dashboard.html).
+    const latestRunId = Object.values(inlineData)[0]?._run_id
+      || (existsSync(join(publicDir, "index.json"))
+        ? (JSON.parse(readFileSync(join(publicDir, "index.json"), "utf-8")).runs?.[0]?.run_id)
+        : null);
+    const dashName = latestRunId ? `${latestRunId}-dashboard.html` : "dashboard.html";
+    outputPath = join(dashboardDir, dashName);
   }
 }
 outputPath = resolve(outputPath);
