@@ -147,7 +147,7 @@ Source agents (audit, exploit, defend) trigger this pipeline after writing artif
            reads: $RUN_DIR/agent-log.jsonl
                   ./data/$PHASE/$RUN_ID.json
 
-    Visualization: SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`)
+    Visualization: SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`)
                    reads dashboard/public/index.json + $RUN_ID.json
 ```
 

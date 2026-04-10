@@ -96,7 +96,7 @@ Agents produce structured JSON that feeds into an interactive React + D3 dashboa
 
 ```bash
 cd dashboard && npm run dashboard
-open dashboard/dashboard.html
+open dashboard/<run-id>-dashboard.html
 ```
 
 The dashboard visualizes:

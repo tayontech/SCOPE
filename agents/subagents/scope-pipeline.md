@@ -164,7 +164,7 @@ Construct `graph.nodes[]` and `graph.edges[]` from the extracted attack path dat
 - Create edges for trust relationships, privilege escalation paths, and data access chains
 - Use the node ID conventions: user:, role:, esc:, data:, ext:
 
-The graph is built from findings.md data. The pipeline does NOT need to handle HTML — visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`), which reads `results.json` and the normalized JSON files in `./data/`.
+The graph is built from findings.md data. The pipeline does NOT need to handle HTML — visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`), which reads `results.json` and the normalized JSON files in `./data/`.
 
 ### Audit Payload Schema
 

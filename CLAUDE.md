@@ -60,7 +60,7 @@ agents/subagents/     Dispatched subagents and inline-read middleware (enum, att
 data/                 Normalized JSON output (runtime-generated, gitignored)
 agent-logs/           Agent activity logs (runtime-generated, gitignored)
 hunt/          Hunt artifacts (runtime-generated, gitignored)
-dashboard/            React + D3 dashboard (`dashboard.html`)
+dashboard/            React + D3 dashboard (`<run-id>-dashboard.html`)
 config/               Optional pre-loaded data (accounts.json, scps/*.json)
 bin/                  Tooling (install.js — editor setup, generate-report.js — dashboard builder)
 config/hooks/         Lifecycle hooks — safety guard, SPL lint, schema validation, artifact check, agent logger
@@ -108,7 +108,7 @@ Invoked by the source agent after writing artifacts — sequential and non-block
 
 All visualization is handled by the SCOPE dashboard. Agents export `results.json` to `$RUN_DIR/` and `dashboard/public/$RUN_ID.json`. Dashboard loads `index.json`, iterates the `runs[]` array, and fetches the latest entry per source phase.
 
-**Dashboard HTML**: `cd dashboard && npm run dashboard` — generates a self-contained `dashboard.html` with all data inlined. Opens in any browser, no server required. Agents generate this automatically after the data pipeline completes.
+**Dashboard HTML**: `cd dashboard && npm run dashboard` — generates a self-contained `<run-id>-dashboard.html` with all data inlined. Opens in any browser, no server required. Agents generate this automatically after the data pipeline completes.
 
 ## AWS Credential Model
 

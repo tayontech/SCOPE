@@ -40,7 +40,7 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 
 **Credential model:** SCOPE inherits credentials from the shell environment (AWS_PROFILE, AWS_ACCESS_KEY_ID, or boto3/AWS CLI defaults). No custom credential loading. The first AWS API call (`sts:GetCallerIdentity` at Gate 1) serves as the credential check.
 
-**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`). Agents export `results.json` to `dashboard/public/$RUN_ID.json` and update `dashboard/public/index.json`.
+**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`). Agents export `results.json` to `dashboard/public/$RUN_ID.json` and update `dashboard/public/index.json`.
 
 **Agent-log fallback hierarchy:** Downstream agents consume upstream output in priority order:
 1. `./agent-logs/` — highest fidelity (claim-level provenance from agent-log.jsonl)
@@ -706,7 +706,7 @@ control artifacts already generated at $RUN_DIR/defend/defend-{timestamp}/.]
 **Additional options:**
 - `/scope:exploit` — validate findings by testing exploitability
 - `/scope:audit [another-target]` — drill into [specific related resource]
-- View results: open `dashboard/dashboard.html` in any browser
+- View results: open `dashboard/<run-id>-dashboard.html` in any browser
 - Review defensive control artifacts: `$RUN_DIR/defend/defend-{timestamp}/`
 ```
 </findings_md>
@@ -853,18 +853,18 @@ After the pipeline completes, generate the self-contained dashboard report:
 cd dashboard && npm run dashboard 2>&1
 ```
 
-This produces `dashboard/dashboard.html` — a portable file that opens in any browser without a server. Essential for Codex and Gemini CLI environments where localhost is unavailable.
+This produces `dashboard/<run-id>-dashboard.html` — a portable file that opens in any browser without a server. Essential for Codex and Gemini CLI environments where localhost is unavailable.
 
 `npm run dashboard` calls `bin/generate-report.js`, which automatically installs dependencies (`npm install`) if `dashboard/node_modules/` is missing before running the build. You do not need to run `npm install` manually.
 
-**Do NOT generate dashboard.html yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above.
+**Do NOT generate dashboard HTML yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above. The output filename is derived from the run ID (e.g., `audit-20260408-201108-all-dashboard.html`).
 
 If dashboard generation fails: log a warning and continue. The raw artifacts and data/ exports are still valid.
 
 **Announce dashboard completion to the operator:**
 ```
 ━━━ Dashboard: generated ━━━
-Open: dashboard/dashboard.html
+Open: dashboard/<run-id>-dashboard.html
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 If dashboard failed: `━━━ Dashboard: failed (non-blocking) — raw artifacts available in $RUN_DIR/ ━━━`

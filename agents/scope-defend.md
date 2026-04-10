@@ -75,7 +75,7 @@ SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: aud
 
 **Credential model:** This agent does NOT make AWS API calls. It reads audit output files and writes remediation artifacts. No credential checks are needed. SCOPE inherits credentials from the shell environment for agents that do make API calls (audit, exploit).
 
-**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`). Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` — upserts this run into the `runs[]` array.
+**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`). Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` — upserts this run into the `runs[]` array.
 
 **Evidence fallback hierarchy:** Defend consumes upstream audit output in priority order:
 1. `./agent-logs/` — highest fidelity (claim-level provenance, coverage manifests)
@@ -279,7 +279,7 @@ ALL output files go into `$RUN_DIR`:
 | RCP policies | `$RUN_DIR/policies/rcp-<short-name>.json` | Compact deployable RCP JSON (no whitespace) |
 | Evidence log | `$RUN_DIR/agent-log.jsonl` | Structured evidence log (API calls, claims, coverage) |
 
-All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`).
+All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`).
 
 At the end of the run, output the run directory path:
 ```
@@ -2229,7 +2229,7 @@ A defend run is complete when ALL of the following are true:
 
 ### Dashboard
 
-- [ ] All visualization is handled by the SCOPE dashboard (`dashboard/dashboard.html`, generated via `cd dashboard && npm run dashboard`)
+- [ ] All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`)
 
 ### Index and Operator Gates
 
