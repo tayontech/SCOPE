@@ -2,11 +2,7 @@
   "mcpServers": {
     "splunk-mcp-server": {
       "command": "bash",
-      "args": ["bin/splunk-mcp-start.sh"],
-      "env": {
-        "SPLUNK_URL": "${SPLUNK_URL}",
-        "SPLUNK_TOKEN": "${SPLUNK_TOKEN}"
-      }
+      "args": ["bin/splunk-mcp-start.sh"]
     }
   }
 }
