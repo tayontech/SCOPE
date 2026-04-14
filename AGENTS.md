@@ -214,6 +214,8 @@ scope-hunt has three operating modes with different isolation properties:
 - **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
 - **Intel mode** (invoked with a threat intel URL or natural language threat description): fetches the URL or parses the description, extracts IOCs and TTPs, generates hypotheses beyond the report, and hunts in Splunk. Extracted identifiers (IPs, ARNs, account IDs, hashes) are session-scoped -- written to `context.json`, not MEMORY.md.
 
+scope-hunt dispatches mode-specific subagents (scope-hunt-investigate, scope-hunt-intel, scope-hunt-audit) for intake and hypothesis generation. The parent orchestrator handles MCP detection, Splunk execution, evidence timeline, and report generation. Subagents do not have memory access — memory is parent-only.
+
 All other agents share data through the agent-logs/data layer.
 
 ## Configuration Files

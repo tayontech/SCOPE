@@ -28,6 +28,9 @@ agents/subagents/scope-enum-sns.md         SNS enumeration (model: claude-haiku-
 agents/subagents/scope-enum-sqs.md         SQS enumeration (model: claude-haiku-4-5)
 agents/subagents/scope-enum-apigateway.md  API Gateway enumeration (model: claude-haiku-4-5)
 agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration (model: claude-haiku-4-5)
+agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert parsing, investigation_context, HYPO-01 (model: claude-haiku-4-5)
+agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses (model: claude-haiku-4-5)
+agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths (model: claude-haiku-4-5)
 agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON (model: claude-sonnet-4-6)
 agents/subagents/scope-verify.md           Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
 agents/subagents/scope-pipeline.md         Post-processing middleware — data normalization then evidence indexing (read inline)
@@ -46,6 +49,9 @@ agents/subagents/scope-pipeline.md         Post-processing middleware — data n
 > - Any `scope-enum-*.md` file (12 enum subagents)
 > - `scope-attack-paths.md`
 > - `scope-defend.md` (unless a future phase explicitly evaluates it)
+> - `scope-hunt-investigate.md`
+> - `scope-hunt-intel.md`
+> - `scope-hunt-audit.md`
 > **Cross-account contamination risk:** Enum subagents and attack-paths enumerate AWS
 > resource identifiers (ARNs, account IDs, role names, key IDs, bucket names) by design.
 > If these subagents wrote to MEMORY.md, resource identifiers from one engagement would
