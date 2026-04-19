@@ -1,0 +1,12 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/TestUser",
+    "UserId": "AIDATEST123456789"
+  },
+  "DescribeOrganizationCommand": {
+    "_error": true,
+    "name": "AccessDeniedException",
+    "message": "You don't have permissions to access this resource."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "GetAccountAuthorizationDetailsCommand": {
+    "UserDetailList": [
+      {
+        "UserName": "TestUser",
+        "Arn": "arn:aws:iam::123456789012:user/TestUser",
+        "GroupList": [],
+        "AttachedManagedPolicies": [],
+        "UserPolicyList": [],
+        "PermissionsBoundary": null
+      }
+    ],
+    "RoleDetailList": [
+      {
+        "RoleName": "TestRole",
+        "Arn": "arn:aws:iam::123456789012:role/TestRole",
+        "Path": "/",
+        "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}",
+        "AttachedManagedPolicies": [],
+        "RolePolicyList": [],
+        "PermissionsBoundary": null,
+        "RoleLastUsed": null
+      }
+    ],
+    "GroupDetailList": [],
+    "Policies": [],
+    "IsTruncated": false
+  },
+  "GenerateCredentialReportCommand": {
+    "State": "COMPLETE"
+  },
+  "GetCredentialReportCommand": {
+    "Content": "user,password_enabled,password_last_used,password_last_changed,password_next_rotation,mfa_active,access_key_1_active,access_key_1_last_rotated,access_key_1_last_used_date,access_key_1_last_used_region,access_key_1_last_used_service,access_key_2_active,access_key_2_last_rotated,access_key_2_last_used_date,access_key_2_last_used_region,access_key_2_last_used_service,cert_1_active,cert_1_last_rotated,cert_2_active,cert_2_last_rotated\n<root_account>,not_supported,2026-01-01T00:00:00+00:00,not_supported,not_supported,true,false,N/A,N/A,N/A,N/A,false,N/A,N/A,N/A,N/A,false,N/A,false,N/A\nTestUser,true,N/A,2026-01-01T00:00:00+00:00,not_applicable,false,false,N/A,N/A,N/A,N/A,false,N/A,N/A,N/A,N/A,false,N/A,false,N/A"
+  },
+  "ListAccessKeysCommand": {
+    "AccessKeyMetadata": [],
+    "IsTruncated": false
+  },
+  "ListMFADevicesCommand": {
+    "MFADevices": [],
+    "IsTruncated": false
+  },
+  "GenerateServiceLastAccessedDetailsCommand": [
+    { "JobId": "job-user-123" },
+    { "JobId": "job-role-456" }
+  ],
+  "GetServiceLastAccessedDetailsCommand": [
+    {
+      "JobStatus": "COMPLETED",
+      "ServicesLastAccessed": [
+        {
+          "ServiceName": "Amazon S3",
+          "ServiceNamespace": "s3",
+          "LastAuthenticated": null,
+          "TotalAuthenticatedEntities": 0
+        }
+      ]
+    },
+    {
+      "JobStatus": "COMPLETED",
+      "ServicesLastAccessed": [
+        {
+          "ServiceName": "Amazon S3",
+          "ServiceNamespace": "s3",
+          "LastAuthenticated": null,
+          "TotalAuthenticatedEntities": 0
+        }
+      ]
+    }
+  ]
+}
