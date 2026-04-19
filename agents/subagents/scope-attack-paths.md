@@ -97,7 +97,7 @@ Before writing results.json, verify ALL of the following. If any check fails, go
    cross-account trust_relationships from iam.json (these are jq-derived and deterministic).
    Additional model-discovered cross-account relationships should be in PHASE_B_EDGES with
    edge_type "cross_account" and _source "reasoning".
-   If Phase A trust edges are missing for cross-account entries: Phase A jq extraction failed — re-run.
+   If Phase A trust edges are missing for cross-account entries: Phase A extraction failed — re-run `node bin/extract-graph.js "$RUN_DIR"`.
    If model discovers additional cross-account relationships: add to PHASE_B_EDGES.
 
 3. **DATA ACCESS COVERAGE (Phase B):** If S3 buckets, secrets, KMS keys, or other data stores were found in enumeration,
@@ -121,13 +121,13 @@ Before writing results.json, verify ALL of the following. If any check fails, go
    - Count of user nodes in PHASE_A_NODES MUST equal summary.total_users
    - Count of role nodes in PHASE_A_NODES MUST equal summary.total_roles (excluding service-linked)
    - Count of group nodes in PHASE_A_NODES MUST match IAM group count from iam.json
-   - If any count mismatches: Phase A jq extraction failed — re-run the Phase A jq commands.
-   - Phase A identity nodes are deterministic (jq-derived). If counts are wrong, the issue is
-     in the jq template or the input data, not model reasoning.
+   - If any count mismatches: Phase A extraction failed — re-run `node bin/extract-graph.js "$RUN_DIR"`.
+   - Phase A identity nodes are deterministic (script-derived). If counts are wrong, the issue is
+     in extract-graph.js or the input data, not model reasoning.
 
 8. **MEMBERSHIP EDGE COVERAGE (Phase A):** Verify PHASE_A_EDGES contains membership edges
    for every IAM user with non-empty groups[]. These edges are jq-derived, not model-generated.
-   If missing: Phase A edge extraction failed — re-run the Factual Edge Extractor.
+   If missing: Phase A edge extraction failed — re-run `node bin/extract-graph.js "$RUN_DIR"`.
 
 9. **EXPLOIT STEP SPECIFICITY:** Every attack path MUST include exploit_steps with real values:
    - Permission names must be the actual IAM action strings from enumeration (e.g., "iam:CreatePolicyVersion"
