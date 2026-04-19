@@ -34,22 +34,12 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 </role>
 
 <project_context>
-## SCOPE Project Context
-
-SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → hunt.
-
-**Credential model:** SCOPE inherits credentials from the shell environment (AWS_PROFILE, AWS_ACCESS_KEY_ID, or boto3/AWS CLI defaults). No custom credential loading. The first AWS API call (`sts:GetCallerIdentity` at Gate 1) serves as the credential check.
-
-**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`). Agents export `results.json` to `dashboard/public/$RUN_ID.json` and update `dashboard/public/index.json`.
+@include agents/shared/agent-preamble.md
 
 **Agent-log fallback hierarchy:** Downstream agents consume upstream output in priority order:
 1. `./agent-logs/` — highest fidelity (claim-level provenance from agent-log.jsonl)
 2. `./data/` — structured report data (summaries, graphs)
 3. `$RUN_DIR/` — raw artifacts (markdown, JSON). Fallback when normalized data is unavailable.
-
-**CloudTrail + Splunk:** CloudTrail is the only log source for Splunk. All SPL detections target `index=cloudtrail`. Do not assume Splunk is available — agents must work standalone without Splunk MCP.
-
-**Approval gates:** Standard workflows are read-only. Before ANY destructive AWS operation, show an approval block and wait for explicit Y/N. Per-step approval — never batch multiple destructive operations. Exploit generates playbooks with write commands but does not execute them.
 
 **Key pitfalls:** Do not add credential validation steps outside Gate 1. Do not silently skip failures (exception: middleware pipeline steps are non-blocking). Module failures are non-blocking — log partial results and continue.
 </project_context>
@@ -525,20 +515,9 @@ If attack-paths returns STATUS: error or does not write results.json:
 </attack_paths_dispatch>
 
 <verification>
-## Verification (Inline)
+@include agents/shared/verification-protocol.md
 
-After attack-paths completes, run verification inline in this orchestrator context.
-
-Read `agents/subagents/scope-verify.md` and apply the `domain-core` and `domain-aws` sections.
-
-Validate all claims in results.json and the findings you will report:
-- Apply the claim ledger protocol (Guaranteed, Conditional, Speculative classification)
-- Run semantic lints on any SPL queries
-- Check attack path satisfiability — list gating conditions for Conditional paths
-- Run safety checks on all SCP/RCP remediation suggestions
-- Strip Speculative claims from output
-
-This step is automatic and mandatory. Do not present verification findings separately. Silently correct errors. Only Guaranteed and Conditional claims appear in the final output.
+**Audit note:** Run verification inline after `scope-attack-paths` completes. Apply domain-core and domain-aws sections. Verify claims in results.json before presenting Gate 4 results.
 </verification>
 
 <gate_4_results_approval>
@@ -950,28 +929,8 @@ printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "$S
 If write fails: log warning and continue. Agent activity logging must never block the primary audit workflow.
 </agent_log_protocol>
 
-<session_isolation>
-## Session Isolation
-
-Every `/scope:audit` invocation is an independent session. Results from different runs MUST NOT mix.
-
-### Context Isolation Rules
-
-1. **No carryover.** Do NOT reference findings, attack paths, or enumeration data from any previous run.
-2. **No shared state.** Do not read files from other `./audit/` subdirectories to inform the current run.
-3. **No deduplication across runs.** If the same finding appears in two runs, report it in both.
-4. **Run directory per invocation.** All artifacts in `./audit/$RUN_ID/`. Every subagent receives RUN_DIR in its initial message and writes exclusively to that directory.
-
-### Subagent Isolation
-
-Each dispatched subagent receives:
-- `RUN_DIR` — the run directory path (unique per invocation)
-- `ACCOUNT_ID` — from Gate 1
-- Other context relevant to that subagent
-
-Subagents write to `$RUN_DIR/` only. They do NOT read from other run directories.
-
-### Run Index
+<run_index>
+## Run Index
 
 After each run completes, append to `./audit/INDEX.md` (create if missing):
 ```markdown
@@ -991,7 +950,7 @@ Also upsert into `./audit/index.json` (create with `{"runs": []}` if missing):
   "directory": "./audit/audit-20260301-143022-all/"
 }
 ```
-</session_isolation>
+</run_index>
 
 <account_context>
 ## Account Context
