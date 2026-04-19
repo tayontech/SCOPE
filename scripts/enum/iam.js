@@ -190,6 +190,42 @@ async function enumerateViaGAAD(client, accountId, logger) {
     marker = resp.IsTruncated ? resp.Marker : undefined;
   } while (marker);
 
+  // Build set of all attached managed policy ARNs across users, roles, groups
+  // NOTE: AttachedManagedPolicies[] uses .PolicyArn; GAAD Policies[] uses .Arn — different fields
+  const principalAttachedArns = new Set();
+  for (const u of allUsers) {
+    for (const p of u.AttachedManagedPolicies || []) principalAttachedArns.add(p.PolicyArn);
+  }
+  for (const r of allRoles) {
+    for (const p of r.AttachedManagedPolicies || []) principalAttachedArns.add(p.PolicyArn);
+  }
+  for (const g of allGroups) {
+    for (const p of g.AttachedManagedPolicies || []) principalAttachedArns.add(p.PolicyArn);
+  }
+
+  // Fetch customer-managed policy documents (skip AWS-managed)
+  const customerManagedDocs = new Map();
+  for (const policy of allPolicies) {
+    if (!principalAttachedArns.has(policy.Arn)) continue;
+    if ((policy.Arn || '').startsWith('arn:aws:iam::aws:policy/')) continue;
+    try {
+      logger.log('api_call', 'GetPolicyVersion', { arn: policy.Arn });
+      const versionResp = await withRetry(() =>
+        client.send(new GetPolicyVersionCommand({
+          PolicyArn: policy.Arn,
+          VersionId: policy.DefaultVersionId,
+        }))
+      );
+      const doc = versionResp.PolicyVersion?.Document;
+      if (doc) {
+        const parsed = typeof doc === 'string' ? JSON.parse(decodeURIComponent(doc)) : doc;
+        customerManagedDocs.set(policy.Arn, parsed);
+      }
+    } catch (err) {
+      logger.log('warning', 'GetPolicyVersion', { arn: policy.Arn, error: err.message });
+    }
+  }
+
   // Build user findings
   const userFindings = allUsers.map((u) => ({
     resource_type: 'iam_user',
@@ -197,8 +233,14 @@ async function enumerateViaGAAD(client, accountId, logger) {
     arn: u.Arn,
     region: 'global',
     groups: (u.GroupList || []),
-    attached_policies: (u.AttachedManagedPolicies || []).map((p) => p.PolicyArn),
-    inline_policies: (u.UserPolicyList || []).map((p) => p.PolicyName),
+    attached_policies: (u.AttachedManagedPolicies || []).map((p) => ({
+      arn: p.PolicyArn,
+      document: customerManagedDocs.get(p.PolicyArn) || null,
+    })),
+    inline_policies: (u.UserPolicyList || []).map((p) => ({
+      name: p.PolicyName,
+      document: p.PolicyDocument || null,
+    })),
     has_console_access: false, // enriched later
     mfa_enabled: false, // enriched later
     access_keys: [], // enriched later
@@ -224,8 +266,14 @@ async function enumerateViaGAAD(client, accountId, logger) {
       region: 'global',
       is_service_linked: isServiceLinked,
       trust_relationships: trustRelationships,
-      attached_policies: (r.AttachedManagedPolicies || []).map((p) => p.PolicyArn),
-      inline_policies: (r.RolePolicyList || []).map((p) => p.PolicyName),
+      attached_policies: (r.AttachedManagedPolicies || []).map((p) => ({
+        arn: p.PolicyArn,
+        document: customerManagedDocs.get(p.PolicyArn) || null,
+      })),
+      inline_policies: (r.RolePolicyList || []).map((p) => ({
+        name: p.PolicyName,
+        document: p.PolicyDocument || null,
+      })),
       has_boundary: !!r.PermissionsBoundary,
       permission_boundary_arn: r.PermissionsBoundary?.PermissionsBoundaryArn || null,
       last_activity: r.RoleLastUsed?.LastUsedDate?.toISOString() || null,
@@ -249,8 +297,14 @@ async function enumerateViaGAAD(client, accountId, logger) {
     arn: g.Arn,
     region: 'global',
     members: [], // enriched via GetGroup later
-    attached_policies: (g.AttachedManagedPolicies || []).map((p) => p.PolicyArn),
-    inline_policies: (g.GroupPolicyList || []).map((p) => p.PolicyName),
+    attached_policies: (g.AttachedManagedPolicies || []).map((p) => ({
+      arn: p.PolicyArn,
+      document: customerManagedDocs.get(p.PolicyArn) || null,
+    })),
+    inline_policies: (g.GroupPolicyList || []).map((p) => ({
+      name: p.PolicyName,
+      document: p.PolicyDocument || null,
+    })),
     findings: [],
   }));
 
@@ -285,11 +339,15 @@ async function enumerateViaFallback(client, accountId, logger) {
 
   const errors = [];
 
+  // Collect all attached policy ARNs for customer-managed doc fetch
+  const fallbackAttachedArns = new Map(); // ARN -> DefaultVersionId (populated as we go)
+
   // Build user findings with per-user details
   const userFindings = [];
+  const userRawAttached = new Map(); // userName -> attachedPolicies array
   for (const u of users) {
     try {
-      const inlinePolicies = await paginate(client, ListUserPoliciesCommand, 'PolicyNames', {
+      const inlinePolicyNames = await paginate(client, ListUserPoliciesCommand, 'PolicyNames', {
         params: { UserName: u.UserName },
         tokenKey: 'Marker',
         responseTokenKey: 'Marker',
@@ -307,14 +365,19 @@ async function enumerateViaFallback(client, accountId, logger) {
         responseTokenKey: 'Marker',
       });
 
+      for (const p of attachedPolicies) {
+        if (!fallbackAttachedArns.has(p.PolicyArn)) fallbackAttachedArns.set(p.PolicyArn, null);
+      }
+      userRawAttached.set(u.UserName, attachedPolicies);
+
       userFindings.push({
         resource_type: 'iam_user',
         resource_id: u.UserName,
         arn: u.Arn,
         region: 'global',
         groups: userGroups.map((g) => g.GroupName),
-        attached_policies: attachedPolicies.map((p) => p.PolicyArn),
-        inline_policies: inlinePolicies,
+        attached_policies: attachedPolicies.map((p) => p.PolicyArn), // placeholder; replaced after doc fetch
+        inline_policies: inlinePolicyNames.map((name) => ({ name, document: null })),
         has_console_access: false,
         mfa_enabled: false,
         access_keys: [],
@@ -334,13 +397,14 @@ async function enumerateViaFallback(client, accountId, logger) {
 
   // Build role findings with per-role details
   const roleFindings = [];
+  const roleRawAttached = new Map(); // roleName -> attachedPolicies array
   for (const r of roles) {
     try {
       logger.log('api_call', 'GetRole', { role: r.RoleName });
       const roleResp = await withRetry(() => client.send(new GetRoleCommand({ RoleName: r.RoleName })));
       const roleDetail = roleResp.Role;
 
-      const inlinePolicies = await paginate(client, ListRolePoliciesCommand, 'PolicyNames', {
+      const inlinePolicyNames = await paginate(client, ListRolePoliciesCommand, 'PolicyNames', {
         params: { RoleName: r.RoleName },
         tokenKey: 'Marker',
         responseTokenKey: 'Marker',
@@ -351,6 +415,11 @@ async function enumerateViaFallback(client, accountId, logger) {
         tokenKey: 'Marker',
         responseTokenKey: 'Marker',
       });
+
+      for (const p of attachedPolicies) {
+        if (!fallbackAttachedArns.has(p.PolicyArn)) fallbackAttachedArns.set(p.PolicyArn, null);
+      }
+      roleRawAttached.set(r.RoleName, attachedPolicies);
 
       const trustDoc = roleDetail.AssumeRolePolicyDocument;
       const trustRelationships = parseTrustPolicy(trustDoc, accountId);
@@ -365,8 +434,8 @@ async function enumerateViaFallback(client, accountId, logger) {
         region: 'global',
         is_service_linked: isServiceLinked,
         trust_relationships: trustRelationships,
-        attached_policies: attachedPolicies.map((p) => p.PolicyArn),
-        inline_policies: inlinePolicies,
+        attached_policies: attachedPolicies.map((p) => p.PolicyArn), // placeholder; replaced after doc fetch
+        inline_policies: inlinePolicyNames.map((name) => ({ name, document: null })),
         has_boundary: !!roleDetail.PermissionsBoundary,
         permission_boundary_arn: roleDetail.PermissionsBoundary?.PermissionsBoundaryArn || null,
         ...staleness,
@@ -381,6 +450,7 @@ async function enumerateViaFallback(client, accountId, logger) {
 
   // Build group findings
   const groupFindings = [];
+  const groupRawAttached = new Map(); // groupName -> attachedPolicies array
   for (const g of groups) {
     try {
       logger.log('api_call', 'GetGroup', { group: g.GroupName });
@@ -392,11 +462,16 @@ async function enumerateViaFallback(client, accountId, logger) {
         responseTokenKey: 'Marker',
       });
 
-      const inlinePolicies = await paginate(client, ListGroupPoliciesCommand, 'PolicyNames', {
+      const inlinePolicyNames = await paginate(client, ListGroupPoliciesCommand, 'PolicyNames', {
         params: { GroupName: g.GroupName },
         tokenKey: 'Marker',
         responseTokenKey: 'Marker',
       });
+
+      for (const p of attachedPolicies) {
+        if (!fallbackAttachedArns.has(p.PolicyArn)) fallbackAttachedArns.set(p.PolicyArn, null);
+      }
+      groupRawAttached.set(g.GroupName, attachedPolicies);
 
       groupFindings.push({
         resource_type: 'iam_group',
@@ -404,14 +479,64 @@ async function enumerateViaFallback(client, accountId, logger) {
         arn: g.Arn,
         region: 'global',
         members: (groupResp.Users || []).map((u) => u.UserName),
-        attached_policies: attachedPolicies.map((p) => p.PolicyArn),
-        inline_policies: inlinePolicies,
+        attached_policies: attachedPolicies.map((p) => p.PolicyArn), // placeholder; replaced after doc fetch
+        inline_policies: inlinePolicyNames.map((name) => ({ name, document: null })),
         findings: [],
       });
     } catch (err) {
       errors.push({ resource: g.GroupName, error: err.message });
       logger.log('error', 'GroupDetailFetch', { group: g.GroupName, error: err.message });
     }
+  }
+
+  // Fetch customer-managed policy documents for all collected attached ARNs
+  const fallbackCustomerDocs = new Map();
+  for (const [policyArn] of fallbackAttachedArns) {
+    if ((policyArn || '').startsWith('arn:aws:iam::aws:policy/')) continue;
+    try {
+      // Need DefaultVersionId — fetch policy metadata
+      logger.log('api_call', 'GetPolicy', { arn: policyArn });
+      const policyResp = await withRetry(() =>
+        client.send(new GetPolicyCommand({ PolicyArn: policyArn }))
+      );
+      const defaultVersionId = policyResp.Policy?.DefaultVersionId;
+      if (!defaultVersionId) continue;
+
+      logger.log('api_call', 'GetPolicyVersion', { arn: policyArn });
+      const versionResp = await withRetry(() =>
+        client.send(new GetPolicyVersionCommand({ PolicyArn: policyArn, VersionId: defaultVersionId }))
+      );
+      const doc = versionResp.PolicyVersion?.Document;
+      if (doc) {
+        const parsed = typeof doc === 'string' ? JSON.parse(decodeURIComponent(doc)) : doc;
+        fallbackCustomerDocs.set(policyArn, parsed);
+      }
+    } catch (err) {
+      logger.log('warning', 'GetPolicyVersion', { arn: policyArn, error: err.message });
+    }
+  }
+
+  // Replace placeholder attached_policies arrays with object format
+  for (const user of userFindings) {
+    const raw = userRawAttached.get(user.resource_id) || [];
+    user.attached_policies = raw.map((p) => ({
+      arn: p.PolicyArn,
+      document: fallbackCustomerDocs.get(p.PolicyArn) || null,
+    }));
+  }
+  for (const role of roleFindings) {
+    const raw = roleRawAttached.get(role.resource_id) || [];
+    role.attached_policies = raw.map((p) => ({
+      arn: p.PolicyArn,
+      document: fallbackCustomerDocs.get(p.PolicyArn) || null,
+    }));
+  }
+  for (const group of groupFindings) {
+    const raw = groupRawAttached.get(group.resource_id) || [];
+    group.attached_policies = raw.map((p) => ({
+      arn: p.PolicyArn,
+      document: fallbackCustomerDocs.get(p.PolicyArn) || null,
+    }));
   }
 
   return { userFindings, roleFindings, groupFindings, errors };
