@@ -1,6 +1,6 @@
 ---
 name: scope-audit
-description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Dispatches parallel enumeration subagents, chains attack-paths reasoning, verification, defensive controls, data pipeline, and dashboard generation. Invoke with /scope:audit <target>.
+description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs parallel SDK enum scripts, chains attack-paths reasoning, verification, defensive controls, data pipeline, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
@@ -16,7 +16,7 @@ Your job: receive a target input, orchestrate the full audit sequence, and retur
 Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 1. Verify credentials and display identity to the operator (Gate 1 — auto-continue)
 2. Show all modules that will run and get batch approval from the operator (Gate 2 — single prompt)
-3. Dispatch enumeration subagents in parallel (2+ services) or execute inline (single service), collect per-module JSON output
+3. Run SDK enum scripts in parallel via Bash background processes, collect per-module JSON output
 4. Present enumeration summary and pause for operator confirmation before attack-paths (Gate 3)
 5. Dispatch the attack-paths subagent with fresh context — it reads from disk, produces results.json
 6. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
@@ -29,8 +29,6 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 **Operator-in-the-loop:** Pause at Gates 2, 3, and 4 and wait for operator approval before continuing. Gate 1 auto-continues. Never silently chain multiple gates or skip operator input.
 
 **Session isolation:** Every audit invocation is a fresh session. Create a unique run directory for all artifacts. Never reference, carry over, or mix data from previous audit runs.
-
-**Platform-agnostic dispatch:** Orchestrator instructions describe intent in platform-agnostic language. Each platform uses its native subagent mechanism (Claude Code: Agent tool; Gemini CLI: subagent delegation; Codex: automatic agent role dispatch via registered roles in .codex/config.toml, requires multi_agent = true in [features]). The AI model reads these instructions and uses the appropriate mechanism for its platform.
 </role>
 
 <project_context>
@@ -51,7 +49,7 @@ Parse the operator's input (`/scope:audit <target>`) to determine the service li
 
 ### Target Types and Service Resolution
 
-**`--all`** → All 12 services: iam, sts, s3, kms, secrets, lambda, ec2, rds, sns, sqs, apigateway, codebuild
+**`--all`** → All 16 services: iam, sts, s3, kms, secrets, lambda, ec2, rds, sns, sqs, apigateway, codebuild, bedrock, cognito, dynamodb, ssm
 
 **Single service name** (e.g., `iam`) → Single-service list: [iam]
 
@@ -64,12 +62,16 @@ Parse the operator's input (`/scope:audit <target>`) to determine the service li
 - `secretsmanager` → [secrets]
 - `lambda` → [lambda]
 - `sts` → [sts]
-- `ec2`, `elasticloadbalancing`, `ssm` → [ec2]
+- `ec2`, `elasticloadbalancing` → [ec2]
 - `rds` → [rds]
 - `sns` → [sns]
 - `sqs` → [sqs]
 - `apigateway`, `execute-api` → [apigateway]
 - `codebuild` → [codebuild]
+- `bedrock` → [bedrock]
+- `cognito-identity`, `cognito-idp` → [cognito]
+- `dynamodb` → [dynamodb]
+- `ssm` → [ssm]
 
 Store the specific ARN as the TARGET for the dispatched module (enables targeted API calls rather than full enumeration).
 
@@ -81,7 +83,11 @@ Store the specific ARN as the TARGET for the dispatched module (enables targeted
 |-------|-------------|
 | `secrets` | secrets |
 | `secretsmanager` | secrets |
-| `vpc`, `ebs`, `elb`, `elbv2`, `ssm` | ec2 |
+| `vpc`, `ebs`, `elb`, `elbv2` | ec2 |
+| `dynamo`, `dynamodb` | dynamodb |
+| `params`, `parameters`, `ssm` | ssm |
+| `cognito` | cognito |
+| `bedrock` | bedrock |
 
 ### No Argument
 
@@ -141,22 +147,16 @@ Stop. Do not continue.
 
 **Discover enabled regions:** After credential check and config loading, run:
 ```bash
-# Discover enabled regions — used by all regional subagents
-ENABLED_REGIONS=$(aws ec2 describe-regions \
-  --filters "Name=opt-in-status,Values=opted-in,opt-in-not-required" \
-  --query "Regions[].RegionName" \
-  --output text | tr '\t' ',')
-REGION_COUNT=$(echo "$ENABLED_REGIONS" | tr ',' '\n' | grep -c '.')
-REGIONS_FALLBACK=false
+# Discover enabled regions via Account API
+REGIONS_JSON=$(node scripts/lib/discover-regions.js 2>/dev/null)
+if [ -z "$REGIONS_JSON" ]; then
+  REGIONS_JSON='["us-east-1","us-east-2","us-west-1","us-west-2","eu-west-1","eu-west-2","eu-west-3","eu-central-1","eu-north-1","ap-southeast-1","ap-southeast-2","ap-northeast-1","ap-northeast-2","ap-northeast-3","ap-south-1","sa-east-1","ca-central-1"]'
+  REGIONS_FALLBACK=true
+fi
+REGIONS_ARG=$(node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.stdout.write(d.join(','));" <<<"$REGIONS_JSON")
+REGION_COUNT=$(echo "$REGIONS_ARG" | tr ',' '\n' | grep -c '.')
+REGIONS_FALLBACK=${REGIONS_FALLBACK:-false}
 ```
-
-If `aws ec2 describe-regions` fails (AccessDenied or any error), use the hardcoded 8-region fallback:
-```bash
-ENABLED_REGIONS="us-east-1,us-east-2,us-west-1,us-west-2,eu-west-1,eu-central-1,ap-southeast-1,ap-northeast-1"
-REGION_COUNT=8
-REGIONS_FALLBACK=true
-```
-Log: `[WARN] Could not discover enabled regions — using default 8-region set.`
 
 **Display Gate 1:**
 ```
@@ -172,7 +172,7 @@ Enabled regions: [REGION_COUNT] discovered (e.g., us-east-1,us-east-2,us-west-2,
 ```
 If fallback was used, show instead:
 ```
-Enabled regions: 8 (default — describe-regions failed)
+Enabled regions: 17 (default — discover-regions.js failed)
 ```
 ```
 Proceeding to module approval...
@@ -194,7 +194,7 @@ GATE 2: SCOPE Audit — Module Approval
 
 Account: [ACCOUNT_ID]
 Target: [original target input]
-Dispatch mode: [parallel subagents | inline (single service)]
+Dispatch mode: parallel SDK enum scripts
 
 Modules to enumerate:
 | # | Service | Key Operations | Region |
@@ -205,13 +205,22 @@ Include only the modules in the resolved service list. Module rows:
 
 | Service | Key Operations | Region |
 |---------|----------------|--------|
-| IAM | get-account-authorization-details, list-users, list-roles | Global |
-| STS | get-session-token, get-caller-identity | Global |
+| IAM | get-account-authorization-details, list-users, list-roles, list-oidc-providers | Global |
+| STS | get-caller-identity, get-session-token | Global |
 | S3 | list-buckets, get-bucket-policy, get-bucket-acl | Global |
 | KMS | list-keys, describe-key, list-grants | Per-region |
 | Secrets | list-secrets, describe-secret | Per-region |
 | Lambda | list-functions, get-function, get-policy | Per-region |
 | EC2 | describe-instances, describe-vpcs, describe-security-groups | Per-region |
+| RDS | describe-db-instances, describe-db-clusters | Per-region |
+| SNS | list-topics, get-topic-attributes, list-subscriptions | Per-region |
+| SQS | list-queues, get-queue-attributes | Per-region |
+| API Gateway | get-rest-apis, get-http-apis, get-stages | Per-region |
+| CodeBuild | list-projects, batch-get-projects | Per-region |
+| Bedrock | list-foundation-models, list-agents, list-guardrails | Per-region |
+| Cognito | list-identity-pools, list-user-pools, list-user-pool-clients | Per-region |
+| DynamoDB | list-tables, describe-table, describe-continuous-backups | Per-region |
+| SSM | describe-parameters, get-parameter | Per-region |
 
 ```
 Options:
@@ -229,113 +238,147 @@ Wait for operator response. If operator says "skip <service>", remove that servi
 <parallel_enumeration_dispatch>
 ## Parallel Enumeration Dispatch
 
-After Gate 2 approval, dispatch enumeration based on service count.
+After Gate 2 approval, run all approved SDK enum scripts as parallel Bash background processes in a single Bash call.
 
-### Single Service (1 service) — Inline Execution
+### Dispatch block
 
-For a single-service audit, execute inline rather than spawning a subagent:
+```bash
+set -euo pipefail
+declare -A SCRIPT_PIDS
 
-1. Read the module definition file: `agents/subagents/scope-enum-{service}.md`
-2. Execute the enumeration logic directly in this orchestrator context, following the instructions in that file. ENABLED_REGIONS is available for regional service iteration.
-3. Write the structured module JSON to `$RUN_DIR/{service}.json` using Bash redirect:
-   ```bash
-   jq -n --arg module "{service}" --arg account_id "$ACCOUNT_ID" ... > "$RUN_DIR/{service}.json"
-   ```
-4. Collect module summary for Gate 3: STATUS, METRICS, ERRORS
+# Global services (no --regions flag)
+node scripts/enum/iam.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" \
+  >"$RUN_DIR/iam.log" 2>&1 &
+SCRIPT_PIDS[$!]="iam"
 
-The single-service inline path still writes `$RUN_DIR/{service}.json` — attack-paths always reads from disk regardless of dispatch mode.
+node scripts/enum/sts.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" \
+  >"$RUN_DIR/sts.log" 2>&1 &
+SCRIPT_PIDS[$!]="sts"
 
-### Multiple Services (2+ services) — Parallel Subagent Dispatch
+# S3 is global but region-aware
+node scripts/enum/s3.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/s3.log" 2>&1 &
+SCRIPT_PIDS[$!]="s3"
 
-For multi-service audits, dispatch all enumeration subagents in parallel:
+# Regional services — pass comma-separated regions list, scripts iterate internally
+node scripts/enum/kms.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/kms.log" 2>&1 &
+SCRIPT_PIDS[$!]="kms"
 
+node scripts/enum/secrets.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/secrets.log" 2>&1 &
+SCRIPT_PIDS[$!]="secrets"
+
+node scripts/enum/lambda.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/lambda.log" 2>&1 &
+SCRIPT_PIDS[$!]="lambda"
+
+node scripts/enum/ec2.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/ec2.log" 2>&1 &
+SCRIPT_PIDS[$!]="ec2"
+
+node scripts/enum/rds.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/rds.log" 2>&1 &
+SCRIPT_PIDS[$!]="rds"
+
+node scripts/enum/sns.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/sns.log" 2>&1 &
+SCRIPT_PIDS[$!]="sns"
+
+node scripts/enum/sqs.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/sqs.log" 2>&1 &
+SCRIPT_PIDS[$!]="sqs"
+
+node scripts/enum/apigateway.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/apigateway.log" 2>&1 &
+SCRIPT_PIDS[$!]="apigateway"
+
+node scripts/enum/codebuild.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/codebuild.log" 2>&1 &
+SCRIPT_PIDS[$!]="codebuild"
+
+node scripts/enum/bedrock.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/bedrock.log" 2>&1 &
+SCRIPT_PIDS[$!]="bedrock"
+
+node scripts/enum/cognito.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/cognito.log" 2>&1 &
+SCRIPT_PIDS[$!]="cognito"
+
+node scripts/enum/dynamodb.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/dynamodb.log" 2>&1 &
+SCRIPT_PIDS[$!]="dynamodb"
+
+node scripts/enum/ssm.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
+  >"$RUN_DIR/ssm.log" 2>&1 &
+SCRIPT_PIDS[$!]="ssm"
+
+# Wait and collect failures
+FAILED_SERVICES=()
+for pid in "${!SCRIPT_PIDS[@]}"; do
+  if ! wait "$pid"; then
+    FAILED_SERVICES+=("${SCRIPT_PIDS[$pid]}")
+  fi
+done
+
+if [ "${#FAILED_SERVICES[@]}" -gt 0 ]; then
+  echo ""
+  echo "[ERROR] Enumeration failed for: ${FAILED_SERVICES[*]}"
+  echo ""
+  for svc in "${FAILED_SERVICES[@]}"; do
+    echo "--- $svc log ---"
+    cat "$RUN_DIR/$svc.log"
+    echo "---"
+  done
+  echo ""
+  echo "Fix the error above and re-run. No partial results — full picture or error."
+  exit 1
+fi
 ```
-For each service in the approved service list, dispatch the corresponding
-enumeration subagent with this initial message:
 
-  RUN_DIR: {run_directory_path}
-  TARGET: {target_input}
-  ACCOUNT_ID: {account_id}
-  ENABLED_REGIONS: {comma-separated list of enabled regions}
-  PATH_CONSTRAINT: ALL files you write (scripts, intermediate data, regional JSON,
-    helper .py or .sh files) MUST go into $RUN_DIR/. Use $RUN_DIR/raw/ for helper
-    scripts and intermediate directories (e.g., iam_details/, iam_raw/). Do NOT
-    write files to the project root or any path outside $RUN_DIR/. Delete helper
-    scripts after use.
+### Behavior
 
-On Claude Code: Use the Agent tool to dispatch each subagent defined in
-agents/subagents/scope-enum-{service}.md (installed to .claude/agents/).
-Dispatch ALL subagents concurrently in the same response — they run in parallel.
+- **Parallel execution:** All 16 scripts run as background processes. Single Bash call. No wave-based dispatch.
+- **Fail-fast:** Any non-zero exit from any script causes the entire run to fail. Show failed service names and their captured log output. No `--skip`, no "continue anyway". Full picture or error.
+- **Output path constraint:** All scripts write output to `$RUN_DIR/{service}.json`. Do NOT write files outside `$RUN_DIR/`.
+- **Log capture:** Each script's stdout+stderr is captured to `$RUN_DIR/{service}.log`. On success, these can be ignored. On failure, the relevant log is displayed.
 
-On Gemini CLI: Delegate to enumeration subagents in .gemini/agents/
-(e.g., scope-enum-iam, scope-enum-s3, etc.) using native subagent delegation.
-Each subagent MUST receive the ENABLED_REGIONS value in its dispatch message —
-subagents must parse this from the message and set it as a shell variable
-before enumeration. Do NOT fall back to a generalist agent — always use the
-named scope-enum-* agent files.
+### Selective dispatch
 
-**Wave-based dispatch (Gemini CLI only):** Do NOT dispatch all 12 subagents at once.
-The three heaviest agents run solo to guarantee full resources. Everything else runs
-concurrently in a final wave:
+When the operator approves a subset of services (not `--all`), only dispatch the approved services. Use a `case` statement or conditional check against the approved service list before each background process line. Example:
 
-  Wave 1: scope-enum-iam (solo — deepest per-entity API calls)
-  Wave 2 (after Wave 1 completes): scope-enum-ec2 (solo — 17 regions × 5 resource types)
-  Wave 3 (after Wave 2 completes): scope-enum-s3 (solo — per-bucket deep checks)
-  Wave 4 (after Wave 3 completes): scope-enum-sts, scope-enum-kms, scope-enum-secrets, scope-enum-lambda, scope-enum-rds, scope-enum-sns, scope-enum-sqs, scope-enum-apigateway, scope-enum-codebuild (all 9 concurrently)
-
-Wait for each wave to finish before dispatching the next wave.
-Collect return summaries from each wave as they complete.
-
-On Codex: Dispatch all enumeration subagents in parallel using the registered Codex agent
-roles from .codex/config.toml (e.g., scope-enum-iam, scope-enum-s3, etc.). With
-multi_agent enabled, Codex automatically spawns the registered roles — instruct each
-role with its RUN_DIR, TARGET, ACCOUNT_ID, and ENABLED_REGIONS context. Wait for all to complete.
-
-Wait for ALL subagents to complete before proceeding to Gate 3.
-Collect return summary from each. Each summary contains:
-  STATUS: complete|partial|error
-  FILE: $RUN_DIR/{service}.json
-  METRICS: {key findings summary}
-  ERRORS: [any issues]
+```bash
+# Only dispatch approved services
+for svc in "${APPROVED_SERVICES[@]}"; do
+  case "$svc" in
+    iam) node scripts/enum/iam.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" >"$RUN_DIR/iam.log" 2>&1 & SCRIPT_PIDS[$!]="iam" ;;
+    sts) node scripts/enum/sts.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" >"$RUN_DIR/sts.log" 2>&1 & SCRIPT_PIDS[$!]="sts" ;;
+    s3) node scripts/enum/s3.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --regions "$REGIONS_ARG" >"$RUN_DIR/s3.log" 2>&1 & SCRIPT_PIDS[$!]="s3" ;;
+    kms) node scripts/enum/kms.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/kms.log" 2>&1 & SCRIPT_PIDS[$!]="kms" ;;
+    secrets) node scripts/enum/secrets.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/secrets.log" 2>&1 & SCRIPT_PIDS[$!]="secrets" ;;
+    lambda) node scripts/enum/lambda.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/lambda.log" 2>&1 & SCRIPT_PIDS[$!]="lambda" ;;
+    ec2) node scripts/enum/ec2.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/ec2.log" 2>&1 & SCRIPT_PIDS[$!]="ec2" ;;
+    rds) node scripts/enum/rds.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/rds.log" 2>&1 & SCRIPT_PIDS[$!]="rds" ;;
+    sns) node scripts/enum/sns.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/sns.log" 2>&1 & SCRIPT_PIDS[$!]="sns" ;;
+    sqs) node scripts/enum/sqs.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/sqs.log" 2>&1 & SCRIPT_PIDS[$!]="sqs" ;;
+    apigateway) node scripts/enum/apigateway.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/apigateway.log" 2>&1 & SCRIPT_PIDS[$!]="apigateway" ;;
+    codebuild) node scripts/enum/codebuild.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/codebuild.log" 2>&1 & SCRIPT_PIDS[$!]="codebuild" ;;
+    bedrock) node scripts/enum/bedrock.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/bedrock.log" 2>&1 & SCRIPT_PIDS[$!]="bedrock" ;;
+    cognito) node scripts/enum/cognito.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/cognito.log" 2>&1 & SCRIPT_PIDS[$!]="cognito" ;;
+    dynamodb) node scripts/enum/dynamodb.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/dynamodb.log" 2>&1 & SCRIPT_PIDS[$!]="dynamodb" ;;
+    ssm) node scripts/enum/ssm.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/ssm.log" 2>&1 & SCRIPT_PIDS[$!]="ssm" ;;
+  esac
+done
 ```
-
-### Subagent Mapping
-
-| Service | Subagent File |
-|---------|--------------|
-| iam | agents/subagents/scope-enum-iam.md |
-| sts | agents/subagents/scope-enum-sts.md |
-| s3 | agents/subagents/scope-enum-s3.md |
-| kms | agents/subagents/scope-enum-kms.md |
-| secrets | agents/subagents/scope-enum-secrets.md |
-| lambda | agents/subagents/scope-enum-lambda.md |
-| ec2 | agents/subagents/scope-enum-ec2.md |
-| rds | agents/subagents/scope-enum-rds.md |
-| sns | agents/subagents/scope-enum-sns.md |
-| sqs | agents/subagents/scope-enum-sqs.md |
-| apigateway | agents/subagents/scope-enum-apigateway.md |
-| codebuild | agents/subagents/scope-enum-codebuild.md |
-
-### Failure Handling
-
-If a subagent returns STATUS: error or STATUS: partial:
-- Log the error: `[PARTIAL] {service} module — {error description}`
-- Continue with remaining subagents — do NOT abort the run
-- Report all failures at Gate 3
-- Attack-paths will work with available data (partial or empty module files)
-
-If a module JSON file is missing after dispatch (subagent crashed without writing):
-- Log: `[MISSING] {service}.json not written — module failed silently`
-- Do not attempt to re-run — report at Gate 3
 
 ### Region Coverage Validation
 
-At Gate 3, for each regional service subagent (ec2, kms, secrets, lambda, s3, rds, sns, sqs, apigateway, codebuild):
+At Gate 3, for each regional service (ec2, kms, secrets, lambda, s3, rds, sns, sqs, apigateway, codebuild, bedrock, cognito, dynamodb, ssm):
 
-Check the returned `$RUN_DIR/{service}.json` — compare the distinct `region` tags in findings against ENABLED_REGIONS. Two scenarios:
+Check the returned `$RUN_DIR/{service}.json` — compare the distinct `region` tags in findings against REGIONS_ARG. Two scenarios:
 
 1. **Findings in fewer regions than scanned** (common): Resources only exist in some regions. This is normal — report as informational, not a warning.
-2. **Subagent errors/skips on specific regions** (check ERRORS field): Regions were skipped due to AccessDenied or timeout. This is a coverage gap — log a warning.
+2. **Script errors on specific regions** (check service log): Regions were skipped due to AccessDenied or timeout. This is a coverage gap — log a warning.
 
 ```
 # Normal: resources found in 2 of 17 scanned regions (no errors)
@@ -345,24 +388,15 @@ Check the returned `$RUN_DIR/{service}.json` — compare the distinct `region` t
 [WARN] {service}: scanned 15/17 enabled regions — skipped: eu-west-1 (AccessDenied), ap-southeast-1 (timeout)
 ```
 
-Only warn when the ERRORS field indicates regions were actually skipped. "Resources found in N regions" is informational, not a warning.
+Only warn when the service log indicates regions were actually skipped. "Resources found in N regions" is informational, not a warning.
 
 ### Output Path Constraint
 
-ALL files written during audit (scripts, intermediate data, JSON output) MUST go into `$RUN_DIR/`. Do NOT write files to the project root, home directory, or any path outside `$RUN_DIR/`. This applies to:
-- Enumeration JSON output
-- Helper scripts or analysis code
+ALL files written during audit (JSON output, logs) MUST go into `$RUN_DIR/`. Do NOT write files to the project root, home directory, or any path outside `$RUN_DIR/`. This applies to:
+- Enumeration JSON output (`$RUN_DIR/{service}.json`)
+- Script log output (`$RUN_DIR/{service}.log`)
 - Intermediate data files (JSONL, CSV, etc.)
 - Findings summaries
-
-If you need to create helper scripts for processing, write them to `$RUN_DIR/` and execute from there.
-
-### Subagent Output Path Constraint
-
-When dispatching enum subagents, include this constraint in the dispatch context:
-"ALL files you write (scripts, intermediate data, JSON output, helper .py or .sh scripts) MUST go into $RUN_DIR/. Do NOT write files to the project root or any path outside $RUN_DIR/. If you need helper scripts for data processing, create them in $RUN_DIR/ and delete after use."
-
-This prevents scaffolding scripts (.py, .sh files) from being left in the project root — observed on Gemini platform runs.
 </parallel_enumeration_dispatch>
 
 <gate_3_enumeration_summary>
