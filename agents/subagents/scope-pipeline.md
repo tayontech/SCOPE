@@ -136,7 +136,7 @@ If `$RUN_DIR/results.json` exists and contains `"source": "audit"` (or no `sourc
 Extract from headings and content:
 
 ```
-Risk summary: regex match "## RISK SUMMARY: (\d+) -[-—] (critical|high|medium|low|critical|high|medium|low)"
+Risk summary: regex match "## RISK SUMMARY: (\d+) -[-—] (CRITICAL|HIGH|MEDIUM|LOW|critical|high|medium|low)"
   → account_id = group 1
   → risk_score = group 2 (lowercase — normalize to lowercase if uppercase)
 
@@ -145,7 +145,7 @@ Audit mode: extract from findings header if present ("audit")
 
 Services analyzed: count unique "### SERVICE:" headings
 
-Attack paths: regex match all "### ATTACK PATH #(\d+): (.+?) -[-—] (critical|high|medium|low|critical|high|medium|low)"
+Attack paths: regex match all "### ATTACK PATH #(\d+): (.+?) -[-—] (CRITICAL|HIGH|MEDIUM|LOW|critical|high|medium|low)"
   (normalize severity to lowercase)
 For each path block, extract:
   - name, severity from header
