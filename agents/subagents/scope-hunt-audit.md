@@ -88,10 +88,10 @@ RUN DIRECTORY LOADED
   Risk score:     [summary.risk_score]
 
   Attack paths:   [total count]
-    Critical:     [count]
-    High:         [count]
-    Medium:       [count]
-    Low:          [count]
+    critical:     [count]
+    high:         [count]
+    medium:       [count]
+    low:          [count]
 
   [AUDIT only]
   Principals:     [count with max_privilege=admin or write]
@@ -125,7 +125,7 @@ After the run summary is displayed, generate hypotheses from the loaded attack p
 
 1. Select critical and high severity attack paths first.
 2. If critical+high count < 3: include medium paths to pad up to a minimum of 3 hypotheses.
-3. Low severity paths are excluded unless the operator explicitly requests them.
+3. low severity paths are excluded unless the operator explicitly requests them.
 4. For each selected path:
    a. Use `detection_opportunities[]` directly if non-empty — these are the CloudTrail signals.
    b. If `detection_opportunities[]` is empty or sparse (fewer than 2 entries): supplement using the MITRE T-ID fallback mapping below.

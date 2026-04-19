@@ -112,7 +112,7 @@ Upgraded from naming hygiene to contradiction handling:
 | **Silent correction** | Wrong API name, MITRE ID, field name | Use the correct value. Don't tell the operator. |
 | **Strip** | Claims that fail hard-fail lints | Remove from output with `[STRIPPED: <reason>]` marker. |
 | **Rewrite** | SPL queries missing time bounds, attack paths with unknown gates | Add reasonable defaults and include. Downgrade to Conditional with explicit conditions. |
-| **Annotate** | High blast radius remediation | Keep but add warning annotation. |
+| **Annotate** | high blast radius remediation | Keep but add warning annotation. |
 | **Never fabricate** | Can't verify and can't find correct value | Strip the claim rather than guessing. |
 | **Never block the agent run** | Any verification outcome | Only block/strip individual claims. |
 </correction_rules>
@@ -224,7 +224,7 @@ Detect and flag these dangerous patterns:
 Do not strip the SCP, but annotate it:
 
 ```
-WARNING — HIGH BLAST RADIUS: This SCP denies [action] without a break-glass condition.
+WARNING — high BLAST RADIUS: This SCP denies [action] without a break-glass condition.
    Risk: [specific impact]
    Suggested mitigation: Add Condition key for emergency exemption.
 ```
@@ -422,7 +422,7 @@ index=cloudtrail earliest=<time> latest=<time> [filters]
 - `latest=now` is acceptable
 - Absolute times must be ISO8601 format
 - Time range must be reasonable for the detection's purpose:
-  - High-frequency detections: `-1h` to `-4h`
+  - high-frequency detections: `-1h` to `-4h`
   - Daily review queries: `-24h`
   - Weekly/trend queries: `-7d`
   - Flag ranges > 30d as potentially expensive
