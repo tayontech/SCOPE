@@ -1,0 +1,18 @@
+{
+  "module": "sns",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "sns_topic",
+      "resource_id": "test-topic",
+      "arn": "arn:aws:sns:us-east-1:123456789012:test-topic",
+      "region": "us-east-1",
+      "resource_policy": null,
+      "kms_key_id": null,
+      "subscriptions_confirmed": 2,
+      "findings": []
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "module": "ec2",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "ec2_instance",
+      "resource_id": "i-0abc123def456789a",
+      "arn": "arn:aws:ec2:us-east-1:*:instance/i-0abc123def456789a",
+      "region": "us-east-1",
+      "name": "test-instance",
+      "state": "running",
+      "instance_type": "t3.micro",
+      "platform": "linux",
+      "public_ip": null,
+      "private_ip": "10.0.1.10",
+      "vpc_id": "vpc-0abc123",
+      "subnet_id": "subnet-0abc123",
+      "iam_instance_profile": {
+        "arn": "arn:aws:iam::123456789012:instance-profile/TestProfile",
+        "id": "AIPATEST"
+      },
+      "security_groups": ["sg-0abc123"],
+      "imds_version": "v1",
+      "metadata_options": {
+        "http_tokens": "optional",
+        "http_endpoint": "enabled",
+        "http_put_response_hop_limit": 1
+      },
+      "findings": [
+        {
+          "type": "imds_v1_enabled",
+          "severity": "critical",
+          "detail": "Instance uses IMDSv1 (HttpTokens=optional) — credential theft via SSRF"
+        }
+      ]
+    },
+    {
+      "resource_type": "ec2_security_group",
+      "resource_id": "sg-0abc123",
+      "arn": "arn:aws:ec2:us-east-1:*:security-group/sg-0abc123",
+      "region": "us-east-1",
+      "name": "test-sg",
+      "description": "Test security group",
+      "vpc_id": "vpc-0abc123",
+      "inbound_rules": [
+        {
+          "protocol": "tcp",
+          "from_port": 80,
+          "to_port": 80,
+          "sources": ["0.0.0.0/0"]
+        }
+      ],
+      "findings": [
+        {
+          "type": "open_to_world",
+          "severity": "high",
+          "detail": "Security group has inbound rule(s) open to 0.0.0.0/0 or ::/0"
+        }
+      ]
+    },
+    {
+      "resource_type": "ec2_vpc",
+      "resource_id": "vpc-0abc123",
+      "arn": "arn:aws:ec2:us-east-1:*:vpc/vpc-0abc123",
+      "region": "us-east-1",
+      "name": "test-vpc",
+      "cidr_block": "10.0.0.0/16",
+      "is_default": false,
+      "state": "available",
+      "findings": []
+    },
+    {
+      "resource_type": "ec2_snapshot",
+      "resource_id": "snap-0abc123",
+      "arn": "arn:aws:ec2:us-east-1:123456789012:snapshot/snap-0abc123",
+      "region": "us-east-1",
+      "volume_id": "vol-0abc123",
+      "volume_size_gb": 20,
+      "encrypted": false,
+      "state": "completed",
+      "is_public": false,
+      "findings": [
+        {
+          "type": "unencrypted_snapshot",
+          "severity": "medium",
+          "detail": "Snapshot is not encrypted"
+        }
+      ]
+    }
+  ]
+}

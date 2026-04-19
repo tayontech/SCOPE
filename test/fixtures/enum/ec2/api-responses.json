@@ -1,0 +1,88 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "DescribeInstancesCommand": {
+    "Reservations": [
+      {
+        "Instances": [
+          {
+            "InstanceId": "i-0abc123def456789a",
+            "State": { "Name": "running" },
+            "InstanceType": "t3.micro",
+            "PublicIpAddress": null,
+            "PrivateIpAddress": "10.0.1.10",
+            "VpcId": "vpc-0abc123",
+            "SubnetId": "subnet-0abc123",
+            "IamInstanceProfile": {
+              "Arn": "arn:aws:iam::123456789012:instance-profile/TestProfile",
+              "Id": "AIPATEST"
+            },
+            "SecurityGroups": [{ "GroupId": "sg-0abc123" }],
+            "MetadataOptions": {
+              "HttpTokens": "optional",
+              "HttpEndpoint": "enabled",
+              "HttpPutResponseHopLimit": 1
+            },
+            "Tags": [{ "Key": "Name", "Value": "test-instance" }]
+          }
+        ]
+      }
+    ]
+  },
+  "DescribeSecurityGroupsCommand": {
+    "SecurityGroups": [
+      {
+        "GroupId": "sg-0abc123",
+        "GroupName": "test-sg",
+        "Description": "Test security group",
+        "VpcId": "vpc-0abc123",
+        "IpPermissions": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "IpRanges": [{ "CidrIp": "0.0.0.0/0" }],
+            "Ipv6Ranges": [],
+            "PrefixListIds": [],
+            "UserIdGroupPairs": []
+          }
+        ]
+      }
+    ]
+  },
+  "DescribeVpcsCommand": {
+    "Vpcs": [
+      {
+        "VpcId": "vpc-0abc123",
+        "CidrBlock": "10.0.0.0/16",
+        "IsDefault": false,
+        "State": "available",
+        "Tags": [{ "Key": "Name", "Value": "test-vpc" }]
+      }
+    ]
+  },
+  "DescribeSnapshotsCommand": {
+    "Snapshots": [
+      {
+        "SnapshotId": "snap-0abc123",
+        "VolumeId": "vol-0abc123",
+        "VolumeSize": 20,
+        "Encrypted": false,
+        "State": "completed"
+      }
+    ]
+  },
+  "DescribeSnapshotAttributeCommand": {
+    "CreateVolumePermissions": []
+  },
+  "DescribeLoadBalancersCommand": {
+    "LoadBalancers": [],
+    "LoadBalancerDescriptions": []
+  },
+  "DescribeListenersCommand": {
+    "Listeners": []
+  }
+}
