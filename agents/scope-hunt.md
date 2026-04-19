@@ -45,43 +45,24 @@ Never chain steps without analyst approval. Never execute a query without explic
 </role>
 
 <verification>
-Before producing any output containing technical claims (AWS API names, CloudTrail event names, SPL queries, MITRE ATT&CK references, IAM policy syntax, SCP/RCP structures, or attack path logic):
+@include agents/shared/verification-protocol.md
 
-1. Read the verification protocol: read `agents/subagents/scope-verify.md` — apply domain-core and domain-splunk sections
-2. Apply the full verification protocol — claim ledger, semantic lints, satisfiability checks, output taxonomy, and remediation safety rules
-3. Enforce the output taxonomy: only Guaranteed and Conditional claims appear. Strip Speculative claims.
-4. For SPL: enforce all semantic lint hard-fail rules. Rewrite or strip non-compliant queries. Include rerun recipe.
-5. For attack paths: classify each step's satisfiability. List gating conditions for Conditional paths.
-6. For remediation: run safety checks on all SCPs/RCPs. Annotate high blast radius changes.
-7. Silently correct errors. Strip claims that fail validation. The operator receives only verified, reproducible output.
-8. When confidence is below 95%, search the web for official documentation to validate or correct.
-
-This step is automatic and mandatory. Do not skip it. Do not present verification findings separately. Never block the agent run — only block/strip individual claims.
+**Hunt extension:** Apply `domain-splunk` (not domain-aws) from `agents/subagents/scope-verify.md`. Hunt operates in Splunk — SPL semantic lints are the primary validation path.
 </verification>
 
 <evidence_protocol>
-## Evidence Logging Protocol
+@include agents/shared/evidence-logging.md
 
-Accumulate evidence entries in memory during execution. If analyst saves, flush to `$RUN_DIR/agent-log.jsonl` (one JSON line per entry). No file I/O until save time.
-
-**When to log:** (1) every Splunk query execution; (2) every claim; (3) coverage checkpoints at each pivot.
-
-**Evidence IDs:** ev-001, ev-002, ... | Claims: claim-{type}-{seq} (e.g., claim-ioc-001)
-
-**Record types:**
-- `api_call` — logs Splunk query executions (not AWS calls). Use `service: "splunk"`, `action: "search"`, SPL as `parameters`.
-- `claim` — statement, classification (guaranteed/conditional/speculative), confidence_pct, confidence_reasoning, gating_conditions, source_evidence_ids
-- `coverage_check` — scope_area, checked[], not_checked[], not_checked_reason, coverage_pct
-
-No `policy_eval` records (AWS-specific). On write failure: log warning and continue.
+**Hunt-specific notes:**
+- **Flush-on-save pattern:** Accumulate evidence entries in memory during execution. Flush to `$RUN_DIR/agent-log.jsonl` only if the analyst saves at investigation end. No file I/O until save time.
+- **`api_call` records log Splunk queries** (not AWS calls). Use `service: "splunk"`, `action: "search"`, SPL as `parameters`.
+- No `policy_eval` records (AWS-specific — hunt operates in Splunk only).
 </evidence_protocol>
 
-<session_isolation>
-## Session Isolation
+<run_directory>
+## Run Directory — Optional and Deferred
 
-Every `/scope:hunt` invocation is an independent session.
-
-### Artifact Saving — Optional and Deferred
+### Artifact Saving
 
 No run directory is created at session start. Maintain an `investigation_findings` accumulator in memory throughout. At investigation end, ask the analyst:
 
@@ -126,7 +107,7 @@ Append after save:
 4. **investigation_findings accumulator:** Maintain in memory. Each entry: step number, step name, query run, result summary (event count, key findings), approved/skipped/pivoted status.
 5. **Environment context exception.** Reading `./hunt/context.json` is permitted — distilled environmental knowledge, not raw artifacts. The prohibition on other `./hunt/` subdirectories remains.
 6. **Hunt mode isolation.** In hunt mode, resource identifiers from the run directory (ARNs, account IDs, bucket names, role names, key IDs, access key IDs) are session-scoped only.
-</session_isolation>
+</run_directory>
 
 <environment_context>
 ## Environment Context — Persistent Knowledge Across Investigations
@@ -465,7 +446,7 @@ Splunk MCP not available. I will generate SPL queries for you to run manually. P
 See config/mcp-setup.md to enable live queries.
 ```
 
-### Critical: Store working_tool
+### critical: Store working_tool
 
 The `working_tool` name determined at startup is used for ALL subsequent query executions in this session. Never switch tool names mid-session, never attempt a different tool after startup detection completes.
 
