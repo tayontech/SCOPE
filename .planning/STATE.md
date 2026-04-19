@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: prompt-architecture-hardening
 status: in_progress
-last_updated: "2026-04-19"
-last_activity: 2026-04-19 — Completed Phase 57 Plan 01 (config/models.json + agents/shared/)
+last_updated: "2026-04-18"
+last_activity: 2026-04-18 — Completed Phase 57 Plan 02 (@include resolver + tier model routing in bin/install.js)
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 1
-  completed_plans: 1
+  total_plans: 2
+  completed_plans: 2
 ---
 
 # Project State
@@ -17,9 +17,9 @@ progress:
 ## Current Position
 
 Phase: 57 — !INCLUDE Infrastructure & Tier Model Declarations
-Plan: 57-01 complete (1/1 plans for Phase 57)
-Status: In progress — Phase 57 done, ready for Phase 58
-Last activity: 2026-04-19 — Completed 57-01: config/models.json + agents/shared/ scaffolding
+Plan: 57-02 complete (2/2 plans for Phase 57)
+Status: In progress — Phase 57 complete, ready for Phase 58
+Last activity: 2026-04-18 — Completed 57-02: @include resolver + resolveModelTier in bin/install.js
 
 ## Phase Index
 
@@ -44,6 +44,9 @@ Last activity: 2026-04-19 — Completed 57-01: config/models.json + agents/share
 - IAM Simulator identified as highest-ROI quality improvement
 - Phase 57 decision: config/models.json uses inherit:null to signal no model field in installed output (session model passthrough)
 - Tier names established: enum (haiku-class), reasoning (sonnet-class), inherit (session passthrough)
+- Phase 57-02 decision: resolveModelTier passes through literal model strings unchanged for backward compat — only symbolic tier labels (enum/reasoning/inherit) are mapped via config/models.json
+- Phase 57-02 decision: resolveIncludes placed before all platform-specific transformation; no nesting allowed; hard-fail on missing file
+- Phase 57-02 decision: Codex TOML developer_instructions uses expandedBody (post-include-resolution) so inlined instructions have @include directives already expanded
 
 ## Dependency Order
 
