@@ -877,38 +877,19 @@ test -f "dashboard/public/$RUN_ID.json" && echo "dashboard export PRESENT" || ec
 If ANY mandatory file is MISSING (and no applicable exception applies), go back and create it before proceeding.
 </mandatory_outputs>
 
-<agent_log_protocol>
-## Agent Activity Log Protocol
+<evidence_protocol>
+@include agents/shared/evidence-logging.md
 
-Maintain a structured activity log at `$RUN_DIR/agent-log.jsonl`.
-Append one JSON line per event.
-
-### When to Log
-
-1. Every AWS API call — immediately after return (for inline execution; subagents log their own calls)
-2. Every subagent dispatch — record which subagent was launched and initial parameters
-3. Every subagent return — record STATUS, METRICS, ERRORS from subagent summary
-4. Every gate transition — record gate number, operator decision, timestamp
-5. Every policy evaluation — full 7-step chain
-6. Every claim — classification, confidence, reasoning
-7. Coverage checkpoints — end of each enumeration module
-
-### Event IDs
-
-Sequential: `ev-001`, `ev-002`, etc.
-Claims: `claim-{type}-{seq}` (e.g., `claim-ap-001` for attack paths)
-
-### Record Types
-
-- `api_call` — service, action, parameters, response_status, response_summary, duration_ms
+**Audit-specific additional record types:**
 - `subagent_dispatch` — name, initial_message, timestamp
 - `subagent_return` — name, STATUS, METRICS, ERRORS, timestamp
 - `gate_transition` — gate, decision, timestamp
-- `policy_eval` — principal_arn, action_tested, 7-step evaluation_chain, source_evidence_ids
-- `claim` — statement, classification, confidence_reasoning, gating_conditions
-- `coverage_check` — scope_area, checked[], not_checked[], coverage_pct
 
-### Writing Log Entries
+**When to log (audit extensions):**
+- Every subagent dispatch and return (subagents log their own API calls)
+- Every gate transition — gate number, operator decision, timestamp
+
+**Writing Log Entries:**
 
 Always append one JSON object per line. Use `jq -c` or `printf` — do NOT use heredocs (`<<EOF`) to write agent-log.jsonl, as heredoc quoting errors cause syntax failures.
 
@@ -923,11 +904,7 @@ printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" '{event_id:"ev-002",type:"gate_tra
 ```bash
 printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "$SUBAGENT_NAME" '{event_id:"ev-NNN",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$RUN_DIR/agent-log.jsonl"
 ```
-
-### Failure Handling
-
-If write fails: log warning and continue. Agent activity logging must never block the primary audit workflow.
-</agent_log_protocol>
+</evidence_protocol>
 
 <run_index>
 ## Run Index
