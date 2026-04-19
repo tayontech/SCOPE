@@ -1,0 +1,24 @@
+{
+  "module": "kms",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "kms_key",
+      "resource_id": "aaaa-1111-bbbb-2222",
+      "arn": "arn:aws:kms:us-east-1:123456789012:key/aaaa-1111-bbbb-2222",
+      "region": "us-east-1",
+      "key_state": "Enabled",
+      "usage": "ENCRYPT_DECRYPT",
+      "origin": "AWS_KMS",
+      "description": "My test key",
+      "rotation_enabled": true,
+      "policy_principals": [
+        "arn:aws:iam::123456789012:root"
+      ],
+      "grants": [],
+      "findings": []
+    }
+  ]
+}

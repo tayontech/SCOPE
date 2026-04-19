@@ -1,0 +1,44 @@
+{
+  "module": "s3",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "s3_bucket",
+      "resource_id": "my-test-bucket",
+      "arn": "arn:aws:s3:::my-test-bucket",
+      "region": "us-east-1",
+      "policy": null,
+      "public_access_block": {
+        "BlockPublicAcls": true,
+        "IgnorePublicAcls": true,
+        "BlockPublicPolicy": true,
+        "RestrictPublicBuckets": true
+      },
+      "versioning": {
+        "Status": "Enabled",
+        "MFADelete": null
+      },
+      "encryption": {
+        "Rules": [
+          {
+            "ApplyServerSideEncryptionByDefault": {
+              "SSEAlgorithm": "AES256"
+            }
+          }
+        ]
+      },
+      "logging": null,
+      "acl_grants": [
+        {
+          "grantee_type": "CanonicalUser",
+          "grantee_id": "abc123",
+          "grantee_uri": null,
+          "permission": "FULL_CONTROL"
+        }
+      ],
+      "findings": []
+    }
+  ]
+}

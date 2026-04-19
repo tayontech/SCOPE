@@ -1,0 +1,54 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListBucketsCommand": {
+    "Buckets": [
+      { "Name": "my-test-bucket" }
+    ]
+  },
+  "GetBucketLocationCommand": {
+    "LocationConstraint": "us-east-1"
+  },
+  "GetBucketPolicyCommand": null,
+  "GetPublicAccessBlockCommand": {
+    "PublicAccessBlockConfiguration": {
+      "BlockPublicAcls": true,
+      "IgnorePublicAcls": true,
+      "BlockPublicPolicy": true,
+      "RestrictPublicBuckets": true
+    }
+  },
+  "GetBucketVersioningCommand": {
+    "Status": "Enabled",
+    "MFADelete": null
+  },
+  "GetBucketEncryptionCommand": {
+    "ServerSideEncryptionConfiguration": {
+      "Rules": [
+        {
+          "ApplyServerSideEncryptionByDefault": {
+            "SSEAlgorithm": "AES256"
+          }
+        }
+      ]
+    }
+  },
+  "GetBucketLoggingCommand": {
+    "LoggingEnabled": null
+  },
+  "GetBucketAclCommand": {
+    "Grants": [
+      {
+        "Grantee": {
+          "Type": "CanonicalUser",
+          "ID": "abc123",
+          "URI": null
+        },
+        "Permission": "FULL_CONTROL"
+      }
+    ]
+  }
+}

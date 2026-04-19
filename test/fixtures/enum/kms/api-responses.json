@@ -1,0 +1,46 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListKeysCommand": {
+    "Keys": [
+      { "KeyId": "aaaa-1111-bbbb-2222" },
+      { "KeyId": "cccc-3333-dddd-4444" }
+    ]
+  },
+  "DescribeKeyCommand": [
+    {
+      "KeyMetadata": {
+        "KeyId": "aaaa-1111-bbbb-2222",
+        "Arn": "arn:aws:kms:us-east-1:123456789012:key/aaaa-1111-bbbb-2222",
+        "KeyManager": "CUSTOMER",
+        "KeyState": "Enabled",
+        "KeyUsage": "ENCRYPT_DECRYPT",
+        "Origin": "AWS_KMS",
+        "Description": "My test key"
+      }
+    },
+    {
+      "KeyMetadata": {
+        "KeyId": "cccc-3333-dddd-4444",
+        "Arn": "arn:aws:kms:us-east-1:123456789012:key/cccc-3333-dddd-4444",
+        "KeyManager": "AWS",
+        "KeyState": "Enabled",
+        "KeyUsage": "ENCRYPT_DECRYPT",
+        "Origin": "AWS_KMS",
+        "Description": "AWS managed key"
+      }
+    }
+  ],
+  "GetKeyPolicyCommand": {
+    "Policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"arn:aws:iam::123456789012:root\"},\"Action\":\"kms:*\",\"Resource\":\"*\"}]}"
+  },
+  "ListGrantsCommand": {
+    "Grants": []
+  },
+  "GetKeyRotationStatusCommand": {
+    "KeyRotationEnabled": true
+  }
+}
