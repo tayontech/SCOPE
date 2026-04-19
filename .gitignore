@@ -28,6 +28,9 @@ audit/
 exploit/
 hunt/
 
+# Test scratch space
+test/tmp/
+
 # Dashboard
 dashboard/node_modules/
 dashboard/dist/
