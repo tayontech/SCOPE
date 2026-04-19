@@ -108,6 +108,55 @@ function rebuildFrontmatter(frontmatter, omitKeys) {
 }
 
 // ---------------------------------------------------------------------------
+// @include resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve @include directives in agent body content.
+ * Directives must appear on their own line: "@include path/to/file.md"
+ * Paths are relative to repoRoot. No nesting — shared files are leaf content.
+ *
+ * @param {string} content   Agent body content (after frontmatter extraction)
+ * @param {string} repoRoot  Absolute path to repo root
+ * @returns {string}         Content with all @include directives expanded
+ */
+function resolveIncludes(content, repoRoot) {
+  const includeRe = /^@include\s+(\S+)$/gm;
+  let match;
+  // Collect all directives first to detect them before mutation
+  const directives = [];
+  while ((match = includeRe.exec(content)) !== null) {
+    directives.push({ full: match[0], filePath: match[1] });
+  }
+
+  if (directives.length === 0) return content;
+
+  let expanded = content;
+  for (const directive of directives) {
+    const absPath = path.join(repoRoot, directive.filePath);
+    if (!fs.existsSync(absPath)) {
+      console.error(`Error: @include references missing file: ${absPath}`);
+      process.exit(1);
+    }
+    const included = fs.readFileSync(absPath, 'utf8');
+    // Reject nesting
+    if (/^@include\s+\S+$/m.test(included)) {
+      console.error(`Error: @include nesting not allowed. File ${absPath} contains @include directives.`);
+      process.exit(1);
+    }
+    expanded = expanded.replace(directive.full, included.trimEnd());
+  }
+
+  // Post-expansion safety check: no unresolved @include should remain
+  if (/^@include\s+\S+$/m.test(expanded)) {
+    console.error(`Error: Unresolved @include directive remains after expansion. Check for edge cases.`);
+    process.exit(1);
+  }
+
+  return expanded;
+}
+
+// ---------------------------------------------------------------------------
 // Per-editor transformation functions
 // ---------------------------------------------------------------------------
 
