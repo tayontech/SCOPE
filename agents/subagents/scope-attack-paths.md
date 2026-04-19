@@ -40,103 +40,21 @@ For each file in SERVICES_COMPLETED:
 
 ## Phase A: Deterministic Graph Extraction
 
-Run these jq commands VERBATIM before any model reasoning. Phase A produces identity nodes, service nodes, data store nodes, and factual edges. Output is deterministic — same enum data produces identical Phase A output on all platforms.
-
-### Unified Node Extractor
+Run `extract-graph.js` to build the identity graph from per-module JSON. Phase A produces identity nodes, service nodes, data store nodes, and factual edges. Output is deterministic — same enum data produces identical output on all platforms.
 
 ```bash
-# ── Phase A: Deterministic Node Extraction ──
-# Read each module JSON with fallback for missing modules
-IAM_DATA=$(cat "$RUN_DIR/iam.json" 2>/dev/null) || IAM_DATA='{"findings":[]}'
-S3_DATA=$(cat "$RUN_DIR/s3.json" 2>/dev/null) || S3_DATA='{"findings":[]}'
-KMS_DATA=$(cat "$RUN_DIR/kms.json" 2>/dev/null) || KMS_DATA='{"findings":[]}'
-SECRETS_DATA=$(cat "$RUN_DIR/secrets.json" 2>/dev/null) || SECRETS_DATA='{"findings":[]}'
-RDS_DATA=$(cat "$RUN_DIR/rds.json" 2>/dev/null) || RDS_DATA='{"findings":[]}'
+# ── Phase A: Deterministic Graph Extraction ──
+GRAPH_OUTPUT=$(node bin/extract-graph.js "$RUN_DIR")
+if [ $? -ne 0 ] || [ -z "$GRAPH_OUTPUT" ]; then
+  echo "[PIPELINE_ERROR] extract-graph.js failed for $RUN_DIR — cannot proceed to Phase B"
+  exit 1
+fi
 
-# Identity nodes from iam.json (user, role, group)
-IAM_NODES=$(echo "$IAM_DATA" | jq '
-  [.findings[] |
-    if .resource_type == "iam_user" then
-      {id: ("user:" + .resource_id), label: .resource_id, type: "user", _source: "api"}
-    elif .resource_type == "iam_role" and (.is_service_linked | not) then
-      {id: ("role:" + .resource_id), label: .resource_id, type: "role", _source: "api"}
-    elif .resource_type == "iam_group" then
-      {id: ("group:" + .resource_id), label: .resource_id, type: "group", _source: "api"}
-    else empty
-    end
-  ]
-')
-
-# Service nodes from IAM role trust_relationships where trust_type == "service"
-SERVICE_NODES=$(echo "$IAM_DATA" | jq '
-  [.findings[] | select(.resource_type == "iam_role") |
-    .trust_relationships[]? | select(.trust_type == "service") |
-    {id: ("svc:" + .principal), label: .principal, type: "external", _source: "api"}
-  ] | unique_by(.id)
-')
-
-# Data store nodes from S3, KMS, Secrets, RDS
-DATA_NODES=$(echo "$S3_DATA" | jq '[.findings[] | {id: ("data:s3:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
-KMS_NODES=$(echo "$KMS_DATA" | jq '[.findings[] | {id: ("data:kms:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
-SECRETS_NODES=$(echo "$SECRETS_DATA" | jq '[.findings[] | {id: ("data:secrets:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
-RDS_NODES=$(echo "$RDS_DATA" | jq '[.findings[] | {id: ("data:rds:" + .resource_id), label: .resource_id, type: "data", _source: "api"}]')
-
-# Merge all Phase A nodes and sort by id for determinism
-PHASE_A_NODES=$(echo "$IAM_NODES" | jq --argjson svc "$SERVICE_NODES" --argjson s3 "$DATA_NODES" --argjson kms "$KMS_NODES" --argjson sec "$SECRETS_NODES" --argjson rds "$RDS_NODES" \
-  '. + $svc + $s3 + $kms + $sec + $rds | unique_by(.id) | sort_by(.id)')
+PHASE_A_NODES=$(echo "$GRAPH_OUTPUT" | jq '.nodes')
+PHASE_A_EDGES=$(echo "$GRAPH_OUTPUT" | jq '.edges')
 ```
 
-### Factual Edge Extractor
-
-```bash
-# ── Phase A: Factual Edge Extraction ──
-# Trust edges from IAM role trust_relationships
-TRUST_EDGES=$(echo "$IAM_DATA" | jq '
-  [.findings[] | select(.resource_type == "iam_role" and (.is_service_linked | not)) | . as $role |
-    .trust_relationships[]? |
-    {
-      source: (
-        if .trust_type == "service" then ("svc:" + .principal)
-        elif .trust_type == "wildcard" then "external:anonymous"
-        elif .trust_type == "cross-account" then ("external:" + .principal)
-        elif .trust_type == "same-account" then
-          (if (.principal | test(":user/")) then ("user:" + (.principal | split("/") | last))
-           elif (.principal | test(":role/")) then ("role:" + (.principal | split("/") | last))
-           else ("external:" + .principal) end)
-        elif .trust_type == "federated" then ("external:" + .principal)
-        else ("external:" + .principal)
-        end
-      ),
-      target: ("role:" + $role.resource_id),
-      edge_type: (if .trust_type == "service" then "service" else "trust" end),
-      trust_type: .trust_type,
-      severity: .risk,
-      label: "can_assume",
-      _source: "api"
-    }
-  ]
-')
-
-# Membership edges from IAM user groups
-MEMBERSHIP_EDGES=$(echo "$IAM_DATA" | jq '
-  [.findings[] | select(.resource_type == "iam_user") | . as $user |
-    .groups[]? |
-    {
-      source: ("user:" + $user.resource_id),
-      target: ("group:" + .),
-      edge_type: "membership",
-      label: "member_of",
-      _source: "api"
-    }
-  ]
-')
-
-# Merge all Phase A edges and sort for determinism
-PHASE_A_EDGES=$(echo "$TRUST_EDGES" | jq --argjson mem "$MEMBERSHIP_EDGES" \
-  '. + $mem | unique_by([.source, .target, .edge_type]) | sort_by([.source, .target, .edge_type])')
-```
-
-**Phase A completion gate:** Do not proceed to config reads or Phase B reasoning until PHASE_A_NODES and PHASE_A_EDGES are populated. Run the jq commands above verbatim. If either variable is empty, re-run the Phase A jq commands above before continuing.
+**Phase A completion gate:** Do not proceed to config reads or Phase B reasoning until PHASE_A_NODES and PHASE_A_EDGES are populated. If `extract-graph.js` exits non-zero or produces invalid JSON, investigate the run directory contents before continuing.
 
 ## Config: Reference Catalogues
 
