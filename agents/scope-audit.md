@@ -421,11 +421,11 @@ Wait for operator approval. If operator says "skip", jump to findings.md generat
 </gate_3_enumeration_summary>
 
 <module_validation>
-## Module JSON Validation (Node Script Post-Check)
+## Module JSON Validation
 
-After all enumeration subagents complete and before presenting Gate 3, validate each module JSON file in $RUN_DIR/ using `bin/validate-enum-output.js`. This performs full per-service schema validation (envelope fields, per-resource required fields, trust entries, sort order) using a single source of truth.
+After all enumeration completes and before presenting Gate 3, spot-check each module JSON file in $RUN_DIR/ for basic integrity. SDK enum scripts enforce the envelope schema in code via `scripts/lib/envelope.js` — no external validator needed.
 
-This check is NON-BLOCKING — log warnings, do not abort the run. Invalid module data degrades attack-paths quality but partial data is better than no data.
+This check is NON-BLOCKING — log warnings, do not abort the run.
 
 Run inline:
 ```bash
@@ -434,9 +434,9 @@ for MODULE_FILE in "$RUN_DIR"/*.json; do
   [ -f "$MODULE_FILE" ] || continue
   BASENAME=$(basename "$MODULE_FILE")
 
-  # Check file is non-empty (catches 0-byte jq redirect failures)
+  # Check file is non-empty (catches 0-byte redirect failures)
   if [ ! -s "$MODULE_FILE" ]; then
-    VALIDATION_WARNINGS+=("[WARN] $BASENAME: file is empty (0 bytes) -- jq redirect likely failed")
+    VALIDATION_WARNINGS+=("[WARN] $BASENAME: file is empty (0 bytes)")
     continue
   fi
 
@@ -444,33 +444,17 @@ for MODULE_FILE in "$RUN_DIR"/*.json; do
   MODULE=$(jq -r '.module // empty' "$MODULE_FILE" 2>/dev/null)
   [ -z "$MODULE" ] && continue
 
-  # Run full schema validation via node script
-  if command -v node >/dev/null 2>&1; then
-    OUTPUT=$(node bin/validate-enum-output.js "$MODULE_FILE" 2>&1)
-    EXIT_CODE=$?
-
-    if [ $EXIT_CODE -eq 1 ]; then
-      # Validation errors -- collect as warnings (non-blocking)
-      while IFS= read -r line; do
-        VALIDATION_WARNINGS+=("[WARN] $line")
-      done <<< "$OUTPUT"
-    elif [ $EXIT_CODE -eq 2 ]; then
-      VALIDATION_WARNINGS+=("[WARN] $BASENAME: validator could not process file")
-    fi
-    # EXIT_CODE 0 = pass, no action needed
-  else
-    VALIDATION_WARNINGS+=("[WARN] node not available -- skipping schema validation for $BASENAME")
+  # Verify required envelope fields
+  MISSING=$(jq -r '[if .module then empty else "module" end, if .account_id then empty else "account_id" end, if .status then empty else "status" end, if .timestamp then empty else "timestamp" end, if .findings then empty else "findings" end] | join(", ")' "$MODULE_FILE" 2>/dev/null)
+  if [ -n "$MISSING" ]; then
+    VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing fields: $MISSING")
   fi
 done
 
-# Display warnings at Gate 3 if any
 if [ ${#VALIDATION_WARNINGS[@]} -gt 0 ]; then
   echo ""
   echo "Module validation warnings (${#VALIDATION_WARNINGS[@]} issue(s) found):"
   printf '  %s\n' "${VALIDATION_WARNINGS[@]}"
-  echo ""
-  echo "These warnings indicate module data quality issues that may degrade attack-path quality."
-  echo "Warnings will be shown alongside the Gate 3 summary — no additional prompt required."
 else
   echo ""
   echo "All modules passed validation."

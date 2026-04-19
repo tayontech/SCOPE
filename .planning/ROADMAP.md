@@ -140,12 +140,21 @@
 **Requirements:** TEST-01, TEST-02, ORCH-02
 **Target files:** `test/`, `agents/subagents/scope-enum-*.md` (removed)
 **Dependency:** Phases 67, 68, 69, 70
+**Plans:** 5/5 plans complete
 
 ### What changes
 
 - **TEST-01**: Fixture-based tests for each SDK enum script.
 - **TEST-02**: Regression test comparing SDK output structure to Haiku agent output.
 - **ORCH-02**: Remove 12 Haiku enum agent files after tests confirm structural compatibility.
+
+### Plans
+
+- [x] 71-01-PLAN.md — Test infrastructure + refactor/test IAM and STS
+- [x] 71-02-PLAN.md — Refactor/test S3, KMS, Secrets, RDS, Lambda
+- [x] 71-03-PLAN.md — Refactor/test EC2, SNS, SQS, CodeBuild
+- [x] 71-04-PLAN.md — Refactor/test API Gateway, Bedrock, Cognito, DynamoDB, SSM
+- [x] 71-05-PLAN.md — Enum agent removal + reference cleanup
 
 ### Success criteria
 
@@ -253,4 +262,4 @@ Phase 75 (AGENT-02, 03: reporting) — independent
 ---
 
 *Roadmap defined: 2026-04-19*
-*Last updated: 2026-04-19 — SIM phases replaced with POL (local policy resolution)*
+*Last updated: 2026-04-19 — Phase 71 plans created (5 plans)*
