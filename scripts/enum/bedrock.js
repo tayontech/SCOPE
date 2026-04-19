@@ -1,0 +1,398 @@
+'use strict';
+
+const {
+  BedrockClient,
+  ListFoundationModelsCommand,
+  ListCustomModelsCommand,
+  ListGuardrailsCommand,
+  GetModelInvocationLoggingConfigurationCommand,
+  ListProvisionedModelThroughputsCommand,
+} = require('@aws-sdk/client-bedrock');
+
+const {
+  BedrockAgentClient,
+  ListAgentsCommand,
+  GetAgentCommand,
+  ListKnowledgeBasesCommand,
+  GetKnowledgeBaseCommand,
+} = require('@aws-sdk/client-bedrock-agent');
+
+const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
+
+// --- CLI ---
+
+function parseArgs(argv) {
+  const args = { runDir: null, region: null };
+  for (let i = 2; i < argv.length; i++) {
+    if (argv[i] === '--run-dir' && argv[i + 1]) {
+      args.runDir = argv[++i];
+    } else if (argv[i] === '--region' && argv[i + 1]) {
+      args.region = argv[++i];
+    } else if (argv[i] === '--help' || argv[i] === '-h') {
+      console.log('Usage: node scripts/enum/bedrock.js --run-dir <dir> --region <region>');
+      console.log('');
+      console.log('Options:');
+      console.log('  --run-dir   Path to the run output directory (required)');
+      console.log('  --region    AWS region to enumerate (required)');
+      console.log('  --help      Show this help message');
+      process.exit(0);
+    }
+  }
+  return args;
+}
+
+// --- Region availability check ---
+
+function isRegionNotAvailableError(err) {
+  const code = err.name || err.Code || '';
+  const message = (err.message || '').toLowerCase();
+  return (
+    code === 'UnrecognizedClientException' ||
+    code === 'InvalidClientTokenId' ||
+    code === 'EndpointNotFound' ||
+    code === 'UnknownEndpoint' ||
+    message.includes('not available in this region') ||
+    message.includes('service is not available') ||
+    message.includes('could not resolve endpoint') ||
+    message.includes('is not supported in region')
+  );
+}
+
+// --- Enumeration functions ---
+
+async function enumerateFoundationModels(client, logger) {
+  logger.log('api_call', 'ListFoundationModels', {});
+  const resp = await withRetry(() => client.send(new ListFoundationModelsCommand({})));
+  const models = resp.modelSummaries || [];
+  return models.map((m) => ({
+    resource_type: 'bedrock_model',
+    resource_id: m.modelId,
+    model_name: m.modelName || null,
+    provider: m.providerName || null,
+    model_arn: m.modelArn || null,
+    input_modalities: m.inputModalities || [],
+    output_modalities: m.outputModalities || [],
+    customizations_supported: m.customizationsSupported || [],
+    inference_types: m.inferenceTypesSupported || [],
+    findings: [],
+  }));
+}
+
+async function enumerateCustomModels(client, logger) {
+  logger.log('api_call', 'ListCustomModels', {});
+  const models = await paginate(client, ListCustomModelsCommand, 'modelSummaries', {});
+  return models.map((m) => ({
+    resource_type: 'bedrock_custom_model',
+    resource_id: m.modelName || m.modelArn,
+    model_name: m.modelName || null,
+    model_arn: m.modelArn || null,
+    base_model_arn: m.baseModelArn || null,
+    creation_time: m.creationTime || null,
+    findings: ['Custom model — training data exposure risk'],
+  }));
+}
+
+async function enumerateAgents(agentClient, logger) {
+  logger.log('api_call', 'ListAgents', {});
+  const agents = await paginate(agentClient, ListAgentsCommand, 'agentSummaries', {});
+  const findings = [];
+
+  for (const agent of agents) {
+    try {
+      logger.log('api_call', 'GetAgent', { agentId: agent.agentId });
+      const resp = await withRetry(() =>
+        agentClient.send(new GetAgentCommand({ agentId: agent.agentId }))
+      );
+      const detail = resp.agent || {};
+      findings.push({
+        resource_type: 'bedrock_agent',
+        resource_id: detail.agentName || agent.agentId,
+        agent_id: agent.agentId,
+        agent_arn: detail.agentArn || null,
+        status: detail.agentStatus || agent.agentStatus || null,
+        execution_role_arn: detail.agentResourceRoleArn || null,
+        foundation_model: detail.foundationModel || null,
+        description: detail.description || null,
+        created_at: detail.createdAt || null,
+        updated_at: detail.updatedAt || null,
+        findings: detail.agentResourceRoleArn
+          ? ['Agent execution role — IAM attack surface (often overpermissive)']
+          : [],
+      });
+    } catch (err) {
+      logger.log('warning', 'GetAgent', { agentId: agent.agentId, error: err.message });
+      findings.push({
+        resource_type: 'bedrock_agent',
+        resource_id: agent.agentId,
+        agent_id: agent.agentId,
+        status: agent.agentStatus || null,
+        execution_role_arn: null,
+        findings: [],
+      });
+    }
+  }
+
+  return findings;
+}
+
+async function enumerateKnowledgeBases(agentClient, logger) {
+  logger.log('api_call', 'ListKnowledgeBases', {});
+  const kbs = await paginate(agentClient, ListKnowledgeBasesCommand, 'knowledgeBaseSummaries', {});
+  const findings = [];
+
+  for (const kb of kbs) {
+    try {
+      logger.log('api_call', 'GetKnowledgeBase', { knowledgeBaseId: kb.knowledgeBaseId });
+      const resp = await withRetry(() =>
+        agentClient.send(new GetKnowledgeBaseCommand({ knowledgeBaseId: kb.knowledgeBaseId }))
+      );
+      const detail = resp.knowledgeBase || {};
+      const storageConfig = detail.storageConfiguration || {};
+      findings.push({
+        resource_type: 'bedrock_knowledge_base',
+        resource_id: detail.name || kb.knowledgeBaseId,
+        knowledge_base_id: kb.knowledgeBaseId,
+        knowledge_base_arn: detail.knowledgeBaseArn || null,
+        status: detail.status || kb.status || null,
+        role_arn: detail.roleArn || null,
+        storage_type: storageConfig.type || null,
+        storage_configuration: storageConfig,
+        description: detail.description || null,
+        created_at: detail.createdAt || null,
+        updated_at: detail.updatedAt || null,
+        findings: ['Knowledge base data source — data access mapping'],
+      });
+    } catch (err) {
+      logger.log('warning', 'GetKnowledgeBase', { knowledgeBaseId: kb.knowledgeBaseId, error: err.message });
+      findings.push({
+        resource_type: 'bedrock_knowledge_base',
+        resource_id: kb.knowledgeBaseId,
+        knowledge_base_id: kb.knowledgeBaseId,
+        status: kb.status || null,
+        findings: [],
+      });
+    }
+  }
+
+  return findings;
+}
+
+async function enumerateGuardrails(client, logger) {
+  logger.log('api_call', 'ListGuardrails', {});
+  const guardrails = await paginate(client, ListGuardrailsCommand, 'guardrails', {});
+  return guardrails.map((g) => ({
+    resource_type: 'bedrock_guardrail',
+    resource_id: g.name || g.id,
+    guardrail_id: g.id || null,
+    guardrail_arn: g.arn || null,
+    name: g.name || null,
+    status: g.status || null,
+    version: g.version || null,
+    created_at: g.createdAt || null,
+    updated_at: g.updatedAt || null,
+    findings: [],
+  }));
+}
+
+async function checkLoggingConfiguration(client, logger) {
+  logger.log('api_call', 'GetModelInvocationLoggingConfiguration', {});
+  const resp = await withRetry(() =>
+    client.send(new GetModelInvocationLoggingConfigurationCommand({}))
+  );
+  const config = resp.loggingConfig || null;
+  const loggingEnabled = !!(
+    config &&
+    (config.textDataDeliveryEnabled ||
+      config.imageDataDeliveryEnabled ||
+      config.embeddingDataDeliveryEnabled ||
+      config.cloudWatchConfig?.logGroupName ||
+      config.s3Config?.bucketName)
+  );
+
+  return {
+    logging_enabled: loggingEnabled,
+    logging_config: config,
+    finding: loggingEnabled
+      ? null
+      : 'Bedrock model invocation logging DISABLED — defense evasion vector (no evidence of queries)',
+  };
+}
+
+async function enumerateProvisionedThroughput(client, logger) {
+  logger.log('api_call', 'ListProvisionedModelThroughputs', {});
+  const throughputs = await paginate(
+    client,
+    ListProvisionedModelThroughputsCommand,
+    'provisionedModelSummaries',
+    {}
+  );
+  return throughputs.map((t) => ({
+    resource_id: t.provisionedModelName || t.provisionedModelArn,
+    provisioned_model_arn: t.provisionedModelArn || null,
+    model_arn: t.modelArn || null,
+    status: t.status || null,
+    commitment_duration: t.commitmentDuration || null,
+    commitment_expiration: t.commitmentExpirationTime || null,
+    created_at: t.creationTime || null,
+  }));
+}
+
+// --- Main ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/bedrock.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  const logger = createLogger(args.runDir);
+  logger.log('info', 'Bedrock_Enumeration_Start', { region: args.region });
+
+  const clientConfig = { region: args.region };
+  const bedrockClient = new BedrockClient(clientConfig);
+  const agentClient = new BedrockAgentClient(clientConfig);
+
+  let findings = [];
+  let status = 'complete';
+  const partialErrors = [];
+
+  try {
+    // Foundation models
+    try {
+      const models = await enumerateFoundationModels(bedrockClient, logger);
+      findings.push(...models);
+    } catch (err) {
+      if (isRegionNotAvailableError(err)) {
+        logger.log('info', 'Bedrock_NotAvailable', { region: args.region, error: err.message });
+        const envelope = createEnvelope({
+          module: 'bedrock',
+          account_id: 'unknown',
+          region: args.region,
+          status: 'complete',
+          findings: [],
+        });
+        writeEnvelope(args.runDir, envelope);
+        await logger.flush();
+        process.exit(0);
+      }
+      throw err;
+    }
+
+    // Custom models
+    try {
+      const customModels = await enumerateCustomModels(bedrockClient, logger);
+      findings.push(...customModels);
+    } catch (err) {
+      partialErrors.push({ resource: 'custom_models', error: err.message });
+      logger.log('warning', 'ListCustomModels', { error: err.message });
+    }
+
+    // Agents
+    try {
+      const agents = await enumerateAgents(agentClient, logger);
+      findings.push(...agents);
+    } catch (err) {
+      partialErrors.push({ resource: 'agents', error: err.message });
+      logger.log('warning', 'ListAgents', { error: err.message });
+    }
+
+    // Knowledge bases
+    try {
+      const kbs = await enumerateKnowledgeBases(agentClient, logger);
+      findings.push(...kbs);
+    } catch (err) {
+      partialErrors.push({ resource: 'knowledge_bases', error: err.message });
+      logger.log('warning', 'ListKnowledgeBases', { error: err.message });
+    }
+
+    // Guardrails
+    try {
+      const guardrails = await enumerateGuardrails(bedrockClient, logger);
+      findings.push(...guardrails);
+    } catch (err) {
+      partialErrors.push({ resource: 'guardrails', error: err.message });
+      logger.log('warning', 'ListGuardrails', { error: err.message });
+    }
+
+    // Logging configuration
+    try {
+      const loggingResult = await checkLoggingConfiguration(bedrockClient, logger);
+      if (loggingResult.finding) {
+        findings.push({
+          resource_type: 'bedrock_logging',
+          resource_id: 'invocation_logging',
+          logging_enabled: loggingResult.logging_enabled,
+          logging_config: loggingResult.logging_config,
+          findings: [loggingResult.finding],
+        });
+      }
+    } catch (err) {
+      partialErrors.push({ resource: 'logging_config', error: err.message });
+      logger.log('warning', 'GetModelInvocationLoggingConfiguration', { error: err.message });
+    }
+
+    // Provisioned throughput
+    try {
+      const throughputs = await enumerateProvisionedThroughput(bedrockClient, logger);
+      if (throughputs.length > 0) {
+        findings.push({
+          resource_type: 'bedrock_provisioned_throughput',
+          resource_id: 'provisioned_throughputs',
+          throughputs,
+          findings: [],
+        });
+      }
+    } catch (err) {
+      partialErrors.push({ resource: 'provisioned_throughput', error: err.message });
+      logger.log('warning', 'ListProvisionedModelThroughputs', { error: err.message });
+    }
+
+  } catch (err) {
+    if (isRegionNotAvailableError(err)) {
+      logger.log('info', 'Bedrock_NotAvailable', { region: args.region, error: err.message });
+      const envelope = createEnvelope({
+        module: 'bedrock',
+        account_id: 'unknown',
+        region: args.region,
+        status: 'complete',
+        findings: [],
+      });
+      writeEnvelope(args.runDir, envelope);
+      await logger.flush();
+      process.exit(0);
+    }
+    logger.log('error', 'Bedrock_Fatal', { error: err.message });
+    status = 'error';
+  }
+
+  if (partialErrors.length > 0 && status === 'complete') {
+    status = 'partial';
+  }
+
+  const envelope = createEnvelope({
+    module: 'bedrock',
+    account_id: 'unknown',
+    region: args.region,
+    status,
+    findings,
+  });
+
+  const outputPath = writeEnvelope(args.runDir, envelope);
+  logger.log('info', 'Bedrock_Enumeration_Complete', {
+    status,
+    findings_count: findings.length,
+    errors: partialErrors.length,
+    output: outputPath,
+  });
+
+  await logger.flush();
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error(`Fatal error: ${err.message}`);
+  process.exit(1);
+});
