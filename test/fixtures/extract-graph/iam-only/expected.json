@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {"id": "role:DeployRole", "label": "DeployRole", "type": "role", "_source": "api"},
+    {"id": "user:admin", "label": "admin", "type": "user", "_source": "api"}
+  ],
+  "edges": [
+    {"source": "role:BuildRole", "target": "role:DeployRole", "edge_type": "trust", "trust_type": "same-account", "severity": "low", "label": "can_assume", "_source": "api"}
+  ]
+}
