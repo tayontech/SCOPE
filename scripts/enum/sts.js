@@ -43,21 +43,16 @@ function derivePrincipalType(arn) {
   return 'unknown';
 }
 
-// --- Main ---
+// --- Run (DI-injectable) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir) {
-    usage();
-  }
+async function run(opts = {}) {
+  const { runDir } = opts;
+  const stsClient = opts.clients && opts.clients.sts ? opts.clients.sts : new STSClient({});
+  const orgsClient = opts.clients && opts.clients.organizations ? opts.clients.organizations : new OrganizationsClient({});
 
-  const runDir = args.runDir;
   const logger = createLogger(runDir);
   const findings = [];
   let status = 'complete';
-
-  // STS client — uses default credential chain
-  const stsClient = new STSClient({});
 
   // --- Step 1: GetCallerIdentity (fatal on failure) ---
   let identity;
@@ -68,7 +63,7 @@ async function main() {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
     console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw err;
   }
 
   const accountId = identity.Account;
@@ -89,7 +84,6 @@ async function main() {
   logger.log('info', 'CallerIdentity resolved', { account_id: accountId, arn: callerArn });
 
   // --- Step 2: Organizations discovery (best-effort) ---
-  const orgsClient = new OrganizationsClient({});
   let orgAccessible = false;
 
   try {
@@ -202,4 +196,26 @@ async function main() {
   console.log(`STS enumeration complete: ${outPath} (${findings.length} findings, status: ${status})`);
 }
 
-main();
+// --- Main (CLI entrypoint) ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir) {
+    usage();
+  }
+  try {
+    await run({ runDir: args.runDir });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  });
+}
+module.exports = { run };

@@ -626,21 +626,15 @@ async function enrichGroupMembers(client, groupFindings, logger) {
   }
 }
 
-// --- Main ---
+// --- Run (DI-injectable) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const { runDir, accountId } = opts;
+  const client = opts.clients && opts.clients.iam ? opts.clients.iam : new IAMClient({});
 
-  if (!args.runDir || !args.accountId) {
-    console.error('Error: --run-dir and --account-id are required');
-    console.error('Usage: node scripts/enum/iam.js --run-dir <dir> --account-id <id>');
-    process.exit(1);
-  }
+  const logger = createLogger(runDir);
+  logger.log('info', 'IAM_Enumeration_Start', { accountId });
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'IAM_Enumeration_Start', { accountId: args.accountId });
-
-  const client = new IAMClient({});
   let userFindings = [];
   let roleFindings = [];
   let groupFindings = [];
@@ -649,7 +643,7 @@ async function main() {
 
   // Attempt GAAD path first
   try {
-    const gaadResult = await enumerateViaGAAD(client, args.accountId, logger);
+    const gaadResult = await enumerateViaGAAD(client, accountId, logger);
     userFindings = gaadResult.userFindings;
     roleFindings = gaadResult.roleFindings;
     groupFindings = gaadResult.groupFindings;
@@ -661,7 +655,7 @@ async function main() {
     if (code === 'AccessDeniedException' || code === 'AccessDenied' || code === 'UnauthorizedAccess') {
       // Fallback to per-resource enumeration
       try {
-        const fallbackResult = await enumerateViaFallback(client, args.accountId, logger);
+        const fallbackResult = await enumerateViaFallback(client, accountId, logger);
         userFindings = fallbackResult.userFindings;
         roleFindings = fallbackResult.roleFindings;
         groupFindings = fallbackResult.groupFindings;
@@ -674,14 +668,14 @@ async function main() {
         status = 'error';
         const envelope = createEnvelope({
           module: 'iam',
-          account_id: args.accountId,
+          account_id: accountId,
           region: 'global',
           status: 'error',
           findings: [],
         });
-        writeEnvelope(args.runDir, envelope);
+        writeEnvelope(runDir, envelope);
         await logger.flush();
-        process.exit(1);
+        return;
       }
     } else {
       // Unexpected error
@@ -689,14 +683,14 @@ async function main() {
       status = 'error';
       const envelope = createEnvelope({
         module: 'iam',
-        account_id: args.accountId,
+        account_id: accountId,
         region: 'global',
         status: 'error',
         findings: [],
       });
-      writeEnvelope(args.runDir, envelope);
+      writeEnvelope(runDir, envelope);
       await logger.flush();
-      process.exit(1);
+      return;
     }
   }
 
@@ -721,13 +715,13 @@ async function main() {
   const findings = [...userFindings, ...roleFindings, ...groupFindings];
   const envelope = createEnvelope({
     module: 'iam',
-    account_id: args.accountId,
+    account_id: accountId,
     region: 'global',
     status,
     findings,
   });
 
-  const outputPath = writeEnvelope(args.runDir, envelope);
+  const outputPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'IAM_Enumeration_Complete', {
     status,
     users: userFindings.length,
@@ -738,10 +732,27 @@ async function main() {
   });
 
   await logger.flush();
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- Main (CLI entrypoint) ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.accountId) {
+    console.error('Error: --run-dir and --account-id are required');
+    console.error('Usage: node scripts/enum/iam.js --run-dir <dir> --account-id <id>');
+    process.exit(1);
+  }
+  try {
+    await run({ runDir: args.runDir, accountId: args.accountId });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+module.exports = { run };
