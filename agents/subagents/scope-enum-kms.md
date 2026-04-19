@@ -227,12 +227,12 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 
 ### Per-Resource Checks
 - Key rotation disabled: flag as finding (should rotate annually)
-- Key policy Principal:*: CRITICAL -- wildcard access to the key
-- Key policy cross-account principal: HIGH -- external account can use key
+- Key policy Principal:*: critical -- wildcard access to the key
+- Key policy cross-account principal: high -- external account can use key
 - Key policy kms:CreateGrant permission: flag -- enables grant chaining attack
 - Key in PendingDeletion state: flag -- scheduled deletion may break encrypted resources
-- Grant to external account grantee: HIGH -- grants bypass IAM policy
-- Grant with CreateGrant operation to non-admin principal: HIGH/CRITICAL -- enables grant abuse chain (CreateGrant -> self-grant Decrypt -> decrypt any encrypted data)
+- Grant to external account grantee: high -- grants bypass IAM policy
+- Grant with CreateGrant operation to non-admin principal: high/critical -- enables grant abuse chain (CreateGrant -> self-grant Decrypt -> decrypt any encrypted data)
 - Grants without EncryptionContext constraints: flag as broadly applicable
 - Encryption dependencies: which services/resources depend on each key (Secrets Manager, EBS, S3, RDS, Lambda env, CloudWatch Logs)
 
@@ -282,37 +282,6 @@ TOTAL_FINDINGS=$(echo "$ALL_FINDINGS" | jq 'length' 2>/dev/null || echo "0")
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/kms.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "kms" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/kms.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-kms" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/kms.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only):**
 ```
 STATUS: complete|partial|error
@@ -323,20 +292,13 @@ REGIONS_WITH_FINDINGS: [us-east-1, eu-west-1] (list only regions where customer-
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
-After writing `$RUN_DIR/kms.json`, validate output against the per-service schema:
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/kms.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] kms.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="kms"
+OUTPUT_FILE="$RUN_DIR/kms.json"
+AGENT_NAME="scope-enum-kms"
+REGION="multi-region"
 ```
-
-Do NOT report STATUS: complete if any validation step fails.
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

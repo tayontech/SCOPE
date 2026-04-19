@@ -113,16 +113,16 @@ FINDINGS_JSON=$(echo "[]" | jq \
 - Cross-account roles: roles whose AssumeRolePolicyDocument contains external principals
 
 ### Per-Resource Checks
-- Root caller: flag as CRITICAL if GetCallerIdentity returns `:root` ARN
-- Wildcard trust (Principal: "*"): CRITICAL finding
+- Root caller: flag as critical if GetCallerIdentity returns `:root` ARN
+- Wildcard trust (Principal: "*"): critical finding
 - Cross-account trust without ExternalId condition: flag; use accounts.json to classify internal vs external
-- Broad account root trust (Principal: arn:aws:iam::ACCOUNT:root): HIGH if external account
+- Broad account root trust (Principal: arn:aws:iam::ACCOUNT:root): high if external account
 - SCPs with broad Deny statements: note which actions are blocked at the org level
 - SCP coverage gaps: accounts or OUs not covered by any restrictive SCP
 
 ### Graph Data
 - Nodes: external account nodes (external:<id>), owned=true/false from accounts.json
-- Edges: cross-account trust (source: ext node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
+- Edges: cross-account trust (source: external node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
 - Source node type for caller: match actual caller type — user:<name>, role:<role-name>, user:root — do not hardcode
 
 ## Execution Workflow
@@ -136,36 +136,6 @@ FINDINGS_JSON=$(echo "[]" | jq \
 
 ## Output Contract
 
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "sts" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "global" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/sts.json"
-```
-
-Append to agent log:
-```bash
-jq -n \
-  --arg agent "scope-enum-sts" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/sts.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 Return to orchestrator (minimal summary only):
 ```
 STATUS: complete|partial|error
@@ -174,20 +144,13 @@ METRICS: {session_tokens: N, assumed_roles: N, findings: N}
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
-After writing `$RUN_DIR/sts.json`, validate output against the per-service schema:
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/sts.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] sts.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-  # Re-patch status in the already-written file to keep disk and return in sync
-  jq --arg status "$STATUS" '.status = $status' "$RUN_DIR/sts.json" > "$RUN_DIR/sts.json.tmp" && mv "$RUN_DIR/sts.json.tmp" "$RUN_DIR/sts.json"
-fi
+MODULE="sts"
+OUTPUT_FILE="$RUN_DIR/sts.json"
+AGENT_NAME="scope-enum-sts"
+REGION="global"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 - AccessDenied on specific API calls: produce empty array for that resource type (valid schema-compliant output), log, continue with available data
