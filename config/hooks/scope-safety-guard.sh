@@ -43,7 +43,7 @@ if [ -n "$PATHS" ]; then
   ALLOWED_PREFIXES=('./audit/' './exploit/' './hunt/' './data/' './engagements/')
 
   # Internal project directories (never block — not operator-provided)
-  INTERNAL_PREFIXES=('./config/' './bin/' './agents/' './dashboard/' './test/' './node_modules/' './.planning/' './.claude/' './.git/' './.codex/' './.gemini/')
+  INTERNAL_PREFIXES=('./config/' './bin/' './agents/' './dashboard/' './test/' './node_modules/' './.planning/' './.claude/' './.git/' './.codex/' './.gemini/' './scripts/')
 
   while IFS= read -r p; do
     [ -z "$p" ] && continue
