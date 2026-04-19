@@ -34,15 +34,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function usage() {
-  console.error('Usage: node scripts/enum/dynamodb.js --run-dir <dir> --region <region>');
-  console.error('');
-  console.error('Options:');
-  console.error('  --run-dir  Path to the run output directory (required)');
-  console.error('  --region   AWS region to enumerate (required)');
-  process.exit(1);
-}
-
 // --- Pagination for ListTables (uses ExclusiveStartTableName, not NextToken) ---
 
 async function listAllTables(client, logger) {
@@ -135,28 +126,24 @@ async function getResourcePolicy(client, tableArn, logger) {
   }
 }
 
-// --- Main ---
+// --- Run (exported for testing) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir || !args.region) {
-    usage();
-  }
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  const region = args.region;
-  const runDir = args.runDir;
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir);
   let status = 'complete';
   const partialErrors = [];
 
   // Get account ID
-  const stsClient = new STSClient({ region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
   logger.log('api_call', 'GetCallerIdentity', {});
   const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
   const accountId = identity.Account;
 
   // DynamoDB client
-  const client = new DynamoDBClient({ region });
+  const client = opts.clients?.dynamodb ?? new DynamoDBClient({ region });
 
   // List all tables
   const tableNames = await listAllTables(client, logger);
@@ -218,6 +205,7 @@ async function main() {
         continuous_backups_status: backupInfo ? backupInfo.continuous_backups_status : null,
         backup_count: backupCount,
         resource_policy: resourcePolicy,
+        findings: [],
       });
     } catch (err) {
       partialErrors.push({ table: tableName, error: err.message });
@@ -246,10 +234,32 @@ async function main() {
   });
 
   await logger.flush();
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.region) {
+    console.error('Usage: node scripts/enum/dynamodb.js --run-dir <dir> --region <region>');
+    console.error('');
+    console.error('Options:');
+    console.error('  --run-dir  Path to the run output directory (required)');
+    console.error('  --region   AWS region to enumerate (required)');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

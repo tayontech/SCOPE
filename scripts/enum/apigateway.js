@@ -281,22 +281,17 @@ async function enumerateV2Apis(client, region, logger) {
   return { findings, errors };
 }
 
-// --- Main ---
+// --- Run (exported for testing) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/apigateway.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
-
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'APIGateway_Enumeration_Start', { region: args.region });
+  const logger = opts.logger || createLogger(runDir);
+  logger.log('info', 'APIGateway_Enumeration_Start', { region });
 
   // Get account ID via STS
-  const stsClient = new STSClient({ region: args.region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -304,17 +299,16 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
 
   // Enumerate REST APIs (APIGatewayClient)
-  const restClient = new APIGatewayClient({ region: args.region });
-  const restResult = await enumerateRestApis(restClient, args.region, logger);
+  const restClient = opts.clients?.apigateway ?? new APIGatewayClient({ region });
+  const restResult = await enumerateRestApis(restClient, region, logger);
 
   // Enumerate HTTP/WebSocket APIs (ApiGatewayV2Client)
-  const v2Client = new ApiGatewayV2Client({ region: args.region });
-  const v2Result = await enumerateV2Apis(v2Client, args.region, logger);
+  const v2Client = opts.clients?.apigatewayV2 ?? new ApiGatewayV2Client({ region });
+  const v2Result = await enumerateV2Apis(v2Client, region, logger);
 
   // Combine results
   const findings = [...restResult.findings, ...v2Result.findings];
@@ -324,12 +318,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'apigateway',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'APIGateway_Enumeration_Complete', {
     status,
     rest_apis: restResult.findings.length,
@@ -342,7 +336,28 @@ async function main() {
   console.log(`API Gateway enumeration complete: ${outPath} (${restResult.findings.length} REST + ${v2Result.findings.length} HTTP/WS APIs, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/apigateway.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

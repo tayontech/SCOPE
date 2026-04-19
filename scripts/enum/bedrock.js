@@ -237,23 +237,17 @@ async function enumerateProvisionedThroughput(client, logger) {
   }));
 }
 
-// --- Main ---
+// --- Run (exported for testing) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/bedrock.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
+  const logger = opts.logger || createLogger(runDir);
+  logger.log('info', 'Bedrock_Enumeration_Start', { region });
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'Bedrock_Enumeration_Start', { region: args.region });
-
-  const clientConfig = { region: args.region };
-  const bedrockClient = new BedrockClient(clientConfig);
-  const agentClient = new BedrockAgentClient(clientConfig);
+  const bedrockClient = opts.clients?.bedrock ?? new BedrockClient({ region });
+  const agentClient = opts.clients?.bedrockAgent ?? new BedrockAgentClient({ region });
 
   let findings = [];
   let status = 'complete';
@@ -266,17 +260,17 @@ async function main() {
       findings.push(...models);
     } catch (err) {
       if (isRegionNotAvailableError(err)) {
-        logger.log('info', 'Bedrock_NotAvailable', { region: args.region, error: err.message });
+        logger.log('info', 'Bedrock_NotAvailable', { region, error: err.message });
         const envelope = createEnvelope({
           module: 'bedrock',
           account_id: 'unknown',
-          region: args.region,
+          region,
           status: 'complete',
           findings: [],
         });
-        writeEnvelope(args.runDir, envelope);
+        writeEnvelope(runDir, envelope);
         await logger.flush();
-        process.exit(0);
+        return;
       }
       throw err;
     }
@@ -341,6 +335,7 @@ async function main() {
         findings.push({
           resource_type: 'bedrock_provisioned_throughput',
           resource_id: 'provisioned_throughputs',
+          provisioned_model_arn: null,
           throughputs,
           findings: [],
         });
@@ -352,17 +347,17 @@ async function main() {
 
   } catch (err) {
     if (isRegionNotAvailableError(err)) {
-      logger.log('info', 'Bedrock_NotAvailable', { region: args.region, error: err.message });
+      logger.log('info', 'Bedrock_NotAvailable', { region, error: err.message });
       const envelope = createEnvelope({
         module: 'bedrock',
         account_id: 'unknown',
-        region: args.region,
+        region,
         status: 'complete',
         findings: [],
       });
-      writeEnvelope(args.runDir, envelope);
+      writeEnvelope(runDir, envelope);
       await logger.flush();
-      process.exit(0);
+      return;
     }
     logger.log('error', 'Bedrock_Fatal', { error: err.message });
     status = 'error';
@@ -375,12 +370,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'bedrock',
     account_id: 'unknown',
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outputPath = writeEnvelope(args.runDir, envelope);
+  const outputPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'Bedrock_Enumeration_Complete', {
     status,
     findings_count: findings.length,
@@ -389,10 +384,30 @@ async function main() {
   });
 
   await logger.flush();
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/bedrock.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

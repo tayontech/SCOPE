@@ -78,6 +78,7 @@ async function enumerateIdentityPools(client, region, logger) {
       findings.push({
         resource_type: 'cognito_identity_pool',
         resource_id: detail.IdentityPoolName || pool.IdentityPoolId,
+        arn: `arn:aws:cognito-identity:${region}:unknown:identitypool/${pool.IdentityPoolId}`,
         pool_id: pool.IdentityPoolId,
         pool_name: detail.IdentityPoolName || null,
         region,
@@ -99,6 +100,7 @@ async function enumerateIdentityPools(client, region, logger) {
       findings.push({
         resource_type: 'cognito_identity_pool',
         resource_id: pool.IdentityPoolId,
+        arn: `arn:aws:cognito-identity:${region}:unknown:identitypool/${pool.IdentityPoolId}`,
         pool_id: pool.IdentityPoolId,
         pool_name: pool.IdentityPoolName || null,
         region,
@@ -157,9 +159,9 @@ async function enumerateUserPools(providerClient, region, logger) {
       userPoolFindings.push({
         resource_type: 'cognito_user_pool',
         resource_id: detail.Name || pool.Id,
+        arn: detail.Arn || `arn:aws:cognito-idp:${region}:unknown:userpool/${pool.Id}`,
         pool_id: pool.Id,
         pool_name: detail.Name || null,
-        arn: detail.Arn || null,
         region,
         self_registration_enabled: selfRegistrationEnabled,
         mfa_configuration: mfaConfig,
@@ -180,7 +182,7 @@ async function enumerateUserPools(providerClient, region, logger) {
 
       // Enumerate clients for this user pool
       try {
-        const clients = await enumerateUserPoolClients(providerClient, pool.Id, logger);
+        const clients = await enumerateUserPoolClients(providerClient, pool.Id, region, logger);
         clientFindings.push(...clients);
       } catch (err) {
         logger.log('warning', 'UserPoolClients', { userPoolId: pool.Id, error: err.message });
@@ -191,6 +193,7 @@ async function enumerateUserPools(providerClient, region, logger) {
       userPoolFindings.push({
         resource_type: 'cognito_user_pool',
         resource_id: pool.Id,
+        arn: `arn:aws:cognito-idp:${region}:unknown:userpool/${pool.Id}`,
         pool_id: pool.Id,
         pool_name: pool.Name || null,
         region,
@@ -204,7 +207,7 @@ async function enumerateUserPools(providerClient, region, logger) {
 
 // --- User Pool Clients ---
 
-async function enumerateUserPoolClients(providerClient, userPoolId, logger) {
+async function enumerateUserPoolClients(providerClient, userPoolId, region, logger) {
   logger.log('api_call', 'ListUserPoolClients', { userPoolId });
 
   const clients = [];
@@ -239,9 +242,11 @@ async function enumerateUserPoolClients(providerClient, userPoolId, logger) {
       findings.push({
         resource_type: 'cognito_user_pool_client',
         resource_id: detail.ClientName || c.ClientId,
+        arn: `arn:aws:cognito-idp:${region}:unknown:userpool/${userPoolId}/client/${c.ClientId}`,
         client_id: c.ClientId,
         client_name: detail.ClientName || null,
         user_pool_id: userPoolId,
+        region,
         allowed_oauth_flows: oauthFlows,
         allowed_oauth_flows_user_pool_client: detail.AllowedOAuthFlowsUserPoolClient || false,
         allowed_oauth_scopes: detail.AllowedOAuthScopes || [],
@@ -261,8 +266,10 @@ async function enumerateUserPoolClients(providerClient, userPoolId, logger) {
       findings.push({
         resource_type: 'cognito_user_pool_client',
         resource_id: c.ClientId,
+        arn: `arn:aws:cognito-idp:${region}:unknown:userpool/${userPoolId}/client/${c.ClientId}`,
         client_id: c.ClientId,
         user_pool_id: userPoolId,
+        region,
         findings: [],
       });
     }
@@ -271,23 +278,17 @@ async function enumerateUserPoolClients(providerClient, userPoolId, logger) {
   return findings;
 }
 
-// --- Main ---
+// --- Run (exported for testing) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/cognito.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
+  const logger = opts.logger || createLogger(runDir);
+  logger.log('info', 'Cognito_Enumeration_Start', { region });
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'Cognito_Enumeration_Start', { region: args.region });
-
-  const clientConfig = { region: args.region };
-  const identityClient = new CognitoIdentityClient(clientConfig);
-  const providerClient = new CognitoIdentityProviderClient(clientConfig);
+  const identityClient = opts.clients?.cognitoIdentity ?? new CognitoIdentityClient({ region });
+  const providerClient = opts.clients?.cognitoIdp ?? new CognitoIdentityProviderClient({ region });
 
   let findings = [];
   let status = 'complete';
@@ -295,7 +296,7 @@ async function main() {
 
   // Identity pools
   try {
-    const identityPoolFindings = await enumerateIdentityPools(identityClient, args.region, logger);
+    const identityPoolFindings = await enumerateIdentityPools(identityClient, region, logger);
     findings.push(...identityPoolFindings);
   } catch (err) {
     partialErrors.push({ resource: 'identity_pools', error: err.message });
@@ -306,7 +307,7 @@ async function main() {
   try {
     const { userPoolFindings, clientFindings } = await enumerateUserPools(
       providerClient,
-      args.region,
+      region,
       logger
     );
     findings.push(...userPoolFindings);
@@ -323,12 +324,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'cognito',
     account_id: 'unknown',
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outputPath = writeEnvelope(args.runDir, envelope);
+  const outputPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'Cognito_Enumeration_Complete', {
     status,
     findings_count: findings.length,
@@ -337,10 +338,30 @@ async function main() {
   });
 
   await logger.flush();
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/cognito.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

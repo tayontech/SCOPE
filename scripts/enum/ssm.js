@@ -31,15 +31,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function usage() {
-  console.error('Usage: node scripts/enum/ssm.js --run-dir <dir> --region <region>');
-  console.error('');
-  console.error('Options:');
-  console.error('  --run-dir  Path to the run output directory (required)');
-  console.error('  --region   AWS region to enumerate (required)');
-  process.exit(1);
-}
-
 // --- Resource policy (per-parameter) ---
 
 async function getResourcePolicy(client, parameterName, logger) {
@@ -68,28 +59,24 @@ async function getResourcePolicy(client, parameterName, logger) {
   }
 }
 
-// --- Main ---
+// --- Run (exported for testing) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir || !args.region) {
-    usage();
-  }
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  const region = args.region;
-  const runDir = args.runDir;
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir);
   let status = 'complete';
   const partialErrors = [];
 
   // Get account ID
-  const stsClient = new STSClient({ region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
   logger.log('api_call', 'GetCallerIdentity', {});
   const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
   const accountId = identity.Account;
 
   // SSM client
-  const client = new SSMClient({ region });
+  const client = opts.clients?.ssm ?? new SSMClient({ region });
 
   // DescribeParameters — paginated (metadata only, NEVER reads values)
   logger.log('api_call', 'DescribeParameters', { note: 'metadata only — no value access' });
@@ -128,6 +115,7 @@ async function main() {
         version: param.Version || null,
         has_resource_policy: resourcePolicy !== null,
         resource_policy: resourcePolicy,
+        findings: [],
       });
     } catch (err) {
       partialErrors.push({ parameter: param.Name, error: err.message });
@@ -157,10 +145,32 @@ async function main() {
   });
 
   await logger.flush();
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.region) {
+    console.error('Usage: node scripts/enum/ssm.js --run-dir <dir> --region <region>');
+    console.error('');
+    console.error('Options:');
+    console.error('  --run-dir  Path to the run output directory (required)');
+    console.error('  --region   AWS region to enumerate (required)');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };
