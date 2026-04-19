@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-19T12:34:52.000Z"
-last_activity: "2026-04-19 — Completed 60-02: wired ESC_CAT, PERSIST_CAT, POSTEX_CAT into scope-exploit.md; removed inline catalogue entries (-138 lines/-12K chars)"
+last_updated: "2026-04-19T13:38:00.000Z"
+last_activity: "2026-04-19 — Completed 61-02: replaced Phase A jq pipelines with extract-graph.js invocation; added 9 PIPELINE_ERROR guards across normalizers"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 8
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 60 — COMPLETE
-Plan: 60-02 complete (2/2 plans for Phase 60)
-Status: Phase 60 complete — ready for Phase 61 (Graph Extraction & Pipeline Guards)
-Last activity: 2026-04-19 — Completed 60-02: wired ESC_CAT, PERSIST_CAT, POSTEX_CAT into scope-exploit.md; removed inline catalogue entries (-138 lines/-12K chars)
+Phase: 61 — IN PROGRESS
+Plan: 61-02 complete (plan 61-01 pending)
+Status: Phase 61 in progress — 61-02 complete, 61-01 pending
+Last activity: 2026-04-19 — Completed 61-02: replaced Phase A jq pipelines with extract-graph.js invocation; added 9 PIPELINE_ERROR guards across normalizers
 
 ## Phase Index
 
@@ -29,7 +29,7 @@ Last activity: 2026-04-19 — Completed 60-02: wired ESC_CAT, PERSIST_CAT, POSTE
 | 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | Complete (2026-04-19) |
 | 59 | scope-defend Intake Consolidation | PROM-04 | Complete (2026-04-19) |
 | 60 | Runtime Reference Loading | PROM-06 | Complete (2026-04-19) |
-| 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | Pending |
+| 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | In Progress (61-02 complete) |
 | 62 | Input Safety — Path Sanitization & Credential Isolation | DET-03, DET-04 | Pending |
 | 63 | IAM Simulator Wrapper | SIM-01 | Pending |
 | 64 | IAM Simulator Integration — Exploit & Attack Paths | SIM-02, SIM-03, SIM-04 | Pending |
