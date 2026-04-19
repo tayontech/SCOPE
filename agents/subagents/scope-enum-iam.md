@@ -699,36 +699,8 @@ jq -s 'add | sort_by(.arn)' \
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/iam.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "iam" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "global" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --slurpfile findings "$RUN_DIR/raw/iam_all_findings.json" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings[0]
-  }' > "$RUN_DIR/iam.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-iam" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/iam.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
+**Note:** IAM uses `--slurpfile` for findings (large combined file from GAAD+fallback path).
+`FINDINGS_JSON` is loaded from the combined temp file before the shared write step runs.
 
 **Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
@@ -738,16 +710,14 @@ METRICS: {users: N, roles: N, groups: N, policies: N, findings: N}
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/iam.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] iam.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="iam"
+OUTPUT_FILE="$RUN_DIR/iam.json"
+AGENT_NAME="scope-enum-iam"
+REGION="global"
+FINDINGS_JSON=$(jq -c '.' "$RUN_DIR/raw/iam_all_findings.json")
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

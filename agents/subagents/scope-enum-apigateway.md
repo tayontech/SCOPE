@@ -275,9 +275,9 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 - Lambda integrations per API: identify which Lambda functions each API invokes (integration type `LAMBDA` or `AWS_PROXY`)
 
 ### Per-Resource Checks
-- Flag REST APIs with no authorizer on any method -- CRITICAL (unauthenticated public invocation)
-- Flag HTTP/WebSocket APIs with no authorizer -- CRITICAL
-- Flag APIs with resource policy containing `Principal: "*"` without IP conditions -- HIGH
+- Flag REST APIs with no authorizer on any method -- critical (unauthenticated public invocation)
+- Flag HTTP/WebSocket APIs with no authorizer -- critical
+- Flag APIs with resource policy containing `Principal: "*"` without IP conditions -- high
 - Flag stages with logging disabled (`executionLoggingEnabled: false`) -- blind spot for CloudTrail-based detection
 - Flag stages with no throttling configured (`throttlingBurstLimit` and `throttlingRateLimit` absent) -- DoS amplification risk
 - Note Lambda integrations: API Gateway -> Lambda function (code execution path for unauthenticated callers if no authorizer)
@@ -299,37 +299,6 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/apigateway.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "apigateway" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/apigateway.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-apigateway" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/apigateway.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only -- do NOT return raw data):**
 ```
 STATUS: complete|partial|error
@@ -340,18 +309,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where APIs were found, or 
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/apigateway.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] apigateway.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-  # Re-patch status in the already-written file to keep disk and return in sync
-  jq --arg status "$STATUS" '.status = $status' "$RUN_DIR/apigateway.json" > "$RUN_DIR/apigateway.json.tmp" && mv "$RUN_DIR/apigateway.json.tmp" "$RUN_DIR/apigateway.json"
-fi
+MODULE="apigateway"
+OUTPUT_FILE="$RUN_DIR/apigateway.json"
+AGENT_NAME="scope-enum-apigateway"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

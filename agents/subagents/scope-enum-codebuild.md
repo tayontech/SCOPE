@@ -1,6 +1,6 @@
 ---
 name: scope-enum-codebuild
-description: "CodeBuild enumeration subagent — project discovery, service role analysis, source credential inventory, and environment variable secret pattern detection. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/codebuild.json. CRITICAL: Never outputs environment variable values."
+description: "CodeBuild enumeration subagent — project discovery, service role analysis, source credential inventory, and environment variable secret pattern detection. Dispatched by scope-audit orchestrator. Returns minimal summary; writes full data to $RUN_DIR/codebuild.json. critical: Never outputs environment variable values."
 tools: Bash, Read, Glob, Grep
 model: claude-haiku-4-5
 maxTurns: 25
@@ -134,8 +134,8 @@ TOTAL_FINDINGS=$(echo "$FINDINGS_JSON" | jq 'length')
 - Build history: `list-builds-for-project` (last 5 builds per project — indicates active use)
 
 ### Per-Resource Checks
-- Flag projects where service role has admin permissions or `iam:PassRole` — HIGH (Method 15 target: attacker can start build with this role; also UpdateProject attack if attacker has `codebuild:UpdateProject` permission)
-- Flag projects with environment variables whose NAMES match secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) — HIGH; never output values
+- Flag projects where service role has admin permissions or `iam:PassRole` — high (Method 15 target: attacker can start build with this role; also UpdateProject attack if attacker has `codebuild:UpdateProject` permission)
+- Flag projects with environment variables whose NAMES match secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) — high; never output values
 - Flag projects with source type `NO_SOURCE` (can run arbitrary code without source repo check)
 - Flag projects with VPC configuration (can reach internal network resources)
 - Flag projects with no VPC configuration AND admin service role (arbitrary internet + admin permissions)
@@ -157,37 +157,6 @@ TOTAL_FINDINGS=$(echo "$FINDINGS_JSON" | jq 'length')
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/codebuild.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "codebuild" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/codebuild.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-codebuild" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/codebuild.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
 STATUS: complete|partial|error
@@ -198,16 +167,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where projects were found,
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/codebuild.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] codebuild.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="codebuild"
+OUTPUT_FILE="$RUN_DIR/codebuild.json"
+AGENT_NAME="scope-enum-codebuild"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 
@@ -219,7 +185,7 @@ fi
 
 ## Module Constraints
 
-**CRITICAL — Do NOT perform any of the following operations:**
+**critical — Do NOT perform any of the following operations:**
 - Do NOT output environment variable VALUES — flag the existence and name of variables matching secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) but NEVER include their values in findings
 - Do NOT start builds or modify project configurations
 - Do NOT retrieve or display source credentials (OAuth tokens, PATs) — `list-source-credentials` returns credential metadata only; never call `get-source-credential`
