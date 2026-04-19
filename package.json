@@ -17,6 +17,8 @@
     "@aws-sdk/client-dynamodb": "3.1032.0",
     "@aws-sdk/client-ec2": "3.1032.0",
     "@aws-sdk/client-ecs": "3.1032.0",
+    "@aws-sdk/client-elastic-load-balancing": "3.1032.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "3.1032.0",
     "@aws-sdk/client-iam": "3.1032.0",
     "@aws-sdk/client-kms": "3.1032.0",
     "@aws-sdk/client-lambda": "3.1032.0",
