@@ -10,7 +10,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
 agents/scope-defend.md      Defensive controls generation (model: claude-sonnet-4-6) — dispatched by orchestrator or invoked via /scope:defend
 agents/scope-exploit.md     Privilege escalation playbooks (slash command)
-agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (slash command, memory: local)
+agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (slash command)
 ```
 
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
@@ -28,9 +28,9 @@ agents/subagents/scope-enum-sns.md         SNS enumeration (model: claude-haiku-
 agents/subagents/scope-enum-sqs.md         SQS enumeration (model: claude-haiku-4-5)
 agents/subagents/scope-enum-apigateway.md  API Gateway enumeration (model: claude-haiku-4-5)
 agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert parsing, investigation_context, HYPO-01 (model: claude-haiku-4-5)
-agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses (model: claude-haiku-4-5)
-agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths (model: claude-haiku-4-5)
+agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert parsing, investigation_context, HYPO-01 (model: claude-sonnet-4-6)
+agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses (model: claude-sonnet-4-6)
+agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths (model: claude-sonnet-4-6)
 agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON (model: claude-sonnet-4-6)
 agents/subagents/scope-verify.md           Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
 agents/subagents/scope-pipeline.md         Post-processing middleware — data normalization then evidence indexing (read inline)
@@ -44,19 +44,13 @@ agents/subagents/scope-pipeline.md         Post-processing middleware — data n
 > **Do not run SCOPE audit sessions with `--model haiku`.**
 > If subagents appear to use the wrong model, check the installed `.claude/agents/*.md` file model field as a first diagnostic step.
 
-> **WARNING -- Subagent Memory Restriction:**
-> `memory:` is permitted ONLY on `scope-hunt.md`. Do NOT add `memory:` to:
-> - Any `scope-enum-*.md` file (12 enum subagents)
-> - `scope-attack-paths.md`
-> - `scope-defend.md` (unless a future phase explicitly evaluates it)
-> - `scope-hunt-investigate.md`
-> - `scope-hunt-intel.md`
-> - `scope-hunt-audit.md`
-> **Cross-account contamination risk:** Enum subagents and attack-paths enumerate AWS
-> resource identifiers (ARNs, account IDs, role names, key IDs, bucket names) by design.
-> If these subagents wrote to MEMORY.md, resource identifiers from one engagement would
-> persist into future sessions on different AWS accounts, creating false context and
-> potential information disclosure across customer boundaries.
+> **WARNING -- No Agent Memory:**
+> `memory:` is NOT permitted on any SCOPE agent. Do NOT add `memory:` to any agent or subagent file.
+> **Cross-account contamination risk:** Agents enumerate AWS resource identifiers (ARNs, account IDs,
+> role names, key IDs, bucket names) by design. If any agent wrote to MEMORY.md, resource identifiers
+> from one engagement would persist into future sessions on different AWS accounts, creating false
+> context and potential information disclosure across customer boundaries.
+> A dedicated memory milestone will design proper multi-environment isolation before enabling memory.
 
 ## Architecture
 
@@ -161,21 +155,10 @@ All other agents share data through the agent-logs/data layer.
 
 All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.
 
-## Memory Hygiene
+## Memory
 
-scope-hunt uses `memory: local` to accumulate Splunk query patterns across sessions. Memory is stored in `.claude/agent-memory-local/scope-hunt/` (project-local, covered by `.gitignore` via the `.claude/` entry).
+No SCOPE agent uses `memory:`. Agent memory is deferred to a future milestone that will design proper multi-environment isolation.
 
-**Post-run ARN contamination check:**
-```bash
-# Run after any scope-hunt session to verify no ARNs leaked into memory
-grep -r "arn:aws:" \
-  "$HOME/.claude/agent-memory/" \
-  "$(pwd)/.claude/agent-memory-local/" \
-  2>/dev/null \
-  && echo "WARNING: ARN found in agent memory — review and remove" \
-  || echo "OK: No ARN patterns found in agent memory"
-```
+**Intel mode (threat intel URL / natural language):** IOCs and extracted identifiers (IPs, ARNs, account IDs, hashes) are session-scoped — written to `context.json` (if the learning pipeline is implemented), not persisted across sessions. Threat intel from one engagement must not persist into future sessions.
 
-**Intel mode (threat intel URL / natural language):** IOCs and extracted identifiers (IPs, ARNs, account IDs, hashes) are session-scoped — written to `context.json`, not MEMORY.md. The same cross-account contamination risk applies: threat intel from one engagement must not persist into future sessions.
-
-**gitignore coverage:** `.claude/` is already in `.gitignore`, which covers `.claude/agent-memory-local/scope-hunt/`. The user-global path `~/.claude/agent-memory/` is not used by SCOPE (memory scope is `local`, not `user`). If operators ever change to `memory: user`, they must verify `~/.gitignore` separately.
+**context.json:** `./hunt/context.json` is an operator-managed environment knowledge file that scope-hunt reads at startup. It is currently read-only — no agent writes to it. Future learning pipeline milestone will add analyst-reviewed writes.

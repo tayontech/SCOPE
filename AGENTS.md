@@ -38,7 +38,7 @@ agents/subagents/scope-pipeline.md         Post-processing middleware -- data no
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
 | Enum subagents | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
-| Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack-paths, defend, hunt intake) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 ## Architecture
 

@@ -129,8 +129,9 @@ SCOPE has two types of agents:
 - 12 enum agents — lightweight enumeration
 - `scope-attack-paths` — security reasoning over combined findings
 - `scope-defend` — defensive controls generation
+- `scope-hunt-investigate`, `scope-hunt-intel`, `scope-hunt-audit` — hunt mode intake and hypothesis generation
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Exploit and hunt always use whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
 ### Model Routing
 
@@ -139,9 +140,9 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
 | Enum subagents (12) | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
-| Attack paths, defend | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack-paths, defend, hunt intake) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
-Skills (audit, exploit, hunt) are not in this table — they inherit your session model.
+Skills (audit, exploit) are not in this table — they inherit your session model. Hunt dispatches reasoning-tier subagents for intake, then runs on the session model for Splunk execution.
 
 ## Documentation
 

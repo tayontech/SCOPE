@@ -200,7 +200,13 @@ const SUBAGENT_MODELS = {
   },
 };
 
-const REASONING_AGENTS = new Set(['scope-attack-paths', 'scope-defend']);
+const REASONING_AGENTS = new Set([
+  'scope-attack-paths',
+  'scope-defend',
+  'scope-hunt-investigate',
+  'scope-hunt-intel',
+  'scope-hunt-audit',
+]);
 
 function getModelForAgent(agentName, editor) {
   const tier = REASONING_AGENTS.has(agentName) ? 'reasoning' : 'enum';

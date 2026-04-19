@@ -1,7 +1,7 @@
 ---
 name: scope-hunt-investigate
 description: Investigation mode intake for scope-hunt. Parses alert input (metadata, notable ID, natural language, Splunk queue), builds investigation_context, and generates HYPO-01 hypothesis. Dispatched by scope-hunt parent when MODE=INVESTIGATION. Returns structured handoff to parent.
-model: claude-haiku-4-5
+model: claude-sonnet-4-6
 tools: Read, Bash
 ---
 

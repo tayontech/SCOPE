@@ -1,7 +1,7 @@
 ---
 name: scope-hunt-audit
 description: Hunt mode intake for scope-hunt. Reads a SCOPE audit or exploit run directory, validates results.json, surfaces attack paths and principals, and generates HYPO-02 (audit) or HYPO-03 (exploit) hypotheses. Dispatched by scope-hunt parent when MODE=HUNT. Returns structured handoff to parent.
-model: claude-haiku-4-5
+model: claude-sonnet-4-6
 tools: Read, Bash, Glob
 ---
 
@@ -240,7 +240,7 @@ ACTIVE HYPOTHESIS: [hypothesis name]
 
 Set `investigation_mode` to "single".
 
-**On selection A (all):** Set `investigation_mode` to "all". Include all hypotheses in `all_hypotheses`. State:
+**On selection A (all):** Set `investigation_mode` to "all". Set `selected_hypothesis` to the first hypothesis. Include all hypotheses in `all_hypotheses`. State:
 
 ```
 Investigating all [N] hypotheses sequentially. After completing each hypothesis investigation, I will prompt before proceeding to the next.

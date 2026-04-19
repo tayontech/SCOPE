@@ -18,13 +18,14 @@ fi
 ERRORS=()
 
 # --- Check for recent audit runs ---
-# Find the most recent audit run directory (modified in the last 30 minutes)
-LATEST_AUDIT=$(find "$CWD/audit" -maxdepth 1 -type d -name "audit-*" -mmin -30 2>/dev/null | sort -r | head -1 || true)
+# Find the most recent audit run directory (modified in the last 60 minutes)
+LATEST_AUDIT=$(find "$CWD/audit" -maxdepth 1 -type d -name "audit-*" -mmin -60 2>/dev/null | sort -r | head -1 || true)
 
+PARTIAL_MODULES=""
 if [ -n "$LATEST_AUDIT" ]; then
   if [ -f "$LATEST_AUDIT/results.json" ]; then
     # results.json exists — check if any module reported partial/error (indicates interrupted run)
-    PARTIAL_MODULES=$(find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "enumeration.json" -exec jq -r 'select(.status == "partial" or .status == "error") | .module' {} \; 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+    PARTIAL_MODULES=$(find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "enumeration.json" -exec jq -r 'select(.status == "partial" or .status == "error") | .module' {} \; 2>/dev/null | tr '\n' ', ' | sed 's/,$//' || true)
     if [ -n "$PARTIAL_MODULES" ]; then
       # Interrupted run — downgrade findings.md and dashboard export to warnings
       if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
@@ -72,7 +73,7 @@ if [ -n "$LATEST_AUDIT" ]; then
 fi
 
 # --- Check for recent defend runs ---
-LATEST_DEFEND=$(find "$CWD/audit" -maxdepth 3 -type d -name "defend-*" -mmin -30 2>/dev/null | sort -r | head -1 || true)
+LATEST_DEFEND=$(find "$CWD/audit" -maxdepth 3 -type d -name "defend-*" -mmin -60 2>/dev/null | sort -r | head -1 || true)
 
 if [ -n "$LATEST_DEFEND" ]; then
   if [ ! -f "$LATEST_DEFEND/executive-summary.md" ]; then
@@ -87,20 +88,31 @@ if [ -n "$LATEST_DEFEND" ]; then
 fi
 
 # --- Check for recent exploit runs ---
-LATEST_EXPLOIT=$(find "$CWD/exploit" -maxdepth 1 -type d -name "exploit-*" -mmin -30 2>/dev/null | sort -r | head -1 || true)
+LATEST_EXPLOIT=$(find "$CWD/exploit" -maxdepth 1 -type d -name "exploit-*" -mmin -60 2>/dev/null | sort -r | head -1 || true)
 
 if [ -n "$LATEST_EXPLOIT" ]; then
-  if [ ! -f "$LATEST_EXPLOIT/playbook.md" ]; then
-    ERRORS+=("MISSING: $LATEST_EXPLOIT/playbook.md (mandatory exploit artifact)")
-  fi
+  # agent-log.jsonl is always required (even for zero-path and Gate 4 skip runs)
   if [ ! -f "$LATEST_EXPLOIT/agent-log.jsonl" ]; then
     ERRORS+=("MISSING: $LATEST_EXPLOIT/agent-log.jsonl (mandatory exploit artifact)")
   fi
 
-  # Check dashboard export
-  RUN_ID_EX=$(basename "$LATEST_EXPLOIT")
-  if [ -f "$LATEST_EXPLOIT/results.json" ] && [ ! -f "$CWD/dashboard/public/$RUN_ID_EX.json" ]; then
-    ERRORS+=("MISSING: dashboard/public/$RUN_ID_EX.json — results.json exists but dashboard export was not written.")
+  # Detect zero-path or Gate 4 skip runs: these have agent-log.jsonl but no results.json.
+  # Per scope-exploit.md, playbook.md, results.json, and dashboard export are NOT required
+  # for zero-path (Gate 3 stop) or Gate 4 skip runs.
+  if [ -f "$LATEST_EXPLOIT/results.json" ]; then
+    # Full run — enforce all artifacts
+    if [ ! -f "$LATEST_EXPLOIT/playbook.md" ]; then
+      ERRORS+=("MISSING: $LATEST_EXPLOIT/playbook.md (mandatory exploit artifact)")
+    fi
+
+    # Check dashboard export
+    RUN_ID_EX=$(basename "$LATEST_EXPLOIT")
+    if [ ! -f "$CWD/dashboard/public/$RUN_ID_EX.json" ]; then
+      ERRORS+=("MISSING: dashboard/public/$RUN_ID_EX.json — results.json exists but dashboard export was not written.")
+    fi
+  else
+    # No results.json — zero-path or Gate 4 skip run. Only agent-log.jsonl required (checked above).
+    :
   fi
 fi
 
