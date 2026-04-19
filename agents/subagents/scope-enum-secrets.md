@@ -205,7 +205,7 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] All secrets per region (list-secrets); iterate ENABLED_REGIONS (split on comma):
+- All secrets per region (list-secrets); iterate ENABLED_REGIONS (split on comma):
   For each region in ENABLED_REGIONS:
     aws secretsmanager list-secrets --region $REGION --output json 2>&1
     If AccessDenied or error on a region:
@@ -213,27 +213,27 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
       Retry once after 2-5 seconds
       If retry also fails: log "[SKIP] secretsmanager $REGION: skipping after retry" and continue to next region
   Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-- [ ] Per-secret: describe-secret for rotation status, LastRotatedDate, LastAccessedDate, KMS key ARN, VersionIdsToStages
-- [ ] Per-secret: resource policy (get-resource-policy)
-- [ ] Tags: look for naming patterns suggesting high-value content (password, key, token, credential, db)
+- Per-secret: describe-secret for rotation status, LastRotatedDate, LastAccessedDate, KMS key ARN, VersionIdsToStages
+- Per-secret: resource policy (get-resource-policy)
+- Tags: look for naming patterns suggesting high-value content (password, key, token, credential, db)
 
 ### Per-Resource Checks
-- [ ] Rotation disabled: flag as finding
-- [ ] Last rotated >90 days ago: flag as HIGH
-- [ ] Last accessed never or >180 days ago: flag as potentially unused secret
-- [ ] KMS key used: DefaultEncryptionKey (aws/secretsmanager) vs customer-managed -- flag if using default
-- [ ] Resource policy Principal:*: CRITICAL
-- [ ] Resource policy cross-account principal: HIGH -- external account can access secret
-- [ ] GetSecretValue granted without conditions: flag as "money action" exposed broadly
-- [ ] PutSecretValue without conditions: flag as potential backdoor path
-- [ ] Condition checks: note aws:SourceVpc, aws:SourceVpce, aws:PrincipalOrgID -- reduce risk, do not eliminate
+- Rotation disabled: flag as finding
+- Last rotated >90 days ago: flag as HIGH
+- Last accessed never or >180 days ago: flag as potentially unused secret
+- KMS key used: DefaultEncryptionKey (aws/secretsmanager) vs customer-managed -- flag if using default
+- Resource policy Principal:*: CRITICAL
+- Resource policy cross-account principal: HIGH -- external account can access secret
+- GetSecretValue granted without conditions: flag as "money action" exposed broadly
+- PutSecretValue without conditions: flag as potential backdoor path
+- Condition checks: note aws:SourceVpc, aws:SourceVpce, aws:PrincipalOrgID -- reduce risk, do not eliminate
 
 ### Graph Data
-- [ ] Nodes: data:secrets:SECRET_NAME (type: "data") for each secret
-- [ ] Edges: IAM-based access (user:<name>/role:<name> -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: read|write|admin)
-- [ ] Edges: cross-account resource policy (external:<id> -> data:secrets:SECRET_NAME, trust_type: "cross-account")
-- [ ] Edges: KMS dependency (data:kms:KEY_ID -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: "read")
-- [ ] access_level: read = GetSecretValue/DescribeSecret/ListSecrets; write = PutSecretValue/UpdateSecret/CreateSecret; admin = secretsmanager:* or DeleteSecret+PutResourcePolicy
+- Nodes: data:secrets:SECRET_NAME (type: "data") for each secret
+- Edges: IAM-based access (user:<name>/role:<name> -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: read|write|admin)
+- Edges: cross-account resource policy (external:<id> -> data:secrets:SECRET_NAME, trust_type: "cross-account")
+- Edges: KMS dependency (data:kms:KEY_ID -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: "read")
+- access_level: read = GetSecretValue/DescribeSecret/ListSecrets; write = PutSecretValue/UpdateSecret/CreateSecret; admin = secretsmanager:* or DeleteSecret+PutResourcePolicy
 
 ## Execution Workflow
 

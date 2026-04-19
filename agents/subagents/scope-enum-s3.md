@@ -204,37 +204,37 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.arn)')
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] All buckets: call `aws s3api list-buckets --output json` once globally (no --region flag) to get all bucket names
+- All buckets: call `aws s3api list-buckets --output json` once globally (no --region flag) to get all bucket names
   If AccessDenied: log partial and stop — provide specific ARN to analyze
-- [ ] Per-bucket: determine home region via `aws s3api get-bucket-location --bucket $BUCKET --output json`
+- Per-bucket: determine home region via `aws s3api get-bucket-location --bucket $BUCKET --output json`
   (empty LocationConstraint means us-east-1)
   Only call per-bucket APIs if bucket's home region is in ENABLED_REGIONS (split on comma)
   Per-finding region tag: every finding object MUST include `"region": "$BUCKET_HOME_REGION"`
-- [ ] Per-bucket (home region in ENABLED_REGIONS only): encryption configuration, versioning status, logging enabled/disabled
-- [ ] Per-bucket: public access block settings (all 4 flags: BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy, RestrictPublicBuckets)
-- [ ] Per-bucket: bucket ACL grants
-- [ ] Per-bucket: bucket policy (if any)
-- [ ] Per-bucket: CORS configuration
-- [ ] Per-bucket: event notification configuration (Lambda triggers)
+- Per-bucket (home region in ENABLED_REGIONS only): encryption configuration, versioning status, logging enabled/disabled
+- Per-bucket: public access block settings (all 4 flags: BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy, RestrictPublicBuckets)
+- Per-bucket: bucket ACL grants
+- Per-bucket: bucket policy (if any)
+- Per-bucket: CORS configuration
+- Per-bucket: event notification configuration (Lambda triggers)
 
 ### Per-Resource Checks
-- [ ] ACL grants with AllUsers or AuthenticatedUsers URI: CRITICAL (publicly readable/writable)
-- [ ] Bucket policy Principal:* without restrictive conditions: CRITICAL
-- [ ] PolicyStatus.IsPublic = true: CRITICAL even if block public access may override
-- [ ] Combined GetObject + ListBucket with Principal:*: "Full public data exposure" -- CRITICAL
-- [ ] CORS AllowOrigin:*: flag as broad cross-origin access
-- [ ] Server-side encryption absent: flag as finding
-- [ ] MFA Delete disabled on versioned buckets: flag
-- [ ] Cross-account bucket policy grants (principal from different account): HIGH if write actions granted
-- [ ] Lambda trigger configurations: flag S3 -> Lambda trigger chains (PutObject = code execution path)
+- ACL grants with AllUsers or AuthenticatedUsers URI: CRITICAL (publicly readable/writable)
+- Bucket policy Principal:* without restrictive conditions: CRITICAL
+- PolicyStatus.IsPublic = true: CRITICAL even if block public access may override
+- Combined GetObject + ListBucket with Principal:*: "Full public data exposure" -- CRITICAL
+- CORS AllowOrigin:*: flag as broad cross-origin access
+- Server-side encryption absent: flag as finding
+- MFA Delete disabled on versioned buckets: flag
+- Cross-account bucket policy grants (principal from different account): HIGH if write actions granted
+- Lambda trigger configurations: flag S3 -> Lambda trigger chains (PutObject = code execution path)
 
 ### Graph Data
-- [ ] Nodes: data:s3:BUCKET_NAME (type: "data") for each bucket
-- [ ] Edges: IAM principal access (user:<name>/role:<name> -> data:s3:BUCKET_NAME, access_level: read|write|admin)
-- [ ] Edges: public access (external:internet -> data:s3:BUCKET_NAME, access_level: read|write|admin)
-- [ ] Edges: cross-account (external:<id> -> data:s3:BUCKET_NAME, trust_type: "cross-account")
-- [ ] Edges: Lambda trigger (data:s3:BUCKET_NAME -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "s3_trigger")
-- [ ] access_level: read = Get*/List* only; write = Put*/Delete*; admin = s3:* or management actions
+- Nodes: data:s3:BUCKET_NAME (type: "data") for each bucket
+- Edges: IAM principal access (user:<name>/role:<name> -> data:s3:BUCKET_NAME, access_level: read|write|admin)
+- Edges: public access (external:internet -> data:s3:BUCKET_NAME, edge_type: "public_access", access_level: read|write|admin)
+- Edges: cross-account (external:<id> -> data:s3:BUCKET_NAME, edge_type: "trust", trust_type: "cross-account")
+- Edges: Lambda trigger (data:s3:BUCKET_NAME -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "s3_trigger")
+- access_level: read = Get*/List* only; write = Put*/Delete*; admin = s3:* or management actions
 
 ## Execution Workflow
 

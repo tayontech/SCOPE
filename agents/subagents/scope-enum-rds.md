@@ -165,23 +165,23 @@ This is a regional service. Iterate ENABLED_REGIONS (split on comma):
 Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
 
 ### Discovery
-- [ ] DB instances per region: `describe-db-instances` — instance ID, engine, publicly_accessible flag, VPC, security groups, IAM auth enabled, storage encryption, deletion protection
-- [ ] Manual snapshots per region: `describe-db-snapshots --snapshot-type manual` — PubliclyAccessible attribute, size, encrypted
-- [ ] DB subnet groups and parameter groups (metadata only — names and descriptions)
+- DB instances per region: `describe-db-instances` — instance ID, engine, publicly_accessible flag, VPC, security groups, IAM auth enabled, storage encryption, deletion protection
+- Manual snapshots per region: `describe-db-snapshots --snapshot-type manual` — PubliclyAccessible attribute, size, encrypted
+- DB subnet groups and parameter groups (metadata only — names and descriptions)
 
 ### Per-Resource Checks
-- [ ] Flag instances with `PubliclyAccessible: true` — HIGH finding
-- [ ] Flag instances with `StorageEncrypted: false` — MEDIUM finding
-- [ ] Flag instances with `IAMDatabaseAuthenticationEnabled: true` — enumerate which IAM roles have `rds-db:connect` permission (cross-reference with IAM findings if available)
-- [ ] Flag snapshots with `PubliclyAccessible: true` — CRITICAL finding (public data exposure)
-- [ ] Flag instances with `DeletionProtection: false` where instance appears production-grade (engine version, MultiAZ, size)
-- [ ] Note KMS key ARN encrypting each instance (feeds attack-paths KMS chain analysis)
-- [ ] Flag security groups on RDS instances allowing port 3306 or 5432 from `0.0.0.0/0`
+- Flag instances with `PubliclyAccessible: true` — HIGH finding
+- Flag instances with `StorageEncrypted: false` — MEDIUM finding
+- Flag instances with `IAMDatabaseAuthenticationEnabled: true` — enumerate which IAM roles have `rds-db:connect` permission (cross-reference with IAM findings if available)
+- Flag snapshots with `PubliclyAccessible: true` — CRITICAL finding (public data exposure)
+- Flag instances with `DeletionProtection: false` where instance appears production-grade (engine version, MultiAZ, size)
+- Note KMS key ARN encrypting each instance (feeds attack-paths KMS chain analysis)
+- Flag security groups on RDS instances allowing port 3306 or 5432 from `0.0.0.0/0`
 
 ### Graph Data
-- [ ] Nodes: `{id: "data:rds:DB_INSTANCE_ID", label: "DB_INSTANCE_ID", type: "data"}` for each instance
-- [ ] Edges: IAM role → RDS node when `rds-db:connect` permission found (`edge_type: "data_access"`, `access_level: "write"`)
-- [ ] Edges: KMS key → RDS node when encryption dependency exists (`edge_type: "data_access"`, `access_level: "read"`, `label: "encrypts"`)
+- Nodes: `{id: "data:rds:DB_INSTANCE_ID", label: "DB_INSTANCE_ID", type: "data"}` for each instance
+- Edges: IAM role → RDS node when `rds-db:connect` permission found (`edge_type: "data_access"`, `access_level: "write"`)
+- Edges: KMS key → RDS node when encryption dependency exists (`edge_type: "data_access"`, `access_level: "read"`, `label: "encrypts"`)
 
 ## Execution Workflow
 

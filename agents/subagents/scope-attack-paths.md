@@ -539,7 +539,7 @@ For each publicly exposed resource (public security groups, open ports), connect
 {
   "source": "external:public",
   "target": "$RESOURCE_NODE_ID",
-  "edge_type": "network",
+  "edge_type": "public_access",
   "severity": "high",
   "label": "$EXPOSED_PORT_OR_PROTOCOL",
   "_source": "reasoning"

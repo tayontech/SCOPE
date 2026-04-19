@@ -260,7 +260,7 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'unique_by(.arn) | sort_by(.region + "
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] All instances per region (describe-instances, skip terminated); iterate ENABLED_REGIONS (split on comma):
+- All instances per region (describe-instances, skip terminated); iterate ENABLED_REGIONS (split on comma):
   For each region in ENABLED_REGIONS:
     aws ec2 describe-instances --region $REGION --output json 2>&1
     If AccessDenied or error on a region:
@@ -291,41 +291,41 @@ If writing the final ec2.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 "errors": ["Enumeration interrupted — completed regions: us-east-1, us-west-2; missed: eu-west-1, ap-southeast-1"]
 ```
 
-- [ ] Instance profiles: list-instance-profiles to map instance → role associations
-- [ ] Per-instance: user data (describe-instance-attribute userData) — decode base64, scan for credential patterns
-- [ ] Per-instance: IMDS configuration (HttpTokens optional vs required, HttpPutResponseHopLimit)
+- Instance profiles: list-instance-profiles to map instance → role associations
+- Per-instance: user data (describe-instance-attribute userData) — decode base64, scan for credential patterns
+- Per-instance: IMDS configuration (HttpTokens optional vs required, HttpPutResponseHopLimit)
 
   **MANDATORY IMDS extraction** — for EVERY instance returned by describe-instances, you MUST extract and evaluate:
   1. `MetadataOptions.HttpTokens` — if "optional", flag as HIGH (IMDSv1 enabled)
   2. `MetadataOptions.HttpPutResponseHopLimit` — if > 1, flag (container IMDS exposure)
   Do NOT skip this check. If MetadataOptions is absent from the API response, flag as UNKNOWN and note in findings.
-- [ ] Per-instance: launch template versions and legacy launch configurations — check UserData for credentials
-- [ ] Security groups (describe-security-groups): all inbound rules
-- [ ] VPCs (describe-vpcs), subnets, internet gateways, NAT gateways
-- [ ] VPC peering connections (describe-vpc-peering-connections)
-- [ ] VPN: site-to-site VPN connections, Client VPN endpoints and authorization rules
-- [ ] EBS volumes (describe-volumes) and snapshots (describe-snapshots --owner-ids self)
-- [ ] ALB/NLB load balancers (elbv2 describe-load-balancers) and listeners
-- [ ] Classic ELBs (elb describe-load-balancers)
-- [ ] SSM managed instances (ssm describe-instance-information)
-- [ ] SSM Parameter Store (ssm describe-parameters) — names and types only
-- [ ] Active SSM sessions (ssm describe-sessions --state Active)
+- Per-instance: launch template versions and legacy launch configurations — check UserData for credentials
+- Security groups (describe-security-groups): all inbound rules
+- VPCs (describe-vpcs), subnets, internet gateways, NAT gateways
+- VPC peering connections (describe-vpc-peering-connections)
+- VPN: site-to-site VPN connections, Client VPN endpoints and authorization rules
+- EBS volumes (describe-volumes) and snapshots (describe-snapshots --owner-ids self)
+- ALB/NLB load balancers (elbv2 describe-load-balancers) and listeners
+- Classic ELBs (elb describe-load-balancers)
+- SSM managed instances (ssm describe-instance-information)
+- SSM Parameter Store (ssm describe-parameters) — names and types only
+- Active SSM sessions (ssm describe-sessions --state Active)
 
 ### Per-Resource Checks
-- [ ] IMDSv1 enabled (HttpTokens: "optional"): HIGH — SSRF credential theft path; flag per instance
-- [ ] HttpPutResponseHopLimit > 1: flag — containers on instance can reach IMDS
-- [ ] Credential patterns in user data or launch template UserData: CRITICAL — include line numbers, not values
-- [ ] IAM instance profile with admin-level role: CRITICAL
-- [ ] Unencrypted EBS volumes attached to instances with sensitive roles: flag
-- [ ] Snapshots shared publicly (CreateVolumePermission Group: all): CRITICAL
-- [ ] Snapshots shared with external accounts: HIGH — cross-account data exposure
-- [ ] Security group ingress 0.0.0.0/0 on sensitive ports: 22 = CRITICAL, 3389 = CRITICAL, 3306/5432/1433 = CRITICAL, -1 (ALL) = CRITICAL
-- [ ] SSM-managed instances with high-privilege roles: HIGH — ssm:SendCommand = arbitrary command execution
-- [ ] SSM Parameter Store plaintext parameters with secret-pattern names (password, secret, key, token, db_): flag existence only
-- [ ] Cross-account VPC peering: flag as lateral movement path
-- [ ] Client VPN with DestinationCidr 0.0.0.0/0 and AccessAll: true: HIGH
-- [ ] ELB access logs disabled: flag
-- [ ] HTTP-only ELB listeners without HTTPS redirect: MEDIUM
+- IMDSv1 enabled (HttpTokens: "optional"): HIGH — SSRF credential theft path; flag per instance
+- HttpPutResponseHopLimit > 1: flag — containers on instance can reach IMDS
+- Credential patterns in user data or launch template UserData: CRITICAL — include line numbers, not values
+- IAM instance profile with admin-level role: CRITICAL
+- Unencrypted EBS volumes attached to instances with sensitive roles: flag
+- Snapshots shared publicly (CreateVolumePermission Group: all): CRITICAL
+- Snapshots shared with external accounts: HIGH — cross-account data exposure
+- Security group ingress 0.0.0.0/0 on sensitive ports: 22 = CRITICAL, 3389 = CRITICAL, 3306/5432/1433 = CRITICAL, -1 (ALL) = CRITICAL
+- SSM-managed instances with high-privilege roles: HIGH — ssm:SendCommand = arbitrary command execution
+- SSM Parameter Store plaintext parameters with secret-pattern names (password, secret, key, token, db_): flag existence only
+- Cross-account VPC peering: flag as lateral movement path
+- Client VPN with DestinationCidr 0.0.0.0/0 and AccessAll: true: HIGH
+- ELB access logs disabled: flag
+- HTTP-only ELB listeners without HTTPS redirect: MEDIUM
 
 ### Post-Enum Self-Check (MANDATORY)
 
@@ -345,13 +345,13 @@ fi
 Do NOT report STATUS: complete if instances exist but IMDS findings are absent.
 
 ### Graph Data
-- [ ] Nodes: data:ec2:INSTANCE_ID (type: "data"), data:ssm:PARAM_NAME (type: "data")
-- [ ] Note: security groups, VPCs, ELBs are findings context — do NOT add as graph nodes
-- [ ] Edges: instance profile (data:ec2:INSTANCE_ID → role:ROLE_NAME, trust_type: "service", label: "instance_profile")
-- [ ] Edges: internet exposure for instances with high-privilege roles (external:internet → data:ec2:INSTANCE_ID, edge_type: "public_access", access_level: "read")
-- [ ] Edges: SSM command vector priv_esc if principal has ssm:SendCommand on instance with admin role
-- [ ] Edges: SSM parameter access (role:<name> → data:ssm:PARAM_NAME, edge_type: "public_access", access_level: read|write|admin)
-- [ ] access_level: read = ssm:GetParameter/ec2:Describe*; write = ssm:PutParameter/ssm:SendCommand/ec2:RunInstances; admin = ssm:*/ec2:* broad scope
+- Nodes: data:ec2:INSTANCE_ID (type: "data"), data:ssm:PARAM_NAME (type: "data")
+- Note: security groups, VPCs, ELBs are findings context — do NOT add as graph nodes
+- Edges: instance profile (data:ec2:INSTANCE_ID → role:ROLE_NAME, trust_type: "service", label: "instance_profile")
+- Edges: internet exposure for instances with high-privilege roles (external:internet → data:ec2:INSTANCE_ID, edge_type: "public_access", access_level: "read")
+- Edges: SSM command vector priv_esc if principal has ssm:SendCommand on instance with admin role
+- Edges: SSM parameter access (role:<name> → data:ssm:PARAM_NAME, edge_type: "public_access", access_level: read|write|admin)
+- access_level: read = ssm:GetParameter/ec2:Describe*; write = ssm:PutParameter/ssm:SendCommand/ec2:RunInstances; admin = ssm:*/ec2:* broad scope
 
 ## Execution Workflow
 

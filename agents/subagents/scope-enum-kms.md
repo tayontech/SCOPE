@@ -211,7 +211,7 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] Customer-managed keys per region (list-keys, then describe-key -- filter to KeyManager=CUSTOMER only); iterate ENABLED_REGIONS (split on comma):
+- Customer-managed keys per region (list-keys, then describe-key -- filter to KeyManager=CUSTOMER only); iterate ENABLED_REGIONS (split on comma):
   For each region in ENABLED_REGIONS:
     aws kms list-keys --region $REGION --output json 2>&1
     If AccessDenied or error on a region:
@@ -219,29 +219,29 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
       Retry once after 2-5 seconds
       If retry also fails: log "[SKIP] kms $REGION: skipping after retry" and continue to next region
   Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
-- [ ] Per-key: KeyState (Enabled, Disabled, PendingDeletion), KeyUsage, Origin, Description
-- [ ] Per-key: key policy (default policy name only)
-- [ ] Per-key: all grants (list-grants -- ALWAYS check after key policy)
-- [ ] Per-key: key rotation enabled status
-- [ ] Multi-region key replicas
+- Per-key: KeyState (Enabled, Disabled, PendingDeletion), KeyUsage, Origin, Description
+- Per-key: key policy (default policy name only)
+- Per-key: all grants (list-grants -- ALWAYS check after key policy)
+- Per-key: key rotation enabled status
+- Multi-region key replicas
 
 ### Per-Resource Checks
-- [ ] Key rotation disabled: flag as finding (should rotate annually)
-- [ ] Key policy Principal:*: CRITICAL -- wildcard access to the key
-- [ ] Key policy cross-account principal: HIGH -- external account can use key
-- [ ] Key policy kms:CreateGrant permission: flag -- enables grant chaining attack
-- [ ] Key in PendingDeletion state: flag -- scheduled deletion may break encrypted resources
-- [ ] Grant to external account grantee: HIGH -- grants bypass IAM policy
-- [ ] Grant with CreateGrant operation to non-admin principal: HIGH/CRITICAL -- enables grant abuse chain (CreateGrant -> self-grant Decrypt -> decrypt any encrypted data)
-- [ ] Grants without EncryptionContext constraints: flag as broadly applicable
-- [ ] Encryption dependencies: which services/resources depend on each key (Secrets Manager, EBS, S3, RDS, Lambda env, CloudWatch Logs)
+- Key rotation disabled: flag as finding (should rotate annually)
+- Key policy Principal:*: CRITICAL -- wildcard access to the key
+- Key policy cross-account principal: HIGH -- external account can use key
+- Key policy kms:CreateGrant permission: flag -- enables grant chaining attack
+- Key in PendingDeletion state: flag -- scheduled deletion may break encrypted resources
+- Grant to external account grantee: HIGH -- grants bypass IAM policy
+- Grant with CreateGrant operation to non-admin principal: HIGH/CRITICAL -- enables grant abuse chain (CreateGrant -> self-grant Decrypt -> decrypt any encrypted data)
+- Grants without EncryptionContext constraints: flag as broadly applicable
+- Encryption dependencies: which services/resources depend on each key (Secrets Manager, EBS, S3, RDS, Lambda env, CloudWatch Logs)
 
 ### Graph Data
-- [ ] Nodes: data:kms:KEY_ID (type: "data", label: key description or ID)
-- [ ] Edges: key policy/IAM access (user:<name>/role:<name> -> data:kms:KEY_ID, edge_type: "data_access", access_level: read|write|admin)
-- [ ] Edges: grant-based access (role:<grantee> -> data:kms:KEY_ID, edge_type: "data_access") -- note grants bypass IAM
-- [ ] Edges: encryption dependency (data:kms:KEY_ID -> data:s3:BUCKET/data:secrets:SECRET/etc., edge_type: "data_access", access_level: "read")
-- [ ] access_level: read = Decrypt/DescribeKey/ListGrants; write = Encrypt/GenerateDataKey/CreateGrant; admin = kms:* or PutKeyPolicy
+- Nodes: data:kms:KEY_ID (type: "data", label: key description or ID)
+- Edges: key policy/IAM access (user:<name>/role:<name> -> data:kms:KEY_ID, edge_type: "data_access", access_level: read|write|admin)
+- Edges: grant-based access (role:<grantee> -> data:kms:KEY_ID, edge_type: "data_access") -- note grants bypass IAM
+- Edges: encryption dependency (data:kms:KEY_ID -> data:s3:BUCKET/data:secrets:SECRET/etc., edge_type: "data_access", access_level: "read")
+- access_level: read = Decrypt/DescribeKey/ListGrants; write = Encrypt/GenerateDataKey/CreateGrant; admin = kms:* or PutKeyPolicy
 
 ## Execution Workflow
 

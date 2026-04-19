@@ -658,34 +658,34 @@ jq -s 'add | sort_by(.arn)' \
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] All IAM users (name, ARN, CreateDate, MFA devices, login profile, access keys)
-- [ ] All IAM roles — skip any RoleName starting with "AWSServiceRole"
-- [ ] All IAM groups (members, attached and inline policies)
-- [ ] All customer-managed policies attached to any principal (default version document only)
-- [ ] Federation providers: SAML providers, OIDC providers
-- [ ] Account password policy settings
-- [ ] Credential report (if accessible)
+- All IAM users (name, ARN, CreateDate, MFA devices, login profile, access keys)
+- All IAM roles — skip any RoleName starting with "AWSServiceRole"
+- All IAM groups (members, attached and inline policies)
+- All customer-managed policies attached to any principal (default version document only)
+- Federation providers: SAML providers, OIDC providers
+- Account password policy settings
+- Credential report (if accessible)
 
 ### Per-Resource Checks
-- [ ] MFA enabled on users with console access (LoginProfile set); flag absent MFA as high
-- [ ] Access key age: flag keys older than 90 days as high
-- [ ] Users with both console access and programmatic access keys: flag as increased attack surface
-- [ ] Wildcard trust policies (Principal: "*" or Principal.AWS: "*"): flag as critical
-- [ ] Cross-account trust without sts:ExternalId condition: flag; classify as internal (in accounts.json) or external
-- [ ] Permission boundaries present on high-privilege roles: flag absent boundary on admin roles
-- [ ] Overly broad inline or managed policies granting iam:* or admin access: critical
-- [ ] Role trust policy principal type: AWS user/role/root, Service, Federated
-- [ ] Assumption chains: A assumes B assumes C — flag cross-account links in chain
+- MFA enabled on users with console access (LoginProfile set); flag absent MFA as high
+- Access key age: flag keys older than 90 days as high
+- Users with both console access and programmatic access keys: flag as increased attack surface
+- Wildcard trust policies (Principal: "*" or Principal.AWS: "*"): flag as critical
+- Cross-account trust without sts:ExternalId condition: flag; classify as internal (in accounts.json) or external
+- Permission boundaries present on high-privilege roles: flag absent boundary on admin roles
+- Overly broad inline or managed policies granting iam:* or admin access: critical
+- Role trust policy principal type: AWS user/role/root, Service, Federated
+- Assumption chains: A assumes B assumes C — flag cross-account links in chain
 
 ### Enrichment Fields (New — GAAD path provides these for free)
-- [ ] Inline policy documents per user/role/group (inline_policies field)
-- [ ] Attached managed policy documents (default version) per principal (attached_policy_documents field)
-- [ ] RoleLastUsed data per role (role_last_used field — last_used_date + region)
+- Inline policy documents per user/role/group (inline_policies field)
+- Attached managed policy documents (default version) per principal (attached_policy_documents field)
+- RoleLastUsed data per role (role_last_used field — last_used_date + region)
 
 ### Graph Data
-- [ ] Nodes: user:<name>, role:<name> (skip AWSServiceRole-prefixed), svc:<service>.amazonaws.com, esc:iam:<Action>
-- [ ] Edges: trust relationships (role:A -> role:B, edge_type: "iam_trust", trust_type: "same-account"|"cross-account-internal"|"cross-account-external"|"service"), escalation paths (user/role -> esc:iam:ACTION, edge_type: "priv_esc"), group memberships (user:<name> -> group:<name>, edge_type: "membership")
-- [ ] Severity: admin/full access = critical; write on IAM/STS/Lambda = high; read on sensitive data = medium; read-only non-sensitive = low
+- Nodes: user:<name>, role:<name> (skip AWSServiceRole-prefixed), svc:<service>.amazonaws.com, esc:iam:<Action>
+- Edges: trust relationships (role:A -> role:B, edge_type: "trust", trust_type: "same-account"|"cross-account-internal"|"cross-account-external"|"service"), escalation paths (user/role -> esc:iam:ACTION, edge_type: "priv_esc"), group memberships (user:<name> -> group:<name>, edge_type: "membership")
+- Severity: admin/full access = critical; write on IAM/STS/Lambda = high; read on sensitive data = medium; read-only non-sensitive = low
 
 ## Execution Workflow
 

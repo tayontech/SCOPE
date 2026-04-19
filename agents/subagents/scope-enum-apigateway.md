@@ -270,23 +270,23 @@ This is a regional service. Iterate ENABLED_REGIONS (split on comma):
 Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
 
 ### Discovery
-- [ ] REST APIs per region: `apigateway get-rest-apis`; for each: `get-authorizers`, `get-stages`, resource policy via `get-rest-api`
-- [ ] HTTP and WebSocket APIs per region: `apigatewayv2 get-apis`; for each: `get-authorizers`, `get-stages`
-- [ ] Lambda integrations per API: identify which Lambda functions each API invokes (integration type `LAMBDA` or `AWS_PROXY`)
+- REST APIs per region: `apigateway get-rest-apis`; for each: `get-authorizers`, `get-stages`, resource policy via `get-rest-api`
+- HTTP and WebSocket APIs per region: `apigatewayv2 get-apis`; for each: `get-authorizers`, `get-stages`
+- Lambda integrations per API: identify which Lambda functions each API invokes (integration type `LAMBDA` or `AWS_PROXY`)
 
 ### Per-Resource Checks
-- [ ] Flag REST APIs with no authorizer on any method -- CRITICAL (unauthenticated public invocation)
-- [ ] Flag HTTP/WebSocket APIs with no authorizer -- CRITICAL
-- [ ] Flag APIs with resource policy containing `Principal: "*"` without IP conditions -- HIGH
-- [ ] Flag stages with logging disabled (`executionLoggingEnabled: false`) -- blind spot for CloudTrail-based detection
-- [ ] Flag stages with no throttling configured (`throttlingBurstLimit` and `throttlingRateLimit` absent) -- DoS amplification risk
-- [ ] Note Lambda integrations: API Gateway -> Lambda function (code execution path for unauthenticated callers if no authorizer)
-- [ ] Flag API key authentication only (API keys are not cryptographically secure auth -- shared key rotation risk)
+- Flag REST APIs with no authorizer on any method -- CRITICAL (unauthenticated public invocation)
+- Flag HTTP/WebSocket APIs with no authorizer -- CRITICAL
+- Flag APIs with resource policy containing `Principal: "*"` without IP conditions -- HIGH
+- Flag stages with logging disabled (`executionLoggingEnabled: false`) -- blind spot for CloudTrail-based detection
+- Flag stages with no throttling configured (`throttlingBurstLimit` and `throttlingRateLimit` absent) -- DoS amplification risk
+- Note Lambda integrations: API Gateway -> Lambda function (code execution path for unauthenticated callers if no authorizer)
+- Flag API key authentication only (API keys are not cryptographically secure auth -- shared key rotation risk)
 
 ### Graph Data
-- [ ] Nodes: `{id: "data:apigateway:API_ID", label: "API_NAME", type: "data"}` for each API
-- [ ] Edges: API Gateway node -> Lambda function node for each Lambda integration (`edge_type: "public_access"`, `access_level: "write"`, `label: "invokes"`)
-- [ ] Edges: External/public -> API Gateway node when resource policy has `Principal: "*"` (`edge_type: "public_access"`, `trust_type: "public"`)
+- Nodes: `{id: "data:apigateway:API_ID", label: "API_NAME", type: "data"}` for each API
+- Edges: API Gateway node -> Lambda function node for each Lambda integration (`edge_type: "public_access"`, `access_level: "write"`, `label: "invokes"`)
+- Edges: External/public -> API Gateway node when resource policy has `Principal: "*"` (`edge_type: "public_access"`, `trust_type: "public"`)
 
 ## Execution Workflow
 

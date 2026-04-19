@@ -1808,7 +1808,7 @@ For each GuardDuty recommendation generated in the attack-path sections above:
 **Activation scope:** [org-wide via delegated admin | single account]
 ```
 
-Order by GuardDuty severity: Critical → High → Medium → Low.
+Order by GuardDuty severity: critical → high → medium → low.
 
 ## Appendix D — All Config Rules (for Cloud Operations)
 
@@ -2178,68 +2178,68 @@ A defend run is complete when ALL of the following are true:
 **Mode-dependent:** In autonomous mode (AUDIT_RUN_DIR provided), only the current audit run is read — skip cross-run aggregation. In manual mode (no AUDIT_RUN_DIR), all audit runs are read and aggregated.
 
 **Autonomous mode (single-run):**
-- [ ] The current audit run's `findings.md` and normalized JSON from `./data/audit/` are both attempted (fallback to findings.md only if normalized data is unavailable, with operator warning)
-- [ ] Intake summary logged before proceeding to SCP/RCP generation
+- The current audit run's `findings.md` and normalized JSON from `./data/audit/` are both attempted (fallback to findings.md only if normalized data is unavailable, with operator warning)
+- Intake summary logged before proceeding to SCP/RCP generation
 
 **Manual mode (all-runs):**
-- [ ] All audit runs in `./audit/INDEX.md` are parsed — or the operator is warned if INDEX.md is absent and filesystem fallback is used
-- [ ] Both `findings.md` and normalized JSON from `./data/audit/` are attempted per run (fallback to findings.md only if normalized data is unavailable, with operator warning)
-- [ ] Cross-run aggregation correctly classifies paths as systemic (2+ runs) or one-off (1 run) using the Counter-based dedup logic (manual mode only — autonomous mode skips aggregation and marks all paths as one-off)
-- [ ] Conflicting findings between runs are reported with both run IDs and timestamps — not silently resolved
-- [ ] Intake summary logged before proceeding to SCP/RCP generation
+- All audit runs in `./audit/INDEX.md` are parsed — or the operator is warned if INDEX.md is absent and filesystem fallback is used
+- Both `findings.md` and normalized JSON from `./data/audit/` are attempted per run (fallback to findings.md only if normalized data is unavailable, with operator warning)
+- Cross-run aggregation correctly classifies paths as systemic (2+ runs) or one-off (1 run) using the Counter-based dedup logic (manual mode only — autonomous mode skips aggregation and marks all paths as one-off)
+- Conflicting findings between runs are reported with both run IDs and timestamps — not silently resolved
+- Intake summary logged before proceeding to SCP/RCP generation
 
 ### SCP and RCP Generation
 
-- [ ] At least one SCP or RCP generated for each HIGH or CRITICAL attack path that has actionable remediation items
-- [ ] Every SCP and RCP has a traceability citation: `Source: [run_id] | Attack Path: [name] | Severity: [level]`
-- [ ] Every Deny SCP has an `ArnNotLike` exemption condition for admin/ops roles — no SCP without an exemption
-- [ ] No `NotPrincipal` in any SCP (SCPs do not support this element)
-- [ ] No specific resource ARNs in SCP `Allow` statements (only `"Resource": "*"` is valid)
-- [ ] Every SCP compact JSON is checked for character count — warn operator if > 4,500 chars, hard stop at 5,120
-- [ ] Every compact SCP/RCP JSON file written to `$RUN_DIR/policies/` with correct naming convention
-- [ ] Every SCP includes the management account note in its impact analysis
-- [ ] All proposed policies logged before writing files
+- At least one SCP or RCP generated for each HIGH or CRITICAL attack path that has actionable remediation items
+- Every SCP and RCP has a traceability citation: `Source: [run_id] | Attack Path: [name] | Severity: [level]`
+- Every Deny SCP has an `ArnNotLike` exemption condition for admin/ops roles — no SCP without an exemption
+- No `NotPrincipal` in any SCP (SCPs do not support this element)
+- No specific resource ARNs in SCP `Allow` statements (only `"Resource": "*"` is valid)
+- Every SCP compact JSON is checked for character count — warn operator if > 4,500 chars, hard stop at 5,120
+- Every compact SCP/RCP JSON file written to `$RUN_DIR/policies/` with correct naming convention
+- Every SCP includes the management account note in its impact analysis
+- All proposed policies logged before writing files
 
 ### Security Controls
 
-- [ ] GuardDuty finding types recommended for each attack path type discovered (IAM, S3, EC2, Secrets)
-- [ ] Config managed rules recommended — org-wide conformance pack for systemic, individual rules for one-off
-- [ ] No CloudFormation, Terraform, or CLI deployment commands generated — text recommendations only
-- [ ] Security control recommendations added to technical-remediation.md
+- GuardDuty finding types recommended for each attack path type discovered (IAM, S3, EC2, Secrets)
+- Config managed rules recommended — org-wide conformance pack for systemic, individual rules for one-off
+- No CloudFormation, Terraform, or CLI deployment commands generated — text recommendations only
+- Security control recommendations added to technical-remediation.md
 
 ### Detection Suggestions
 
-- [ ] At least one SPL detection generated for each attack path that has non-empty `detection_opportunities`
-- [ ] Every SPL detection uses raw `index=cloudtrail` with explicit `earliest`/`latest` time bounds — never backtick macros
-- [ ] Every SPL detection includes the `| rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn` CIM rename
-- [ ] Every detection has all required template fields populated: MITRE ATT&CK, Severity, Type (Atomic/Composite), Description, False Positives, Tuning Guidance, Related Attack Path, Source
-- [ ] Detections follow the atomic → composite model: individual behaviors as atomic detections, multi-phase TTPs as composite detections correlating atomics by `src_user_arn`
-- [ ] Composite detections have higher severity than their atomic components
-- [ ] No Sigma YAML in detection output — SPL only
-- [ ] No CloudWatch metric filters included as detection alternatives — SPL detections only
-- [ ] All proposed detections embedded in technical-remediation.md
+- At least one SPL detection generated for each attack path that has non-empty `detection_opportunities`
+- Every SPL detection uses raw `index=cloudtrail` with explicit `earliest`/`latest` time bounds — never backtick macros
+- Every SPL detection includes the `| rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn` CIM rename
+- Every detection has all required template fields populated: MITRE ATT&CK, Severity, Type (Atomic/Composite), Description, False Positives, Tuning Guidance, Related Attack Path, Source
+- Detections follow the atomic → composite model: individual behaviors as atomic detections, multi-phase TTPs as composite detections correlating atomics by `src_user_arn`
+- Composite detections have higher severity than their atomic components
+- No Sigma YAML in detection output — SPL only
+- No CloudWatch metric filters included as detection alternatives — SPL detections only
+- All proposed detections embedded in technical-remediation.md
 
 ### Output Documents
 
-- [ ] `executive-summary.md` written to `$RUN_DIR/` with: risk posture scorecard (category breakdown), top 5 quick wins with business impact, systemic vs one-off breakdown table, remediation timeline suggestion (this week / this month / this quarter)
-- [ ] `technical-remediation.md` written to `$RUN_DIR/` (only when attack paths exist) with: prioritization matrix (Quick Wins first), full attack-path-grouped remediation bundles (SCP + RCP + security controls + SPL detection per path), and Appendix A-E organized by control type for team handoff. When zero attack paths are found, only executive-summary.md is written (see error_handling for the zero-paths flow).
-- [ ] Every attack path section in technical-remediation.md includes the attack path name, severity, source run ID(s), systemic/one-off classification, and affected account IDs
-- [ ] Appendix E in technical-remediation.md lists all SPL detections organized by MITRE tactic order: Initial Access → Persistence → Privilege Escalation → Defense Evasion → Credential Access → Discovery → Exfiltration
-- [ ] Output files written to $RUN_DIR/
+- `executive-summary.md` written to `$RUN_DIR/` with: risk posture scorecard (category breakdown), top 5 quick wins with business impact, systemic vs one-off breakdown table, remediation timeline suggestion (this week / this month / this quarter)
+- `technical-remediation.md` written to `$RUN_DIR/` (only when attack paths exist) with: prioritization matrix (Quick Wins first), full attack-path-grouped remediation bundles (SCP + RCP + security controls + SPL detection per path), and Appendix A-E organized by control type for team handoff. When zero attack paths are found, only executive-summary.md is written (see error_handling for the zero-paths flow).
+- Every attack path section in technical-remediation.md includes the attack path name, severity, source run ID(s), systemic/one-off classification, and affected account IDs
+- Appendix E in technical-remediation.md lists all SPL detections organized by MITRE tactic order: Initial Access → Persistence → Privilege Escalation → Defense Evasion → Credential Access → Discovery → Exfiltration
+- Output files written to $RUN_DIR/
 
 ### Dashboard
 
-- [ ] All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`)
+- All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`)
 
 ### Index and Operator Gates
 
-- [ ] `$AUDIT_RUN_DIR/defend/INDEX.md` entry appended after run completes — created if it doesn't exist
-- [ ] Run completion summary displayed with artifact paths and top 3 quick wins
+- `$AUDIT_RUN_DIR/defend/INDEX.md` entry appended after run completes — created if it doesn't exist
+- Run completion summary displayed with artifact paths and top 3 quick wins
 
 ### Pipeline
 
-- [ ] scope-pipeline.md invoked with PHASE=defend, RUN_DIR=$RUN_DIR (Phase 1 data normalization + Phase 2 evidence indexing)
-- [ ] Pipeline failures logged as warnings (non-blocking)
+- scope-pipeline.md invoked with PHASE=defend, RUN_DIR=$RUN_DIR (Phase 1 data normalization + Phase 2 evidence indexing)
+- Pipeline failures logged as warnings (non-blocking)
 </success_criteria>
 
 <error_handling>

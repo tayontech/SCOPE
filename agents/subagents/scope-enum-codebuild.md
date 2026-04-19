@@ -129,22 +129,22 @@ TOTAL_FINDINGS=$(echo "$FINDINGS_JSON" | jq 'length')
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] Projects per region: `list-projects`; for each project: `batch-get-projects --names` (service role ARN, environment variables, source type, source location, artifacts, VPC config)
-- [ ] Source credentials: `list-source-credentials` (credential ARN, server type, auth type — note GitHub/Bitbucket connected accounts by type only, no token values)
-- [ ] Build history: `list-builds-for-project` (last 5 builds per project — indicates active use)
+- Projects per region: `list-projects`; for each project: `batch-get-projects --names` (service role ARN, environment variables, source type, source location, artifacts, VPC config)
+- Source credentials: `list-source-credentials` (credential ARN, server type, auth type — note GitHub/Bitbucket connected accounts by type only, no token values)
+- Build history: `list-builds-for-project` (last 5 builds per project — indicates active use)
 
 ### Per-Resource Checks
-- [ ] Flag projects where service role has admin permissions or `iam:PassRole` — HIGH (Method 15 target: attacker can start build with this role; also UpdateProject attack if attacker has `codebuild:UpdateProject` permission)
-- [ ] Flag projects with environment variables whose NAMES match secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) — HIGH; never output values
-- [ ] Flag projects with source type `NO_SOURCE` (can run arbitrary code without source repo check)
-- [ ] Flag projects with VPC configuration (can reach internal network resources)
-- [ ] Flag projects with no VPC configuration AND admin service role (arbitrary internet + admin permissions)
-- [ ] Flag source credentials of type GITHUB or BITBUCKET — OAuth tokens grant repo access; note count by type
-- [ ] Note: projects where attacker has `codebuild:UpdateProject` + `codebuild:StartBuild` on an existing project with admin role = code execution WITHOUT `iam:PassRole` (flag these projects explicitly as UpdateProject targets)
+- Flag projects where service role has admin permissions or `iam:PassRole` — HIGH (Method 15 target: attacker can start build with this role; also UpdateProject attack if attacker has `codebuild:UpdateProject` permission)
+- Flag projects with environment variables whose NAMES match secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE) — HIGH; never output values
+- Flag projects with source type `NO_SOURCE` (can run arbitrary code without source repo check)
+- Flag projects with VPC configuration (can reach internal network resources)
+- Flag projects with no VPC configuration AND admin service role (arbitrary internet + admin permissions)
+- Flag source credentials of type GITHUB or BITBUCKET — OAuth tokens grant repo access; note count by type
+- Note: projects where attacker has `codebuild:UpdateProject` + `codebuild:StartBuild` on an existing project with admin role = code execution WITHOUT `iam:PassRole` (flag these projects explicitly as UpdateProject targets)
 
 ### Graph Data
-- [ ] Nodes: `{id: "data:codebuild:PROJECT_NAME", label: "PROJECT_NAME", type: "data"}` for each project
-- [ ] Edges: CodeBuild project node → IAM role node (data:codebuild:PROJECT_NAME -> role:ROLE_NAME, edge_type: "iam_trust", trust_type: "service", label: "service_role" — key for Method 15 and UpdateProject attack analysis)
+- Nodes: `{id: "data:codebuild:PROJECT_NAME", label: "PROJECT_NAME", type: "data"}` for each project
+- Edges: CodeBuild project node → IAM role node (data:codebuild:PROJECT_NAME -> role:ROLE_NAME, edge_type: "trust", trust_type: "service", label: "service_role" — key for Method 15 and UpdateProject attack analysis)
 
 ## Execution Workflow
 

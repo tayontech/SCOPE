@@ -193,21 +193,21 @@ This is a regional service. Iterate ENABLED_REGIONS (split on comma):
 Aggregate findings across all regions. Per-finding region tag: every finding object MUST include `"region": "$CURRENT_REGION"`
 
 ### Discovery
-- [ ] Queues per region: `list-queues`, then `get-queue-attributes --attribute-names All` for each — Policy, KmsMasterKeyId, SseType, VisibilityTimeout, RedrivePolicy, QueueArn, FifoQueue
-- [ ] Queue URL to queue name mapping for all queues
+- Queues per region: `list-queues`, then `get-queue-attributes --attribute-names All` for each — Policy, KmsMasterKeyId, SseType, VisibilityTimeout, RedrivePolicy, QueueArn, FifoQueue
+- Queue URL to queue name mapping for all queues
 
 ### Per-Resource Checks
-- [ ] Flag queues with resource policy containing `Principal: "*"` — CRITICAL (public send/receive access)
-- [ ] Flag queues with cross-account principals in resource policy — HIGH (data exfiltration or message injection)
-- [ ] Flag queues with no `KmsMasterKeyId` (SseType absent or DISABLED) — messages unencrypted at rest
-- [ ] Flag queues with no dead-letter queue (`RedrivePolicy` absent) — unprocessed messages silently dropped, potential data loss
-- [ ] Note SQS → Lambda event source mappings (Lambda module holds these; SQS should emit queue nodes for cross-reference)
-- [ ] Flag FIFO queues without content-based deduplication (`ContentBasedDeduplication: false`) — data integrity risk
+- Flag queues with resource policy containing `Principal: "*"` — CRITICAL (public send/receive access)
+- Flag queues with cross-account principals in resource policy — HIGH (data exfiltration or message injection)
+- Flag queues with no `KmsMasterKeyId` (SseType absent or DISABLED) — messages unencrypted at rest
+- Flag queues with no dead-letter queue (`RedrivePolicy` absent) — unprocessed messages silently dropped, potential data loss
+- Note SQS → Lambda event source mappings (Lambda module holds these; SQS should emit queue nodes for cross-reference)
+- Flag FIFO queues without content-based deduplication (`ContentBasedDeduplication: false`) — data integrity risk
 
 ### Graph Data
-- [ ] Nodes: `{id: "data:sqs:QUEUE_NAME", label: "QUEUE_NAME", type: "data"}` for each queue
-- [ ] Edges: Lambda function → SQS queue node when event source mapping exists from Lambda module cross-reference (`edge_type: "public_access"`, `access_level: "read"`, `label: "consumes"`)
-- [ ] Edges: External account → SQS queue when cross-account policy principal found (`edge_type: "public_access"`, `trust_type: "cross-account"`)
+- Nodes: `{id: "data:sqs:QUEUE_NAME", label: "QUEUE_NAME", type: "data"}` for each queue
+- Edges: Lambda function → SQS queue node when event source mapping exists from Lambda module cross-reference (`edge_type: "public_access"`, `access_level: "read"`, `label: "consumes"`)
+- Edges: External account → SQS queue when cross-account policy principal found (`edge_type: "public_access"`, `trust_type: "cross-account"`)
 
 ## Execution Workflow
 

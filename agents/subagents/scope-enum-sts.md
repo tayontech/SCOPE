@@ -103,27 +103,27 @@ FINDINGS_JSON=$(echo "[]" | jq \
 ## Service Enumeration Checklist
 
 ### Discovery
-- [ ] Caller identity: ARN, Account, UserId (GetCallerIdentity)
-- [ ] Caller type: IAM user (`:user/`), assumed role (`:assumed-role/`), root (`:root`), federated user
-- [ ] Access key attribution: account ownership for any specific key under investigation
-- [ ] Organization structure: org ID, master account, member accounts, OU hierarchy (AccessDenied is EXPECTED on non-management accounts — log "[INFO] Organizations API unavailable (non-management account)" and continue. Do NOT count this as a partial failure or set STATUS=partial — the STS module is complete when GetCallerIdentity and federation/session data succeed, regardless of Organizations access.)
-- [ ] Service Control Policies: list and describe each SCP, extract deny statements
-- [ ] Resource Control Policies: list if available (2024+ feature)
-- [ ] Merge live SCPs with config/scps/*.json pre-loaded SCPs; tag source as "live", "config", or "config+live"
-- [ ] Cross-account roles: roles whose AssumeRolePolicyDocument contains external principals
+- Caller identity: ARN, Account, UserId (GetCallerIdentity)
+- Caller type: IAM user (`:user/`), assumed role (`:assumed-role/`), root (`:root`), federated user
+- Access key attribution: account ownership for any specific key under investigation
+- Organization structure: org ID, master account, member accounts, OU hierarchy (AccessDenied is EXPECTED on non-management accounts — log "[INFO] Organizations API unavailable (non-management account)" and continue. Do NOT count this as a partial failure or set STATUS=partial — the STS module is complete when GetCallerIdentity and federation/session data succeed, regardless of Organizations access.)
+- Service Control Policies: list and describe each SCP, extract deny statements
+- Resource Control Policies: list if available (2024+ feature)
+- Merge live SCPs with config/scps/*.json pre-loaded SCPs; tag source as "live", "config", or "config+live"
+- Cross-account roles: roles whose AssumeRolePolicyDocument contains external principals
 
 ### Per-Resource Checks
-- [ ] Root caller: flag as CRITICAL if GetCallerIdentity returns `:root` ARN
-- [ ] Wildcard trust (Principal: "*"): CRITICAL finding
-- [ ] Cross-account trust without ExternalId condition: flag; use accounts.json to classify internal vs external
-- [ ] Broad account root trust (Principal: arn:aws:iam::ACCOUNT:root): HIGH if external account
-- [ ] SCPs with broad Deny statements: note which actions are blocked at the org level
-- [ ] SCP coverage gaps: accounts or OUs not covered by any restrictive SCP
+- Root caller: flag as CRITICAL if GetCallerIdentity returns `:root` ARN
+- Wildcard trust (Principal: "*"): CRITICAL finding
+- Cross-account trust without ExternalId condition: flag; use accounts.json to classify internal vs external
+- Broad account root trust (Principal: arn:aws:iam::ACCOUNT:root): HIGH if external account
+- SCPs with broad Deny statements: note which actions are blocked at the org level
+- SCP coverage gaps: accounts or OUs not covered by any restrictive SCP
 
 ### Graph Data
-- [ ] Nodes: external account nodes (external:<id>), owned=true/false from accounts.json
-- [ ] Edges: cross-account trust (source: ext node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
-- [ ] Source node type for caller: match actual caller type — user:<name>, role:<role-name>, user:root — do not hardcode
+- Nodes: external account nodes (external:<id>), owned=true/false from accounts.json
+- Edges: cross-account trust (source: ext node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
+- Source node type for caller: match actual caller type — user:<name>, role:<role-name>, user:root — do not hardcode
 
 ## Execution Workflow
 

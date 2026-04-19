@@ -207,21 +207,21 @@ If writing the final sns.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 ```
 
 ### Discovery
-- [ ] Topics per region: `list-topics`, then `get-topic-attributes` for each — Policy, KmsMasterKeyId, DisplayName, SubscriptionsConfirmed, SubscriptionsPending
-- [ ] Subscriptions per topic: `list-subscriptions-by-topic` — endpoint type, endpoint, status, subscription ARN
+- Topics per region: `list-topics`, then `get-topic-attributes` for each — Policy, KmsMasterKeyId, DisplayName, SubscriptionsConfirmed, SubscriptionsPending
+- Subscriptions per topic: `list-subscriptions-by-topic` — endpoint type, endpoint, status, subscription ARN
 
 ### Per-Resource Checks
-- [ ] Flag topics with resource policy containing `Principal: "*"` — CRITICAL (public publish access)
-- [ ] Flag topics with cross-account principals in resource policy — HIGH (data exfiltration path)
-- [ ] Flag HTTP/HTTPS subscriptions with `PendingConfirmation` status — MEDIUM (subscription hijack if attacker controls endpoint domain)
-- [ ] Flag cross-account subscriptions (subscription endpoint ARN belongs to external account)
-- [ ] Note SNS → Lambda subscriptions: topic publish triggers Lambda function execution with Lambda's execution role (indirect code execution path)
-- [ ] Flag topics with no `KmsMasterKeyId` — messages unencrypted at rest
+- Flag topics with resource policy containing `Principal: "*"` — CRITICAL (public publish access)
+- Flag topics with cross-account principals in resource policy — HIGH (data exfiltration path)
+- Flag HTTP/HTTPS subscriptions with `PendingConfirmation` status — MEDIUM (subscription hijack if attacker controls endpoint domain)
+- Flag cross-account subscriptions (subscription endpoint ARN belongs to external account)
+- Note SNS → Lambda subscriptions: topic publish triggers Lambda function execution with Lambda's execution role (indirect code execution path)
+- Flag topics with no `KmsMasterKeyId` — messages unencrypted at rest
 
 ### Graph Data
-- [ ] Nodes: `{id: "data:sns:TOPIC_NAME", label: "TOPIC_NAME", type: "data"}` for each topic
-- [ ] Edges: Lambda function node → SNS topic node when Lambda subscription found (`edge_type: "public_access"`, `access_level: "read"`, `label: "triggered_by"`)
-- [ ] Edges: External account → SNS topic when cross-account subscription or policy principal found (`edge_type: "public_access"`, `trust_type: "cross-account"`)
+- Nodes: `{id: "data:sns:TOPIC_NAME", label: "TOPIC_NAME", type: "data"}` for each topic
+- Edges: Lambda function node → SNS topic node when Lambda subscription found (`edge_type: "public_access"`, `access_level: "read"`, `label: "triggered_by"`)
+- Edges: External account → SNS topic when cross-account subscription or policy principal found (`edge_type: "public_access"`, `trust_type: "cross-account"`)
 
 ## Execution Workflow
 
