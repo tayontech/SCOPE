@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-19T13:38:00.000Z"
-last_activity: "2026-04-19 — Completed 61-02: replaced Phase A jq pipelines with extract-graph.js invocation; added 9 PIPELINE_ERROR guards across normalizers"
+last_updated: "2026-04-19T14:18:00.000Z"
+last_activity: "2026-04-19 — Completed 62-02: credential isolation shared include + exploit hop template subshell rewrite"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 8
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 61 — IN PROGRESS
-Plan: 61-02 complete (plan 61-01 pending)
-Status: Phase 61 in progress — 61-02 complete, 61-01 pending
-Last activity: 2026-04-19 — Completed 61-02: replaced Phase A jq pipelines with extract-graph.js invocation; added 9 PIPELINE_ERROR guards across normalizers
+Phase: 62 — IN PROGRESS
+Plan: 62-02 complete (plan 62-01 pending)
+Status: Phase 62 in progress — 62-02 complete, 62-01 pending
+Last activity: 2026-04-19 — Completed 62-02: credential isolation shared include + exploit hop template subshell rewrite
 
 ## Phase Index
 
@@ -30,7 +30,7 @@ Last activity: 2026-04-19 — Completed 61-02: replaced Phase A jq pipelines wit
 | 59 | scope-defend Intake Consolidation | PROM-04 | Complete (2026-04-19) |
 | 60 | Runtime Reference Loading | PROM-06 | Complete (2026-04-19) |
 | 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | In Progress (61-02 complete) |
-| 62 | Input Safety — Path Sanitization & Credential Isolation | DET-03, DET-04 | Pending |
+| 62 | Input Safety — Path Sanitization & Credential Isolation | DET-03, DET-04 | In Progress (62-02 complete) |
 | 63 | IAM Simulator Wrapper | SIM-01 | Pending |
 | 64 | IAM Simulator Integration — Exploit & Attack Paths | SIM-02, SIM-03, SIM-04 | Pending |
 
@@ -55,6 +55,7 @@ Last activity: 2026-04-19 — Completed 61-02: replaced Phase A jq pipelines wit
 - Phase 58-03 decision: <session_isolation> renamed to <run_directory> in exploit/defend/hunt; audit replaced with <run_index> for index content; mandate line removed from all
 - Phase 59-01 decision: scope-defend intake consolidated into <intake_protocol>; no orchestrator-vs-operator distinction — same routing logic either way; no multi-run aggregation; most-recent fallback selects single audit run
 - Phase 60-02 decision: ESC_CAT/PERSIST_CAT/POSTEX_CAT loads are hard-fail mandatory (no fallback); cloudtrail-classes.json retains existing graceful degradation; all four loads co-located in cloudtrail_classification section
+- Phase 62-02 decision: Nested subshells for multi-hop chains — each hop opens a child subshell inside parent hop's subshell (not sequential subshells)
 
 ## Dependency Order
 
