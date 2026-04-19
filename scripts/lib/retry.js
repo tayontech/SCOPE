@@ -30,7 +30,8 @@ async function withRetry(fn, opts = {}) {
       return await fn();
     } catch (err) {
       const code = err.name || err.Code || err.__type || '';
-      const isThrottle = THROTTLE_CODES.has(code);
+      const httpStatus = err.$metadata?.httpStatusCode;
+      const isThrottle = THROTTLE_CODES.has(code) || httpStatus === 429 || httpStatus === 503;
       if (!isThrottle || attempt >= maxRetries) {
         throw err;
       }
