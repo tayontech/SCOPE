@@ -87,22 +87,22 @@ function extractDlqArn(redrivePolicyJson) {
   }
 }
 
-// --- Main ---
+// --- Exported run() for testing ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const { runDir, region } = opts;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/sqs.js --run-dir <dir> --region <region>');
-    process.exit(1);
+  if (!runDir || !region) {
+    throw new Error('runDir and region are required');
   }
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'SQS_Enumeration_Start', { region: args.region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
+  const client = opts.clients?.sqs ?? new SQSClient({ region });
+
+  const logger = createLogger(runDir);
+  logger.log('info', 'SQS_Enumeration_Start', { region });
 
   // Get account ID via STS
-  const stsClient = new STSClient({ region: args.region });
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -110,11 +110,9 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
 
-  const client = new SQSClient({ region: args.region });
   const findings = [];
   let status = 'complete';
   const errors = [];
@@ -122,20 +120,20 @@ async function main() {
   // List all queues (paginated via NextToken)
   let queueUrls;
   try {
-    logger.log('api_call', 'ListQueues', { region: args.region });
+    logger.log('api_call', 'ListQueues', { region });
     queueUrls = await paginate(client, ListQueuesCommand, 'QueueUrls', {});
   } catch (err) {
     logger.log('error', 'ListQueues', { error: err.message });
     const envelope = createEnvelope({
       module: 'sqs',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'error',
       findings: [],
     });
-    writeEnvelope(args.runDir, envelope);
+    writeEnvelope(runDir, envelope);
     await logger.flush();
-    process.exit(1);
+    throw new Error(`ListQueues failed: ${err.message}`);
   }
 
   // Per-queue: GetQueueAttributes (All)
@@ -164,7 +162,7 @@ async function main() {
         resource_type: 'sqs_queue',
         resource_id: queueName,
         arn: queueArn,
-        region: args.region,
+        region,
         queue_url: queueUrl,
         resource_policy: principals.length > 0 ? { principals } : null,
         fifo: isFifo,
@@ -184,12 +182,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'sqs',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'SQS_Enumeration_Complete', {
     status,
     queues: findings.length,
@@ -201,7 +199,28 @@ async function main() {
   console.log(`SQS enumeration complete: ${outPath} (${findings.length} queues, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/sqs.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

@@ -48,7 +48,7 @@ function parseArgs(argv) {
 
 // --- Instance enumeration ---
 
-async function enumerateInstances(ec2, logger) {
+async function enumerateInstances(ec2, region, logger) {
   logger.log('api_call', 'DescribeInstances', { service: 'ec2' });
   const reservations = await paginate(ec2, DescribeInstancesCommand, 'Reservations');
 
@@ -64,7 +64,8 @@ async function enumerateInstances(ec2, logger) {
       const finding = {
         resource_type: 'ec2_instance',
         resource_id: instance.InstanceId,
-        arn: `arn:aws:ec2:${ec2.config.region}:*:instance/${instance.InstanceId}`,
+        arn: `arn:aws:ec2:${region}:*:instance/${instance.InstanceId}`,
+        region,
         name: nameTag ? nameTag.Value : null,
         state: instance.State?.Name || null,
         instance_type: instance.InstanceType || null,
@@ -120,7 +121,7 @@ async function enumerateInstances(ec2, logger) {
 
 // --- Security Groups ---
 
-async function enumerateSecurityGroups(ec2, logger) {
+async function enumerateSecurityGroups(ec2, region, logger) {
   logger.log('api_call', 'DescribeSecurityGroups', { service: 'ec2' });
   const groups = await paginate(ec2, DescribeSecurityGroupsCommand, 'SecurityGroups');
 
@@ -148,7 +149,8 @@ async function enumerateSecurityGroups(ec2, logger) {
     const finding = {
       resource_type: 'ec2_security_group',
       resource_id: sg.GroupId,
-      arn: `arn:aws:ec2:${ec2.config.region}:*:security-group/${sg.GroupId}`,
+      arn: `arn:aws:ec2:${region}:*:security-group/${sg.GroupId}`,
+      region,
       name: sg.GroupName || null,
       description: sg.Description || null,
       vpc_id: sg.VpcId || null,
@@ -173,7 +175,7 @@ async function enumerateSecurityGroups(ec2, logger) {
 
 // --- VPCs ---
 
-async function enumerateVpcs(ec2, logger) {
+async function enumerateVpcs(ec2, region, logger) {
   logger.log('api_call', 'DescribeVpcs', { service: 'ec2' });
   const vpcs = await paginate(ec2, DescribeVpcsCommand, 'Vpcs');
 
@@ -183,7 +185,8 @@ async function enumerateVpcs(ec2, logger) {
     findings.push({
       resource_type: 'ec2_vpc',
       resource_id: vpc.VpcId,
-      arn: `arn:aws:ec2:${ec2.config.region}:*:vpc/${vpc.VpcId}`,
+      arn: `arn:aws:ec2:${region}:*:vpc/${vpc.VpcId}`,
+      region,
       name: nameTag ? nameTag.Value : null,
       cidr_block: vpc.CidrBlock || null,
       is_default: vpc.IsDefault || false,
@@ -198,7 +201,7 @@ async function enumerateVpcs(ec2, logger) {
 
 // --- Snapshots ---
 
-async function enumerateSnapshots(ec2, accountId, logger) {
+async function enumerateSnapshots(ec2, accountId, region, logger) {
   logger.log('api_call', 'DescribeSnapshots', { service: 'ec2', owner: 'self' });
   const snapshots = await paginate(ec2, DescribeSnapshotsCommand, 'Snapshots', {
     params: { OwnerIds: ['self'] },
@@ -228,7 +231,8 @@ async function enumerateSnapshots(ec2, accountId, logger) {
     const finding = {
       resource_type: 'ec2_snapshot',
       resource_id: snap.SnapshotId,
-      arn: `arn:aws:ec2:${ec2.config.region}:${accountId}:snapshot/${snap.SnapshotId}`,
+      arn: `arn:aws:ec2:${region}:${accountId}:snapshot/${snap.SnapshotId}`,
+      region,
       volume_id: snap.VolumeId || null,
       volume_size_gb: snap.VolumeSize || null,
       encrypted: snap.Encrypted || false,
@@ -262,7 +266,7 @@ async function enumerateSnapshots(ec2, accountId, logger) {
 
 // --- ELBv2 (ALB/NLB) ---
 
-async function enumerateELBv2(elbv2, logger) {
+async function enumerateELBv2(elbv2, region, logger) {
   logger.log('api_call', 'DescribeLoadBalancers_v2', { service: 'elbv2' });
   const lbs = await paginate(elbv2, DescribeALBsCommand, 'LoadBalancers', {
     tokenKey: 'Marker',
@@ -287,6 +291,7 @@ async function enumerateELBv2(elbv2, logger) {
       resource_type: 'ec2_load_balancer',
       resource_id: lb.LoadBalancerName,
       arn: lb.LoadBalancerArn,
+      region,
       type: lb.Type || null,
       scheme: lb.Scheme || null,
       state: lb.State?.Code || null,
@@ -318,7 +323,7 @@ async function enumerateELBv2(elbv2, logger) {
 
 // --- Classic ELB ---
 
-async function enumerateClassicELB(elb, logger) {
+async function enumerateClassicELB(elb, region, logger) {
   logger.log('api_call', 'DescribeLoadBalancers_classic', { service: 'elb' });
   const lbs = await paginate(elb, DescribeClassicLBsCommand, 'LoadBalancerDescriptions', {
     tokenKey: 'Marker',
@@ -331,6 +336,7 @@ async function enumerateClassicELB(elb, logger) {
       resource_type: 'ec2_load_balancer',
       resource_id: lb.LoadBalancerName,
       arn: null, // Classic ELBs don't have ARN in describe response
+      region,
       type: 'classic',
       scheme: lb.Scheme || null,
       dns_name: lb.DNSName || null,
@@ -360,22 +366,24 @@ async function enumerateClassicELB(elb, logger) {
   return findings;
 }
 
-// --- Main ---
+// --- Exported run() for testing ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const { runDir, region } = opts;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/ec2.js --run-dir <dir> --region <region>');
-    process.exit(1);
+  if (!runDir || !region) {
+    throw new Error('runDir and region are required');
   }
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'EC2_Enumeration_Start', { region: args.region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
+  const ec2 = opts.clients?.ec2 ?? new EC2Client({ region });
+  const elbv2 = opts.clients?.elbv2 ?? new ElasticLoadBalancingV2Client({ region });
+  const elb = opts.clients?.elb ?? new ElasticLoadBalancingClient({ region });
+
+  const logger = createLogger(runDir);
+  logger.log('info', 'EC2_Enumeration_Start', { region });
 
   // Get account ID via STS
-  const stsClient = new STSClient({ region: args.region });
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -383,13 +391,8 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
-
-  const ec2 = new EC2Client({ region: args.region });
-  const elbv2 = new ElasticLoadBalancingV2Client({ region: args.region });
-  const elb = new ElasticLoadBalancingClient({ region: args.region });
 
   const allFindings = [];
   let status = 'complete';
@@ -397,7 +400,7 @@ async function main() {
 
   // 1. Instances
   try {
-    const instances = await enumerateInstances(ec2, logger);
+    const instances = await enumerateInstances(ec2, region, logger);
     allFindings.push(...instances);
   } catch (err) {
     errors.push({ resource_type: 'ec2_instance', error: err.message });
@@ -406,7 +409,7 @@ async function main() {
 
   // 2. Security Groups
   try {
-    const sgs = await enumerateSecurityGroups(ec2, logger);
+    const sgs = await enumerateSecurityGroups(ec2, region, logger);
     allFindings.push(...sgs);
   } catch (err) {
     errors.push({ resource_type: 'ec2_security_group', error: err.message });
@@ -415,7 +418,7 @@ async function main() {
 
   // 3. VPCs
   try {
-    const vpcs = await enumerateVpcs(ec2, logger);
+    const vpcs = await enumerateVpcs(ec2, region, logger);
     allFindings.push(...vpcs);
   } catch (err) {
     errors.push({ resource_type: 'ec2_vpc', error: err.message });
@@ -424,7 +427,7 @@ async function main() {
 
   // 4. Snapshots
   try {
-    const snaps = await enumerateSnapshots(ec2, accountId, logger);
+    const snaps = await enumerateSnapshots(ec2, accountId, region, logger);
     allFindings.push(...snaps);
   } catch (err) {
     errors.push({ resource_type: 'ec2_snapshot', error: err.message });
@@ -433,7 +436,7 @@ async function main() {
 
   // 5. ELBv2 (ALB/NLB)
   try {
-    const elbv2Findings = await enumerateELBv2(elbv2, logger);
+    const elbv2Findings = await enumerateELBv2(elbv2, region, logger);
     allFindings.push(...elbv2Findings);
   } catch (err) {
     errors.push({ resource_type: 'ec2_load_balancer_v2', error: err.message });
@@ -442,7 +445,7 @@ async function main() {
 
   // 6. Classic ELB
   try {
-    const classicFindings = await enumerateClassicELB(elb, logger);
+    const classicFindings = await enumerateClassicELB(elb, region, logger);
     allFindings.push(...classicFindings);
   } catch (err) {
     errors.push({ resource_type: 'ec2_load_balancer_classic', error: err.message });
@@ -454,12 +457,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'ec2',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings: allFindings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
 
   const counts = {};
   for (const f of allFindings) {
@@ -478,7 +481,28 @@ async function main() {
   console.log(`EC2 enumeration complete: ${outPath} (${allFindings.length} resources, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/ec2.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

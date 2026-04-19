@@ -49,22 +49,22 @@ function chunk(arr, size) {
   return chunks;
 }
 
-// --- Main ---
+// --- Exported run() for testing ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const { runDir, region } = opts;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/codebuild.js --run-dir <dir> --region <region>');
-    process.exit(1);
+  if (!runDir || !region) {
+    throw new Error('runDir and region are required');
   }
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'CodeBuild_Enumeration_Start', { region: args.region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
+  const codebuild = opts.clients?.codebuild ?? new CodeBuildClient({ region });
+
+  const logger = createLogger(runDir);
+  logger.log('info', 'CodeBuild_Enumeration_Start', { region });
 
   // Get account ID via STS
-  const stsClient = new STSClient({ region: args.region });
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -72,11 +72,8 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
-
-  const codebuild = new CodeBuildClient({ region: args.region });
 
   // List all project names (paginated)
   logger.log('api_call', 'ListProjects', { service: 'codebuild' });
@@ -91,25 +88,24 @@ async function main() {
     const envelope = createEnvelope({
       module: 'codebuild',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'error',
       findings: [],
     });
-    writeEnvelope(args.runDir, envelope);
+    writeEnvelope(runDir, envelope);
     await logger.flush();
-    console.error(`FATAL: ListProjects failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`ListProjects failed: ${err.message}`);
   }
 
   if (!projectNames || projectNames.length === 0) {
     const envelope = createEnvelope({
       module: 'codebuild',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'complete',
       findings: [],
     });
-    const outPath = writeEnvelope(args.runDir, envelope);
+    const outPath = writeEnvelope(runDir, envelope);
     logger.log('info', 'CodeBuild_Enumeration_Complete', {
       status: 'complete',
       projects: 0,
@@ -142,6 +138,7 @@ async function main() {
           resource_type: 'codebuild_project',
           resource_id: project.name,
           arn: project.arn || null,
+          region,
           service_role: project.serviceRole || null,
           source_type: project.source?.type || null,
           source_location: project.source?.location || null,
@@ -209,12 +206,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'codebuild',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
 
   logger.log('info', 'CodeBuild_Enumeration_Complete', {
     status,
@@ -227,7 +224,28 @@ async function main() {
   console.log(`CodeBuild enumeration complete: ${outPath} (${findings.length} projects, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- CLI entry point ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/codebuild.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };
