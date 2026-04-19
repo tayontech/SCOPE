@@ -69,24 +69,13 @@ The operator reviews the final combined output (audit findings + remediation pla
 </autonomous_mode>
 
 <project_context>
-## SCOPE Project Context
+@include agents/shared/agent-preamble.md
 
-SCOPE (Security Cloud Ops Purple Engagement) runs the full purple team loop: audit → exploit → defend → hunt.
-
-**Credential model:** This agent does NOT make AWS API calls. It reads audit output files and writes remediation artifacts. No credential checks are needed. SCOPE inherits credentials from the shell environment for agents that do make API calls (audit, exploit).
-
-**Dashboard:** All visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`). Defend exports `results.json` to `dashboard/public/$RUN_ID.json` and updates `dashboard/public/index.json` — upserts this run into the `runs[]` array.
-
-**Evidence fallback hierarchy:** Defend consumes upstream audit output in priority order:
-1. `./agent-logs/` — highest fidelity (claim-level provenance, coverage manifests)
-2. `./data/` — structured report data (summaries, attack path lists)
-3. `$RUN_DIR/` — raw artifacts (findings.md, results.json). Fallback when normalized data is unavailable.
-
-**No auto-deployment:** This agent generates artifacts for operator review. Never invoke `aws organizations create-policy`, `aws cloudformation deploy`, or any deployment/mutation command. Write files only.
-
-**CloudTrail + Splunk:** CloudTrail is the only log source for Splunk. All SPL detections target `index=cloudtrail`. Before generating detections, reason about which AWS API calls generate which CloudTrail events. Do not assume Splunk is available — agents must work standalone without Splunk MCP.
-
-**Key pitfalls:** Do not silently skip failures in defend's own logic (stop and report). Exception: middleware pipeline steps are non-blocking — log warnings and continue. Do not re-score findings — trust severity assigned by the audit skill.
+**Defend-specific notes:**
+- This agent does NOT make AWS API calls. It reads audit output files and writes remediation artifacts. No credential checks are needed.
+- **SCP/SPL equality principle:** Preventative and detective controls are equals. Present SCP/RCP policies alongside SPL detections with no default bias toward one category.
+- **Evidence fallback hierarchy:** Defend consumes upstream audit output in priority order: `./agent-logs/` (highest fidelity) → `./data/` (structured summaries) → `$RUN_DIR/` (raw artifacts).
+- **Key pitfalls:** Do not silently skip failures in defend's own logic (stop and report). Exception: middleware pipeline steps are non-blocking. Do not re-score findings — trust severity assigned by the audit skill.
 </project_context>
 
 <mandatory_outputs>
@@ -176,54 +165,21 @@ See `<session_isolation>` for additional pipeline context.
 </post_processing_pipeline>
 
 <verification>
-Before producing any output containing technical claims (AWS API names, CloudTrail event names, SPL queries, MITRE ATT&CK references, IAM policy syntax, SCP/RCP structures, or attack path logic):
+@include agents/shared/verification-protocol.md
 
-1. Read the verification protocol: read `agents/subagents/scope-verify.md` — apply domain-core, domain-aws, and domain-splunk sections
-2. Apply the full verification protocol — claim ledger, semantic lints, satisfiability checks, output taxonomy, and remediation safety rules
-3. Enforce the output taxonomy: only Guaranteed and Conditional claims appear. Strip Speculative claims.
-4. For SPL: enforce all semantic lint hard-fail rules. Rewrite or strip non-compliant queries. Include rerun recipe.
-5. For attack paths: classify each step's satisfiability. List gating conditions for Conditional paths.
-6. For remediation: run safety checks on all SCPs/RCPs. Annotate high blast radius changes.
-7. Silently correct errors. Strip claims that fail validation. The operator receives only verified, reproducible output.
-8. When confidence is below 95%, search the web for official documentation to validate or correct.
-
-This step is automatic and mandatory. Do not skip it. Do not present verification findings separately. Never block the agent run — only block/strip individual claims.
+**Defend extension:** Also apply `domain-splunk` from `agents/subagents/scope-verify.md` — defend generates SPL detections alongside SCPs/RCPs.
 </verification>
 
 <evidence_protocol>
-## Evidence Logging Protocol
+@include agents/shared/evidence-logging.md
 
-During execution, maintain a structured evidence log at `$RUN_DIR/agent-log.jsonl`.
-Append one JSON line per evidence event.
-
-### When to log
-1. Every policy evaluation — full 7-step chain
-2. Every claim — classification, confidence, reasoning, source evidence IDs
-3. Coverage checkpoints — end of each remediation module
-
-Note: This agent does NOT make AWS API calls, so there are no `api_call` evidence records. Evidence consists of policy evaluations, claims, and coverage checks only.
-
-### Evidence IDs
-Sequential: ev-001, ev-002, etc.
-Claims: claim-{type}-{seq} (e.g., claim-scp-001 for SCP claims, claim-det-001 for detection claims)
-
-### Record types
-See Phase 2 evidence indexing in `agents/subagents/scope-pipeline.md` for the full schema of each record type:
-- `api_call` — service, action, parameters, response_status, response_summary, duration_ms
-- `policy_eval` — principal_arn, action_tested, 7-step evaluation_chain, source_evidence_ids
-- `claim` — statement, classification (guaranteed/conditional/speculative), confidence_reasoning, gating_conditions, source_evidence_ids
-- `coverage_check` — scope_area, checked[], not_checked[], not_checked_reason, coverage_pct
-
-### Failure handling
-If write fails, log warning and continue. Evidence logging must never block the primary defend workflow.
+**Defend-specific notes:**
+- This agent does NOT make AWS API calls — there are no `api_call` evidence records. Evidence consists of policy evaluations, claims, and coverage checks only.
+- Claim ID convention: `claim-scp-001` for SCP claims, `claim-det-001` for detection claims.
 </evidence_protocol>
 
-<session_isolation>
-## Session Isolation
-
-Every defend invocation is an independent session. Results from different defend runs MUST NOT mix.
-
-### Run Directory
+<run_directory>
+## Run Directory Setup
 
 At the start of every defend run (after audit intake, before any processing), create a unique run directory. Defend output lives as a subdirectory of the audit run it analyzes.
 
@@ -329,7 +285,7 @@ After writing all artifacts (including results.json from the results_export step
 
 Sequential. Automatic. Mandatory. Do not ask the operator for approval.
 If any step fails, log a warning and continue to the next step — the raw artifacts are already written.
-</session_isolation>
+</run_directory>
 
 
 <findings_intake>
