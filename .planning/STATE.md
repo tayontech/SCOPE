@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.14
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-19T19:58:57.679Z"
+last_updated: "2026-04-19T22:30:00.000Z"
 last_activity: 2026-04-19
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 6
-  total_plans: 13
-  completed_plans: 13
-  percent: 100
+  total_plans: 17
+  completed_plans: 16
+  percent: 94
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 71 (Migration Testing & Enum Agent Removal) — EXECUTING
-Plan: 2 of 5
-Status: Ready to execute
+Phase: 72 (Orchestrator Rewrite) — EXECUTING
+Plan: 4 of 4
+Status: Plan 03 complete — ready for plan 04
 Last activity: 2026-04-19
 
 ## Phase Index
@@ -54,6 +54,9 @@ Last activity: 2026-04-19
 - Core enum logic preserved in SDK scripts: service-linked role exclusion, trust type classification, risk labeling
 - Scripts live in scripts/enum/{service}.js, shared lib at scripts/lib/
 - Pipeline no longer normalizes enum data — SDK scripts produce final format directly
+- scope-audit.md rewritten: all 16 SDK enum scripts dispatched via Bash background processes, fail-fast on any non-zero exit
+- Orchestrator region discovery uses discover-regions.js (Account API) with 17-region fallback replacing old aws ec2 describe-regions call
+- SSM is now a standalone service in routing (was incorrectly aliased to ec2)
 
 ## Dependency Order
 
