@@ -354,9 +354,7 @@ After `active_hypothesis` is set and before entering `<investigation_loop>`, rea
 cat config/hunt-techniques.json 2>/dev/null || echo '{}'
 ```
 
-If the file is absent, log: `[WARN] config/hunt-techniques.json not found — hunt technique patterns unavailable. Falling back to reference patterns in <reasoning_framework>.`
-
-Continue regardless of whether the file loads.
+If the file is absent, emit: `[ERROR] config/hunt-techniques.json not found — setup required.` and halt.
 
 ### Pattern Matching — Adversary Goal → Category Key
 
@@ -708,266 +706,27 @@ At each step, the agent evaluates these priorities in order. The highest-priorit
 
 When the priority hierarchy produces a step, the structured reasoning block must cite which priority triggered the selection and what specific context entry or absence of context drove the decision.
 
-### Reference Pattern Catalogue
+### Reference Pattern Loading
 
-Reference patterns provide investigation *angles* — not mandatory ordered steps. Each pattern lists the key investigative angles for an alert type. The agent draws from these angles in whatever order the priority hierarchy and findings dictate.
+The full reference pattern catalogue is in `config/hunt-reference-patterns.json`. Load the matching pattern on-demand after `active_hypothesis` is set, keyed by `alert_type`:
 
-#### Pattern: CreateAccessKey
+```bash
+ALERT_TYPE="[alert_type from investigation_context]"
+REF_PATTERN=$(jq -r --arg t "$ALERT_TYPE" '
+  .patterns as $p |
+  ($p | keys[] | select(ascii_downcase == ($t | ascii_downcase))) as $k |
+  $p[$k]
+' config/hunt-reference-patterns.json 2>/dev/null)
 
-**Investigation angles:**
-- **Anchor event** — Find the triggering CreateAccessKey, extract actor vs. target user, source IP, user agent
-- **Target user privilege assessment** — What can the target user do? Recent IAM changes to the target?
-- **Actor reconnaissance** — Did the actor enumerate IAM resources before key creation?
-- **Credential usage** — Has the new key been used? From what IP? What services?
-- **Related persistence** — Other persistence mechanisms in the same time window (CreateLoginProfile, AddUserToGroup, policy changes)?
-
-**SPL templates** (adapt field values from investigation_context):
-
-Anchor event:
-```spl
-index=cloudtrail eventName=CreateAccessKey (userIdentity.arn="[user_arn]" OR userIdentity.userName="[user_name]") earliest="[time_range_earliest]" latest="[time_range_latest]"
-| rename userIdentity.userName AS actor, userIdentity.arn AS actor_arn, requestParameters.userName AS target_user
-| table _time eventName actor actor_arn target_user sourceIPAddress userAgent recipientAccountId errorCode
-| sort _time
+if [ -z "$REF_PATTERN" ] || [ "$REF_PATTERN" = "null" ]; then
+  echo "[INFO] No reference pattern matched alert type '$ALERT_TYPE' — using Generic pattern"
+  REF_PATTERN=$(jq -r '.patterns.Generic' config/hunt-reference-patterns.json)
+fi
 ```
 
-Target user IAM history:
-```spl
-index=cloudtrail eventSource=iam.amazonaws.com (userIdentity.userName="[target_user]" OR requestParameters.userName="[target_user]") earliest="[24h_before_event]" latest="[event_time]"
-| table _time eventName userIdentity.userName userIdentity.arn requestParameters.policyArn requestParameters.groupName sourceIPAddress errorCode
-| sort _time
-```
+If `config/hunt-reference-patterns.json` does not exist: emit `[ERROR] config/hunt-reference-patterns.json not found — setup required. Cannot load reference patterns.` and halt the investigation.
 
-Actor enumeration (30 min before):
-```spl
-index=cloudtrail (userIdentity.arn="[actor_arn]" OR userIdentity.userName="[actor_name]") (eventName=ListUsers OR eventName=ListAccessKeys OR eventName=ListRoles OR eventName=ListGroupsForUser OR eventName=GetUser OR eventName=GetRole OR eventName=ListAttachedRolePolicies OR eventName=ListAttachedUserPolicies OR eventName=GetUserPolicy OR eventName=GetAccountAuthorizationDetails) earliest="[30_min_before_event]" latest="[event_time]"
-| table _time eventName userIdentity.userName sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Credential usage (2h after):
-```spl
-index=cloudtrail (sourceIPAddress="[source_ip]" OR userIdentity.userName="[target_user]") earliest="[event_time]" latest="[2h_after_event]"
-| table _time eventName eventSource userIdentity.userName userIdentity.arn userIdentity.accessKeyId sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Related persistence (1h window):
-```spl
-index=cloudtrail eventSource=iam.amazonaws.com (userIdentity.arn="[actor_arn]" OR userIdentity.userName="[actor_name]") earliest="[30_min_before_event]" latest="[30_min_after_event]"
-| table _time eventName userIdentity.userName requestParameters.userName requestParameters.policyArn sourceIPAddress errorCode
-| sort _time
-```
-
----
-
-#### Pattern: Root Account Login
-
-**Investigation angles:**
-- **Anchor event** — Find ConsoleLogin for Root, extract MFA status, login result, source IP, user agent
-- **Post-login activity** — All Root activity in 1 hour after login (IAM mods, CloudTrail changes, security tool changes)
-- **Pre-login attempts** — Failed ConsoleLogin for Root in 1 hour before (brute force / credential stuffing pattern)
-- **IP history** — Has this source IP been seen before in this account? Which other principals use it?
-
-**SPL templates:**
-
-Anchor event:
-```spl
-index=cloudtrail eventName=ConsoleLogin "userIdentity.type"=Root earliest="[time_range_earliest]" latest="[time_range_latest]"
-| eval mfa_used=coalesce('additionalEventData.MFAUsed', "unknown")
-| eval login_result=if(errorCode="" OR isnull(errorCode), "Success", "Failed: ".errorCode)
-| table _time eventName sourceIPAddress userAgent mfa_used login_result recipientAccountId
-| sort _time
-```
-
-Post-login activity:
-```spl
-index=cloudtrail "userIdentity.type"=Root earliest="[login_time]" latest="[1h_after_login]"
-| table _time eventName eventSource requestParameters.* sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Pre-login attempts:
-```spl
-index=cloudtrail eventName=ConsoleLogin "userIdentity.type"=Root earliest="[1h_before_login]" latest="[login_time]"
-| eval login_result=if(errorCode="" OR isnull(errorCode), "Success", "Failed: ".errorCode)
-| table _time eventName sourceIPAddress userAgent login_result
-| sort _time
-```
-
-IP history:
-```spl
-index=cloudtrail sourceIPAddress="[source_ip]" earliest="[1.5h_before_login]" latest="[1.5h_after_login]"
-| stats count by userIdentity.arn userIdentity.userName userIdentity.type
-| table userIdentity.arn userIdentity.userName userIdentity.type count
-| sort -count
-```
-
----
-
-#### Pattern: IAM Policy Change
-
-Covers: AttachRolePolicy, PutUserPolicy, CreatePolicyVersion, AttachUserPolicy, PutRolePolicy, CreatePolicy
-
-**Investigation angles:**
-- **Anchor event** — Find the policy change, extract what was changed, who changed it, target principal
-- **Privilege exploitation** — Did the target principal use new permissions in 2 hours after? Which services?
-- **Actor reconnaissance** — IAM enumeration by the actor in 2 hours before (ListPolicies, GetPolicy, GetAccountAuthorizationDetails)
-- **Lateral movement** — If role policy changed, did new principals assume the role after the change?
-
-**SPL templates:**
-
-Anchor event:
-```spl
-index=cloudtrail (eventName=AttachRolePolicy OR eventName=PutUserPolicy OR eventName=CreatePolicyVersion OR eventName=AttachUserPolicy OR eventName=PutRolePolicy OR eventName=CreatePolicy) (userIdentity.arn="[user_arn]" OR userIdentity.userName="[user_name]") earliest="[time_range_earliest]" latest="[time_range_latest]"
-| table _time eventName userIdentity.arn userIdentity.userName requestParameters.policyArn requestParameters.roleName requestParameters.userName requestParameters.policyDocument sourceIPAddress errorCode
-| sort _time
-```
-
-Target principal activity after change:
-```spl
-index=cloudtrail (userIdentity.arn="[target_principal_arn]" OR userIdentity.userName="[target_principal_name]") earliest="[change_time]" latest="[2h_after_change]"
-| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Actor history before change:
-```spl
-index=cloudtrail (userIdentity.arn="[actor_arn]" OR userIdentity.userName="[actor_name]") earliest="[2h_before_change]" latest="[change_time]"
-| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Role assumption after change:
-```spl
-index=cloudtrail eventName=AssumeRole requestParameters.roleArn="[target_role_arn]" earliest="[change_time]" latest="[2h_after_change]"
-| table _time eventName userIdentity.arn userIdentity.userName requestParameters.roleArn requestParameters.roleSessionName sourceIPAddress errorCode
-| sort _time
-```
-
----
-
-#### Pattern: AssumeRole / Cross-Account Access
-
-**Investigation angles:**
-- **Anchor event** — Find the AssumeRole event, extract assuming principal, target role, session name, external ID, cross-account status
-- **Session activity** — What did the assumed role session do in 2 hours after? Key: IAM changes, data access, role chaining
-- **Historical baseline** — Who normally assumes this role? From where? Compare alerting assumption to 7-day baseline
-- **Post-assumption IAM** — Did the assumed role session make IAM changes (privilege escalation from temporary session)?
-
-**SPL templates:**
-
-Anchor event:
-```spl
-index=cloudtrail eventName=AssumeRole (userIdentity.arn="[user_arn]" OR requestParameters.roleArn="[role_arn_if_known]") earliest="[time_range_earliest]" latest="[time_range_latest]"
-| table _time eventName userIdentity.arn userIdentity.type requestParameters.roleArn requestParameters.roleSessionName requestParameters.externalId responseElements.assumedRoleUser.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Session activity:
-```spl
-index=cloudtrail "userIdentity.arn"="[assumed_role_session_arn]" earliest="[assumption_time]" latest="[2h_after_assumption]"
-| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Historical assumption pattern:
-```spl
-index=cloudtrail eventName=AssumeRole requestParameters.roleArn="[target_role_arn]" earliest="[7d_before_event]" latest="[event_time]"
-| stats count by userIdentity.arn sourceIPAddress
-| table userIdentity.arn sourceIPAddress count
-| sort -count
-```
-
-Post-assumption IAM:
-```spl
-index=cloudtrail eventSource=iam.amazonaws.com "userIdentity.arn"="[assumed_role_session_arn]" earliest="[assumption_time]" latest="[1h_after_assumption]"
-| table _time eventName requestParameters.policyArn requestParameters.userName requestParameters.roleName sourceIPAddress errorCode
-| sort _time
-```
-
----
-
-#### Pattern: CloudTrail Modification / Defense Evasion
-
-Covers: StopLogging, DeleteTrail, UpdateTrail, PutEventSelectors
-
-**Investigation angles:**
-- **Anchor event** — Find the modification, extract which trail, what type (StopLogging vs DeleteTrail vs UpdateTrail vs PutEventSelectors)
-- **Logging gap activity** — What did the actor do during the suppression period? (Note: events may be missing if StopLogging succeeded)
-- **Restoration check** — Was logging restored? Gap duration? Who restored it?
-- **Full actor timeline** — 4-hour window centered on modification (recon → evasion → exploitation sequence)
-
-**SPL templates:**
-
-Anchor event:
-```spl
-index=cloudtrail (eventName=StopLogging OR eventName=DeleteTrail OR eventName=UpdateTrail OR eventName=PutEventSelectors) earliest="[time_range_earliest]" latest="[time_range_latest]"
-| table _time eventName userIdentity.arn userIdentity.userName requestParameters.name requestParameters.trailName sourceIPAddress userAgent recipientAccountId errorCode
-| sort _time
-```
-
-Activity during gap:
-```spl
-index=cloudtrail (userIdentity.arn="[actor_arn]" OR userIdentity.userName="[actor_name]") earliest="[modification_time]" latest="[1h_after_modification]"
-| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
-Restoration check:
-```spl
-index=cloudtrail eventName=StartLogging (requestParameters.name="[trail_name]" OR requestParameters.trailName="[trail_name]") earliest="[modification_time]" latest="[4h_after_modification]"
-| table _time eventName userIdentity.arn userIdentity.userName sourceIPAddress
-| sort _time
-```
-
-Full actor timeline:
-```spl
-index=cloudtrail (userIdentity.arn="[actor_arn]" OR userIdentity.userName="[actor_name]") earliest="[2h_before_modification]" latest="[2h_after_modification]"
-| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
----
-
-#### Pattern: Generic / Unknown Alert Type
-
-Use when the alert_type does not match any specific pattern above.
-
-**Investigation angles:**
-- **Find triggering events** — Search by available fields (event name, user identity, source IP, time range). Determine actual event type
-- **Actor activity timeline** — 2-hour window centered on triggering event. Is this isolated or part of a sequence?
-- **Analyst-directed pivot** — After timeline, present pivot menu. The analyst decides direction
-
-**SPL templates:**
-
-Find triggering events:
-```spl
-index=cloudtrail (eventName="[event_name_if_known]") (userIdentity.arn="[user_arn]" OR userIdentity.userName="[user_name]" OR sourceIPAddress="[source_ip]") earliest="[time_range_earliest]" latest="[time_range_latest]"
-| table _time eventName eventSource userIdentity.arn userIdentity.userName userIdentity.type sourceIPAddress userAgent recipientAccountId errorCode
-| sort _time
-```
-
-Actor timeline:
-```spl
-index=cloudtrail (userIdentity.arn="[actor_arn]" OR userIdentity.userName="[actor_name]") earliest="[1h_before_event]" latest="[1h_after_event]"
-| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode
-| sort _time
-```
-
----
-
-### How to Use Reference Patterns
-
-1. **Identify the matching pattern** — match `investigation_context.alert_type` case-insensitively against the pattern catalogue
-2. **Review the investigation angles** — understand what this pattern type typically requires
-3. **Apply the priority hierarchy** — select the first step based on IOC match, baseline deviation, novel entity, FP pattern check, or reference pattern (in that order)
-4. **Adapt SPL templates** — substitute field values from `investigation_context`. Modify queries as findings dictate
-5. **Do not follow pattern order blindly** — the agent selects the NEXT step based on what was found, not on pattern sequence
-
-### When No Pattern Matches
-
-If the alert type does not match any reference pattern, use the Generic pattern. The Generic pattern's investigation angles are intentionally broad — the agent should propose an anchor event query and then let findings drive the investigation direction.
+Use `$REF_PATTERN` to read `investigation_angles` and `spl_templates` for the matched alert type. Adapt SPL template field values from `investigation_context`. Apply the priority hierarchy — reference patterns are a floor, not a ceiling.
 </reasoning_framework>
 
 <output_format>
