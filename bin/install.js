@@ -32,6 +32,19 @@ const EDITOR_DIRS = {
 };
 
 // ---------------------------------------------------------------------------
+// Model tier configuration (single source of truth)
+// ---------------------------------------------------------------------------
+
+const MODELS_CONFIG_PATH = path.join(__dirname, '..', 'config', 'models.json');
+let MODELS_CONFIG;
+try {
+  MODELS_CONFIG = JSON.parse(fs.readFileSync(MODELS_CONFIG_PATH, 'utf8'));
+} catch (err) {
+  console.error(`Error: config/models.json not found or invalid JSON.\n  Path: ${MODELS_CONFIG_PATH}\n  ${err.message}`);
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
 // YAML frontmatter parser (manual — no yaml library required)
 // ---------------------------------------------------------------------------
 
@@ -177,40 +190,33 @@ const TOP_LEVEL_SUBAGENTS = new Set([
   'scope-defend',
 ]);
 
-// Model assignments for subagents — two-tier routing.
-// Tier 1 (haiku): Enum subagents — structured CLI data collection, no reasoning.
-//   Fast and cheap; haiku is correct for AWS API calls and JSON output.
-// Tier 2 (sonnet): Reasoning agents — attack path analysis and defensive controls.
-//   These agents evaluate policy chains, generate SCP/RCP policies, and write SPL.
-//   Explicit sonnet pin prevents session-model inheritance (e.g., --model haiku)
-//   from silently degrading security-critical reasoning to an under-powered model.
-// scope-verify and scope-pipeline are NOT deployed as subagents — they are read inline.
-const SUBAGENT_MODELS = {
-  claude: {
-    enum: 'claude-haiku-4-5',
-    reasoning: 'claude-sonnet-4-6',
-  },
-  gemini: {
-    enum: 'gemini-3.1-flash-lite-preview',
-    reasoning: 'gemini-3.1-pro-preview',
-  },
-  codex: {
-    enum: 'gpt-5.4-mini',
-    reasoning: 'gpt-5.4',
-  },
-};
-
-const REASONING_AGENTS = new Set([
-  'scope-attack-paths',
-  'scope-defend',
-  'scope-hunt-investigate',
-  'scope-hunt-intel',
-  'scope-hunt-audit',
-]);
-
-function getModelForAgent(agentName, editor) {
-  const tier = REASONING_AGENTS.has(agentName) ? 'reasoning' : 'enum';
-  return SUBAGENT_MODELS[editor]?.[tier] || SUBAGENT_MODELS.claude[tier];
+/**
+ * Resolve a tier label (or literal model string) from source frontmatter to
+ * a vendor-specific model name for the given platform.
+ *
+ * - "enum"      → config/models.json[platform].enum
+ * - "reasoning" → config/models.json[platform].reasoning
+ * - "inherit"   → null (no model field in installed output)
+ * - anything else → returned as-is (literal model string, backward compat)
+ *
+ * @param {string|undefined} modelValue  Value of the model: field in source frontmatter
+ * @param {string} platform              "claude" | "gemini" | "codex"
+ * @returns {string|null}               Resolved model string, or null for inherit
+ */
+function resolveModelTier(modelValue, platform) {
+  if (!modelValue) return null;
+  const tiers = ['enum', 'reasoning', 'inherit'];
+  if (!tiers.includes(modelValue)) {
+    // Literal model string — pass through unchanged
+    return modelValue;
+  }
+  if (modelValue === 'inherit') return null;
+  const resolved = MODELS_CONFIG[platform]?.[modelValue];
+  if (!resolved) {
+    console.error(`Error: config/models.json missing key [${platform}][${modelValue}]`);
+    process.exit(1);
+  }
+  return resolved;
 }
 
 /**
@@ -351,8 +357,10 @@ function installSubagentsClaude(subagents, scope) {
 
     if (parsed) {
       const { frontmatter, body } = parsed;
-      frontmatter.model = getModelForAgent(subagent.name, 'claude');
-      const fm = rebuildFrontmatter(frontmatter, []);
+      const resolvedModel = resolveModelTier(frontmatter.model, 'claude');
+      const omitKeys = resolvedModel === null ? ['model'] : [];
+      if (resolvedModel !== null) frontmatter.model = resolvedModel;
+      const fm = rebuildFrontmatter(frontmatter, omitKeys);
       content = `---\n${fm}\n---\n\n${body}`;
     }
 
@@ -380,7 +388,6 @@ function installSubagentsGemini(subagents, scope) {
 
   fs.mkdirSync(agentsDir, { recursive: true });
   const GEMINI_STRIP_KEYS = ['argument-hint', 'disable-model-invocation', 'allowed-tools', 'tools', 'color', 'compatibility', 'memory', 'context', 'agent', 'maxTurns'];
-  // Model routing handled by getModelForAgent('name', 'gemini')
   let count = 0;
 
   // Gemini defaults: max_turns=15 — too low for SCOPE agents.
@@ -415,8 +422,12 @@ function installSubagentsGemini(subagents, scope) {
         frontmatter.max_turns = String(config.max_turns);
       }
       // Inject platform-specific model
-      frontmatter.model = getModelForAgent(subagent.name, 'gemini');
-      const fm = rebuildFrontmatter(frontmatter, GEMINI_STRIP_KEYS);
+      const resolvedModel = resolveModelTier(frontmatter.model, 'gemini');
+      const geminiOmitKeys = resolvedModel === null
+        ? [...GEMINI_STRIP_KEYS, 'model']
+        : GEMINI_STRIP_KEYS;
+      if (resolvedModel !== null) frontmatter.model = resolvedModel;
+      const fm = rebuildFrontmatter(frontmatter, geminiOmitKeys);
       // Build tools as YAML array (rebuildFrontmatter only handles strings)
       let toolsYaml = '';
       if (config && config.tools) {
@@ -478,9 +489,11 @@ function installSubagentsCodex(subagents, scope) {
     const parsed = parseFrontmatter(subagent.content);
     let content = subagent.content;
     let description = subagent.name;
+    let sourceFrontmatter = null;
 
     if (parsed) {
       const { frontmatter, body } = parsed;
+      sourceFrontmatter = frontmatter;
       if (frontmatter.description) description = frontmatter.description;
       const fm = rebuildFrontmatter(frontmatter, CODEX_STRIP_KEYS);
       content = `---\n${fm}\n---\n\n${body}`;
@@ -493,7 +506,7 @@ function installSubagentsCodex(subagents, scope) {
     console.log(`  Installing subagent ${subagent.name} -> ${displayMd}`);
     count++;
 
-    const codexModel = getModelForAgent(subagent.name, 'codex');
+    const codexModel = resolveModelTier(sourceFrontmatter?.model, 'codex') || MODELS_CONFIG['codex']['enum'];
     const reasoningEffort = 'medium';
 
     // Generate per-agent .toml config layer.
