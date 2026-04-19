@@ -6,7 +6,7 @@ color: gray
 ---
 
 <role>
-You are SCOPE's post-processing middleware. You run automatically after source agents write their artifacts.
+You are SCOPE's post-processing middleware. You are read inline by source agents (scope-audit, scope-exploit, scope-defend) after they write their artifacts.
 
 **Input:** PHASE (one of: audit, defend, exploit) and RUN_DIR path, provided by the calling agent.
 **Output:** Normalized JSON in `./data/<phase>/<run-id>.json` and provenance envelope in `./agent-logs/<phase>/<run-id>.json`.
@@ -136,7 +136,7 @@ If `$RUN_DIR/results.json` exists and contains `"source": "audit"` (or no `sourc
 Extract from headings and content:
 
 ```
-Risk summary: regex match "## RISK SUMMARY: (\d+) -[-—] (CRITICAL|HIGH|MEDIUM|LOW|critical|high|medium|low)"
+Risk summary: regex match "## RISK SUMMARY: (\d+) -[-—] (critical|high|medium|low|critical|high|medium|low)"
   → account_id = group 1
   → risk_score = group 2 (lowercase — normalize to lowercase if uppercase)
 
@@ -145,7 +145,7 @@ Audit mode: extract from findings header if present ("audit")
 
 Services analyzed: count unique "### SERVICE:" headings
 
-Attack paths: regex match all "### ATTACK PATH #(\d+): (.+?) -[-—] (CRITICAL|HIGH|MEDIUM|LOW|critical|high|medium|low)"
+Attack paths: regex match all "### ATTACK PATH #(\d+): (.+?) -[-—] (critical|high|medium|low|critical|high|medium|low)"
   (normalize severity to lowercase)
 For each path block, extract:
   - name, severity from header
@@ -433,7 +433,7 @@ Extract from headings and content:
 ```
 Target ARN: from the playbook header or introduction
 Paths found: count of "## Path" or "## Attack Path" headings
-Highest privilege: from the summary section — e.g., "ADMIN", "POWER_USER"
+highest privilege: from the summary section — e.g., "ADMIN", "POWER_USER"
 Novel paths found: count of paths with source "novel"
 PassRole chains: count from PassRole attack surface section
 
@@ -1259,7 +1259,7 @@ Each entry in `./agent-logs/index.json` `runs` array:
 
 When a downstream agent needs to consume upstream output, prefer data sources in this order:
 
-1. `./agent-logs/` — Highest fidelity. Claim-level provenance, coverage manifests, policy evaluation chains. Use when you need to understand WHY a claim was made and what supports it.
+1. `./agent-logs/` — highest fidelity. Claim-level provenance, coverage manifests, policy evaluation chains. Use when you need to understand WHY a claim was made and what supports it.
 2. `./data/` — Structured report data. Summaries, graph structures, attack path lists. Use when you need WHAT was found but don't need provenance.
 3. `$RUN_DIR/` — Raw artifacts. Markdown reports, results.json, raw JSON. Fallback when normalized data is unavailable. Requires regex parsing.
 </evidence_schema_reference>

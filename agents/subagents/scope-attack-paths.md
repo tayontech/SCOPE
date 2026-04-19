@@ -162,7 +162,7 @@ POSTEX_CATALOGUE=$(cat "$(git rev-parse --show-toplevel 2>/dev/null || echo '.')
 
 ## Pre-Write Completeness Check
 
-**CRITICAL — IDENTITY GRAPH FIRST:** Before evaluating rules 1-11, verify rule 7 (Identity Node Completeness).
+**critical — IDENTITY GRAPH FIRST:** Before evaluating rules 1-11, verify rule 7 (Identity Node Completeness).
 The graph MUST contain a node for EVERY IAM user and EVERY IAM role found in iam.json — not just principals
 that appear in attack paths. If the graph has fewer user nodes than total_users or fewer role nodes than
 total_roles, STOP immediately and add the missing identity nodes. This is the most common graph completeness
@@ -192,13 +192,13 @@ Before writing results.json, verify ALL of the following. If any check fails, go
    If found: STOP. Add the missing priv_esc edge(s) connecting principal(s) to the disconnected node.
 
 5. **PUBLIC ACCESS COVERAGE (Phase B):** If EC2 enumeration found publicly exposed security groups or open ports,
-   then PHASE_B_EDGES MUST contain at least one edge with edge_type "network" and _source "reasoning".
+   then PHASE_B_EDGES MUST contain at least one edge with edge_type "public_access" and _source "reasoning".
    If missing and public exposure data exists: go back and add public_access edges from external:public.
 
 6. **SUMMARY COUNTS MATCH:** attack_paths_total in summary MUST equal the length of the attack_paths array.
    If mismatch: update summary.attack_paths_total to match the actual array length.
 
-7. **[HIGH PRIORITY — EVALUATE FIRST] IDENTITY NODE COMPLETENESS (Phase A):**
+7. **[high PRIORITY — EVALUATE FIRST] IDENTITY NODE COMPLETENESS (Phase A):**
    Verify PHASE_A_NODES contains the correct counts:
    - Count of user nodes in PHASE_A_NODES MUST equal summary.total_users
    - Count of role nodes in PHASE_A_NODES MUST equal summary.total_roles (excluding service-linked)
@@ -240,11 +240,11 @@ Before writing results.json, verify ALL of the following. If any check fails, go
     TRUST_JSON=$(echo "$TRUST_JSON" | \
       jq '[.[] | .risk = (.risk | ascii_downcase)]')
     ```
-    This ensures severity values are "critical|high|medium|low" — not "CRITICAL|HIGH|MEDIUM|LOW".
+    This ensures severity values are "critical|high|medium|low" — not "critical|high|medium|low".
     Graph edge severity values are already lowercase (set by the edge construction templates above).
     Note: XVAL-03 requires trust_relationships.risk to be lowercase. This supersedes the Phase 17-02
     decision that left trust risk unchanged — App.jsx normalizeForDashboard() already calls
-    .risk?.toLowerCase(), making agent output match removes the normalization mismatch at source.
+    .risk?.tolowerCase(), making agent output match removes the normalization mismatch at source.
 
 13. **EDGE DENSITY CHECK:** The merged graph (PHASE_A_EDGES + PHASE_B_EDGES = ALL_EDGES) MUST contain
     at least 1 edge per 3 attack_paths. Use the final EDGES_ARRAY (merged Phase A + Phase B) for this count.
@@ -318,7 +318,7 @@ SUMMARY_JSON=$(jq -n \
 - `attack_paths_total`: count of all attack path entries in ATTACK_PATHS_JSON
 - `critical_priv_esc_risks`: count of attack paths where `severity == "critical"` AND `category == "privilege_escalation"`. Derive with jq after ATTACK_PATHS_JSON is finalized:
   ```bash
-  CRITICAL_PRIV_ESC=$(echo "$ATTACK_PATHS_JSON" | jq '[.[] | select(.severity == "critical" and .category == "privilege_escalation")] | length')
+  critical_PRIV_ESC=$(echo "$ATTACK_PATHS_JSON" | jq '[.[] | select(.severity == "critical" and .category == "privilege_escalation")] | length')
   ```
   Never leave as 0 if critical privilege escalation paths exist.
 - `wildcard_trust_policies`: count of trust relationships where `is_wildcard == true`
@@ -419,7 +419,7 @@ GRAPH_JSON=$(jq -n --argjson nodes "$NODES_ARRAY" --argjson edges "$EDGES_ARRAY"
 #     "affected_resources": ["arn:aws:iam::123456789012:role/AdminRole"]
 #   }
 #
-# CRITICAL: "steps" is REQUIRED on every path — it must be an array of strings
+# critical: "steps" is REQUIRED on every path — it must be an array of strings
 # describing the exploit steps with real AWS CLI commands and real ARNs from
 # enumeration data. Paths without steps are incomplete.
 ATTACK_PATHS_JSON="[...]"  # populated from analysis — MUST be an array
@@ -636,7 +636,7 @@ For permission X on resource Y:
 4. Identity policy allows? -> Need to check
 5. Permission boundary set? -> Must also allow X
 6. Using role session? -> Session policy must allow X
-If all checks pass -> ALLOWED
+If all checks pass -> ALlowED
 ```
 
 Apply this evaluation template when checking whether any permission is actually effective during Stage 2 reasoning. Do not skip steps. If any step cannot be verified (e.g., SCP data unavailable), note the gap in the path description.
@@ -814,16 +814,16 @@ These examples demonstrate the reasoning process — how to move from observatio
 Rate each discovered attack path on two dimensions:
 
 **Severity** — the blast radius if the path succeeds:
-- CRITICAL: Direct path to admin/root or organization-wide impact
-- HIGH: Significant privilege gain or data access
-- MEDIUM: Meaningful access gain with preconditions
-- LOW: Theoretical path with significant barriers
+- critical: Direct path to admin/root or organization-wide impact
+- high: Significant privilege gain or data access
+- medium: Meaningful access gain with preconditions
+- low: Theoretical path with significant barriers
 
 **Exploitability** — how likely the path succeeds in practice:
-- CRITICAL: All required permissions verified, no additional preconditions
-- HIGH: Path exists with 1-2 easily met preconditions
-- MEDIUM: Path requires specific conditions or timing dependencies
-- LOW: Requires social engineering, race conditions, or multiple unlikely preconditions
+- critical: All required permissions verified, no additional preconditions
+- high: Path exists with 1-2 easily met preconditions
+- medium: Path requires specific conditions or timing dependencies
+- low: Requires social engineering, race conditions, or multiple unlikely preconditions
 
 When SCP or permission boundary data is incomplete or sourced only from config files (not live enumeration), note the gap in the path description. Do not assign a numeric confidence score — describe what was verified and what was not.
 
@@ -1168,7 +1168,7 @@ Edges with `blocked: true` are NOT followed during traversal. Instead, record th
 **Rule 7 — Cycle detection:**
 Maintain a `visited` set of node IDs per principal traversal. When an edge leads to an already-visited node, skip it. This prevents infinite loops in graphs with mutual trust relationships or circular service integrations.
 
-#### Critical Path Identification
+#### critical Path Identification
 
 After completing BFS for a principal, flag chains as **critical** if any of the following conditions are met:
 - **Admin through indirection:** The chain reaches `max_privilege: "admin"` through 2 or more hops (not direct admin attachment)
@@ -1221,7 +1221,7 @@ For each principal, produce a `reachability` object:
 #### Performance Guardrail
 
 For graphs with **500+ nodes**, limit full reachability computation to:
-1. High-risk principals — those flagged with `risk_flags` containing `"admin_equivalent"`, `"no_mfa"`, `"wildcard_trust"`, `"broad_account_trust"`, or `"console_access"`
+1. high-risk principals — those flagged with `risk_flags` containing `"admin_equivalent"`, `"no_mfa"`, `"wildcard_trust"`, `"broad_account_trust"`, or `"console_access"`
 2. Explicitly targeted ARNs (from the operator's input)
 3. Principals with `priv_esc` outgoing edges
 

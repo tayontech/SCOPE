@@ -141,9 +141,9 @@ After generating all artifacts but BEFORE writing results.json, verify proportio
 - If Organizations access was NOT available: log `[INFO] RCP gate skipped -- no Organizations access` and skip this gate entirely
 - Do NOT fail the overall coverage check because of RCP count when Organizations was inaccessible
 
-**CRITICAL path coverage:**
-- Every CRITICAL-severity attack path MUST map to at least 1 SCP or 1 detection
-- If any CRITICAL path has no control, add one before proceeding
+**critical path coverage:**
+- Every critical-severity attack path MUST map to at least 1 SCP or 1 detection
+- If any critical path has no control, add one before proceeding
 
 **On threshold failure:**
 1. Go back and generate additional controls for the specific uncovered attack paths
@@ -419,7 +419,7 @@ For each audit run directory, read `$RUN_DIR/findings.md`:
 **Extract Layer 1 — Risk Summary:**
 ```python
 import re
-risk_match = re.search(r'## RISK SUMMARY: (\d+) -- (CRITICAL|HIGH|MEDIUM|LOW)', findings_text, re.IGNORECASE)
+risk_match = re.search(r'## RISK SUMMARY: (\d+) -- (critical|high|medium|low)', findings_text, re.IGNORECASE)
 account_id = risk_match.group(1) if risk_match else "unknown"
 overall_risk = risk_match.group(2).lower() if risk_match else "unknown"
 # Export as shell variable for results export: OVERALL_RISK="$overall_risk", ACCOUNT_ID="$account_id"
@@ -429,7 +429,7 @@ overall_risk = risk_match.group(2).lower() if risk_match else "unknown"
 ```python
 import re
 # Find all attack path headers
-paths = re.findall(r'### ATTACK PATH #(\d+): (.+?) -- (CRITICAL|HIGH|MEDIUM|LOW)', findings_text, re.IGNORECASE)
+paths = re.findall(r'### ATTACK PATH #(\d+): (.+?) -- (critical|high|medium|low)', findings_text, re.IGNORECASE)
 # paths = [(number, name, severity), ...]
 
 # Extract the full block for each attack path (name + content until next ### or end of file)
@@ -519,8 +519,8 @@ When two audit runs report contradictory findings for the same resource (e.g., r
 
 1. Report both findings with run ID and timestamp — do NOT silently resolve
 2. Compare run dates:
-   - Newer run shows LOWER risk → flag as "**Potentially Remediated**" (the earlier finding may have been addressed)
-   - Newer run shows HIGHER risk → flag as "**Escalating Risk**" (situation worsened between runs)
+   - Newer run shows lowER risk → flag as "**Potentially Remediated**" (the earlier finding may have been addressed)
+   - Newer run shows highER risk → flag as "**Escalating Risk**" (situation worsened between runs)
 3. If the gap between runs is greater than 7 days, recommend: "Re-run `/scope:audit` on this target to confirm current state before deploying remediation."
 
 ### Attack Path Construction — Use Discretion
@@ -779,7 +779,7 @@ Addresses: Category 4 — public snapshot exfiltration (attacker calls `ModifyDB
 }
 ```
 
-OU Level: Workload OUs | Blast radius: Low — only blocks the specific API call with `AttributeValue: all`; authorized snapshot sharing by exception role is exempt.
+OU Level: Workload OUs | Blast radius: low — only blocks the specific API call with `AttributeValue: all`; authorized snapshot sharing by exception role is exempt.
 
 **CloudTrail eventSource:** `rds.amazonaws.com` | **Detection target:** `eventName=ModifyDBSnapshotAttribute requestParameters.attributeName=restore requestParameters.attributeValue=all`
 
@@ -814,7 +814,7 @@ Addresses: Method 9/10 — SageMaker escalation victim with public internet acce
 }
 ```
 
-OU Level: Workload OUs (especially ML/data science OUs) | Blast radius: Medium — affects teams creating notebooks; require VPC-only mode for all new notebooks.
+OU Level: Workload OUs (especially ML/data science OUs) | Blast radius: medium — affects teams creating notebooks; require VPC-only mode for all new notebooks.
 
 **CloudTrail eventSource:** `sagemaker.amazonaws.com` | **Detection target:** `eventName=CreateNotebookInstance requestParameters.directInternetAccess=Enabled`
 
@@ -850,7 +850,7 @@ Addresses: Method 12 — `iam:PassRole` to Bedrock service principal + `bedrock:
 }
 ```
 
-OU Level: Workload OUs | Blast radius: Medium — blocks non-admin Bedrock agent creation; expand the exemption list for teams with legitimate Bedrock agent use cases.
+OU Level: Workload OUs | Blast radius: medium — blocks non-admin Bedrock agent creation; expand the exemption list for teams with legitimate Bedrock agent use cases.
 
 **Companion control:** Pair with an `iam:PassRole` condition restricting PassRole to `bedrock.amazonaws.com` service principal only from approved roles. SCP cannot inspect the PassRole target service, so use IAM permission boundaries on Bedrock execution roles as the enforcement mechanism.
 
@@ -890,7 +890,7 @@ Note: SCPs cannot inspect the specific service role ARN being attached to a Code
 }
 ```
 
-OU Level: Workload OUs (not CI/CD OUs where this access is legitimate) | Blast radius: High for developer OUs — adjust the exemption list per OU before deploying.
+OU Level: Workload OUs (not CI/CD OUs where this access is legitimate) | Blast radius: high for developer OUs — adjust the exemption list per OU before deploying.
 
 **Preferred enforcement:** IAM permission boundary on CodeBuild service roles restricting their maximum permissions. Config rule `CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK` also detects credential exposure in build environment variables.
 
@@ -1080,15 +1080,15 @@ Map discovered attack paths to specific GuardDuty finding types. Recommend enabl
 
 | Finding Type | Severity | Trigger | Attack Path Match |
 |---|---|---|---|
-| `PrivilegeEscalation:IAMUser/AnomalousBehavior` | Medium | ML: anomalous AttachRolePolicy, PutUserPolicy, AddUserToGroup | IAM privilege escalation paths |
-| `Discovery:IAMUser/AnomalousBehavior` | Low | ML: anomalous GetRolePolicy, ListAccessKeys, DescribeInstances | Recon enumeration detection |
-| `Persistence:IAMUser/AnomalousBehavior` | Medium | ML: anomalous CreateAccessKey, ImportKeyPair | Persistence via access key creation |
-| `CredentialAccess:IAMUser/AnomalousBehavior` | Medium | ML: anomalous GetSecretValue, GetPasswordData | Secrets exfiltration paths |
-| `DefenseEvasion:IAMUser/AnomalousBehavior` | Medium | ML: anomalous DeleteFlowLogs, StopLogging, DisableAlarmActions | Defense evasion attack paths |
-| `Exfiltration:IAMUser/AnomalousBehavior` | High | ML: anomalous PutBucketReplication, CreateSnapshot | Data exfiltration paths |
-| `Stealth:IAMUser/CloudTrailLoggingDisabled` | Low | CloudTrail trail disabled/deleted | CloudTrail protection findings |
-| `Policy:IAMUser/RootCredentialUsage` | Low | Root credentials used | Root user exposure findings |
-| `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` | High | EC2 creds used from external IP | EC2 metadata / SSRF findings |
+| `PrivilegeEscalation:IAMUser/AnomalousBehavior` | medium | ML: anomalous AttachRolePolicy, PutUserPolicy, AddUserToGroup | IAM privilege escalation paths |
+| `Discovery:IAMUser/AnomalousBehavior` | low | ML: anomalous GetRolePolicy, ListAccessKeys, DescribeInstances | Recon enumeration detection |
+| `Persistence:IAMUser/AnomalousBehavior` | medium | ML: anomalous CreateAccessKey, ImportKeyPair | Persistence via access key creation |
+| `CredentialAccess:IAMUser/AnomalousBehavior` | medium | ML: anomalous GetSecretValue, GetPasswordData | Secrets exfiltration paths |
+| `DefenseEvasion:IAMUser/AnomalousBehavior` | medium | ML: anomalous DeleteFlowLogs, StopLogging, DisableAlarmActions | Defense evasion attack paths |
+| `Exfiltration:IAMUser/AnomalousBehavior` | high | ML: anomalous PutBucketReplication, CreateSnapshot | Data exfiltration paths |
+| `Stealth:IAMUser/CloudTrailLoggingDisabled` | low | CloudTrail trail disabled/deleted | CloudTrail protection findings |
+| `Policy:IAMUser/RootCredentialUsage` | low | Root credentials used | Root user exposure findings |
+| `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` | high | EC2 creds used from external IP | EC2 metadata / SSRF findings |
 
 **GuardDuty baseline note:** ML-based `AnomalousBehavior` findings require approximately 7-14 days of activity baseline before firing reliably. Rule-based findings (e.g., `Stealth:IAMUser/CloudTrailLoggingDisabled`) fire immediately after enablement.
 
@@ -1165,7 +1165,7 @@ Enable IAM Access Analyzer in each AWS region where resources exist. Recommended
 **Source:** [run_id] | Attack Path: [attack_path_name] | Severity: [critical|high|medium|low]
 ```
 
-### CloudWatch Alarms (High-Priority Events Only)
+### CloudWatch Alarms (high-Priority Events Only)
 
 Recommend CloudWatch metric filters and alarms for specific high-severity events that benefit from near-real-time alerting. Text recommendation only — no CloudFormation or CLI commands.
 
@@ -1173,10 +1173,10 @@ Recommend CloudWatch metric filters and alarms for specific high-severity events
 
 | Alarm | CloudTrail Event Filter | Severity | Purpose |
 |---|---|---|---|
-| Root console login | `eventName = ConsoleLogin AND userIdentity.type = Root` | CRITICAL | Any root login should page immediately |
-| CloudTrail disabled | `eventName IN (DeleteTrail, StopLogging, UpdateTrail)` | CRITICAL | Audit evasion detection |
-| IAM policy changes | `eventName IN (PutUserPolicy, AttachRolePolicy, CreatePolicy)` | HIGH | Privilege change alerting |
-| Network ACL changes | `eventName IN (CreateNetworkAcl, DeleteNetworkAcl, ReplaceNetworkAclAssociation)` | HIGH | Network perimeter changes |
+| Root console login | `eventName = ConsoleLogin AND userIdentity.type = Root` | critical | Any root login should page immediately |
+| CloudTrail disabled | `eventName IN (DeleteTrail, StopLogging, UpdateTrail)` | critical | Audit evasion detection |
+| IAM policy changes | `eventName IN (PutUserPolicy, AttachRolePolicy, CreatePolicy)` | high | Privilege change alerting |
+| Network ACL changes | `eventName IN (CreateNetworkAcl, DeleteNetworkAcl, ReplaceNetworkAclAssociation)` | high | Network perimeter changes |
 
 **Format for recommendation in report:**
 ```markdown
@@ -1215,7 +1215,7 @@ Detections follow a two-tier architecture: **atomic detections** that fire on in
 1. Generate atomic detections first — one per distinct observable behavior
 2. Then generate composite detections that reference the atomic detections, correlating by `src_user_arn` within an appropriate time window
 3. Mark each detection as `[ATOMIC]` or `[COMPOSITE]` in the detection name
-4. Composite detections should have HIGHER severity than their individual atomic components — the correlation is what elevates confidence
+4. Composite detections should have highER severity than their individual atomic components — the correlation is what elevates confidence
 
 **Composite SPL pattern — use `streamstats` for sequence-aware correlation:**
 
@@ -1332,7 +1332,7 @@ Use this exact markdown format for every detection embedded in technical-remedia
 
 **Key requirement:** Every field must be populated. Do not leave Description, False Positives, or Tuning Guidance blank — a SOC analyst must be able to use this detection immediately without referring to additional documentation.
 
-**Atomic vs Composite severity:** Atomic detections typically get Medium or Low severity (single observable, high false positive rate alone). Composite detections that correlate multiple atomics get High or Critical severity (multi-phase behavior, high confidence). The composite is what pages the SOC — the atomics feed the investigation timeline.
+**Atomic vs Composite severity:** Atomic detections typically get medium or low severity (single observable, high false positive rate alone). Composite detections that correlate multiple atomics get high or critical severity (multi-phase behavior, high confidence). The composite is what pages the SOC — the atomics feed the investigation timeline.
 
 ### Standard SPL Query Skeleton
 
@@ -1522,21 +1522,21 @@ After generating all remediation artifacts (SCPs, RCPs, security control recomme
 ### Framework
 
 ```
-               LOW EFFORT                  HIGH EFFORT
-HIGH RISK  | QUICK WINS                 | MAJOR PROJECTS
+               low EFFORT                  high EFFORT
+high RISK  | QUICK WINS                 | MAJOR PROJECTS
            | (do this week)             | (plan for quarter)
 -----------|----------------------------|---------------------------
-LOW RISK   | MAINTENANCE                | BACKLOG
+low RISK   | MAINTENANCE                | BACKLOG
            | (do when convenient)       | (deprioritize)
 ```
 
 ### Risk Calibration
 
 Map audit severity directly to the matrix:
-- **critical** → High Risk
-- **high** → High Risk
-- **medium** → Low Risk
-- **low** → Low Risk
+- **critical** → high Risk
+- **high** → high Risk
+- **medium** → low Risk
+- **low** → low Risk
 
 Do not re-score findings — trust the severity assigned by the audit skill.
 
@@ -1544,20 +1544,20 @@ Do not re-score findings — trust the severity assigned by the audit skill.
 
 | Effort Level | Description | Examples |
 |---|---|---|
-| **Low** | 30 minutes or less; copy-paste or click-through | Enable a GuardDuty detector, attach an existing managed Config rule, copy an SCP JSON from this report and paste into AWS Organizations console |
-| **High** | Days to weeks; requires planning, architecture review, or org-wide coordination | Write net-new SCP with complex multi-account exemptions, migrate IAM architecture to role-based access, deploy org-wide conformance pack with remediation |
+| **low** | 30 minutes or less; copy-paste or click-through | Enable a GuardDuty detector, attach an existing managed Config rule, copy an SCP JSON from this report and paste into AWS Organizations console |
+| **high** | Days to weeks; requires planning, architecture review, or org-wide coordination | Write net-new SCP with complex multi-account exemptions, migrate IAM architecture to role-based access, deploy org-wide conformance pack with remediation |
 
 ### Matrix Classification Logic
 
 For each remediation item, classify it:
 1. Check attack path severity → Risk level
 2. Evaluate the specific action:
-   - SCP copy-paste → Low Effort → Quick Win (if critical/high) or Maintenance (if medium/low)
-   - Enable GuardDuty finding type → Low Effort → Quick Win (if critical/high)
-   - Enable Config managed rule → Low Effort → Quick Win (if critical/high)
-   - Design new IAM permission boundary → High Effort → Major Project (if critical/high)
-   - Org-wide MFA enforcement → High Effort → Major Project (if critical/high)
-   - Access key rotation → Low Effort → Maintenance (if medium/low)
+   - SCP copy-paste → low Effort → Quick Win (if critical/high) or Maintenance (if medium/low)
+   - Enable GuardDuty finding type → low Effort → Quick Win (if critical/high)
+   - Enable Config managed rule → low Effort → Quick Win (if critical/high)
+   - Design new IAM permission boundary → high Effort → Major Project (if critical/high)
+   - Org-wide MFA enforcement → high Effort → Major Project (if critical/high)
+   - Access key rotation → low Effort → Maintenance (if medium/low)
 
 ### Output Format — Prioritization Matrix
 
@@ -1566,26 +1566,26 @@ Surface this at the TOP of both executive-summary.md and technical-remediation.m
 ```markdown
 ## Prioritization Matrix
 
-### Quick Wins (High Risk, Low Effort) — Do This Week
+### Quick Wins (high Risk, low Effort) — Do This Week
 
 | # | Action | Risk | Effort | Why Now | Source Attack Path |
 |---|--------|------|--------|---------|-------------------|
-| 1 | Attach SCP: deny CloudTrail disable | CRITICAL | 30 min | Audit evasion is root-level org risk | [attack path name] |
-| 2 | Enable GuardDuty: CloudTrailLoggingDisabled finding | CRITICAL | 15 min | Immediate detection, no baseline required | [attack path name] |
-| 3 | Enable Config: iam-root-access-key-check | HIGH | 15 min | Root access keys are persistently risky | [attack path name] |
+| 1 | Attach SCP: deny CloudTrail disable | critical | 30 min | Audit evasion is root-level org risk | [attack path name] |
+| 2 | Enable GuardDuty: CloudTrailLoggingDisabled finding | critical | 15 min | Immediate detection, no baseline required | [attack path name] |
+| 3 | Enable Config: iam-root-access-key-check | high | 15 min | Root access keys are persistently risky | [attack path name] |
 
-### Major Projects (High Risk, High Effort) — Plan for Quarter
+### Major Projects (high Risk, high Effort) — Plan for Quarter
 
 | # | Action | Risk | Effort | Why Plan | Source Attack Path |
 |---|--------|------|--------|---------|-------------------|
-| 1 | Implement org-wide MFA policy via SCP | HIGH | 2-3 days | Complex rollout requires coordination with all account owners | [attack path name] |
+| 1 | Implement org-wide MFA policy via SCP | high | 2-3 days | Complex rollout requires coordination with all account owners | [attack path name] |
 
-### Maintenance (Low Risk, Low Effort) — Do When Convenient
+### Maintenance (low Risk, low Effort) — Do When Convenient
 
 | # | Action | Risk | Effort | Why | Source Attack Path |
 |---|--------|------|--------|-----|-------------------|
 
-### Backlog (Low Risk, High Effort) — Deprioritize
+### Backlog (low Risk, high Effort) — Deprioritize
 
 | # | Action | Risk | Effort | Why Defer | Source Attack Path |
 |---|--------|------|--------|-----------|-------------------|
@@ -1619,14 +1619,14 @@ Leadership-facing. Risk posture at a glance. No SCP JSON or SPL queries — thos
 
 | Category | Risk Level | Finding Count | Systemic |
 |---|---|---|---|
-| IAM | CRITICAL | [count] | [count] org-wide |
-| Data Exposure (S3/KMS/Secrets) | HIGH | [count] | [count] org-wide |
-| Network | MEDIUM | [count] | [count] org-wide |
-| **Overall** | **[CRITICAL/HIGH/MEDIUM/LOW]** | **[total]** | **[systemic count]** |
+| IAM | critical | [count] | [count] org-wide |
+| Data Exposure (S3/KMS/Secrets) | high | [count] | [count] org-wide |
+| Network | medium | [count] | [count] org-wide |
+| **Overall** | **[critical/high/medium/low]** | **[total]** | **[systemic count]** |
 
 ---
 
-## Quick Wins — Top 5 Actions (High Risk, Low Effort)
+## Quick Wins — Top 5 Actions (high Risk, low Effort)
 
 No technical detail — business-impact framing only.
 
@@ -1660,7 +1660,7 @@ No technical detail — business-impact framing only.
 
 | Attack Path | Severity | Affected Accounts |
 |---|---|---|
-| [path name] | [CRITICAL/HIGH] | [count] accounts |
+| [path name] | [critical/high] | [count] accounts |
 
 **One-off misconfigs (account-specific):** [count] attack paths appeared in 1 audit run — these require account-level remediation only.
 
@@ -1675,7 +1675,7 @@ No technical detail — business-impact framing only.
 **This week (Quick Wins):**
 - [Top 1-2 quick win actions — lowest effort, highest risk reduction]
 
-**This month (High-priority projects):**
+**This month (high-priority projects):**
 - [1-3 actions requiring planning but achievable within 30 days]
 
 **This quarter (Major projects):**
@@ -1920,7 +1920,7 @@ If any file is missing, go back and create it before displaying the report.
 
 After writing executive-summary.md and technical-remediation.md, export structured results for the SCOPE dashboard. This step MUST complete before displaying the Final Operator Report.
 
-### CRITICAL: Array-First Construction Discipline
+### critical: Array-First Construction Discipline
 # No count field is ever set from a narrative estimate or placeholder.
 # Every count is `jq 'length'` applied to the actual array.
 # The arrays MUST be fully built before ANY summary field references them.
@@ -2190,7 +2190,7 @@ A defend run is complete when ALL of the following are true:
 
 ### SCP and RCP Generation
 
-- At least one SCP or RCP generated for each HIGH or CRITICAL attack path that has actionable remediation items
+- At least one SCP or RCP generated for each high or critical attack path that has actionable remediation items
 - Every SCP and RCP has a traceability citation: `Source: [run_id] | Attack Path: [name] | Severity: [level]`
 - Every Deny SCP has an `ArnNotLike` exemption condition for admin/ops roles — no SCP without an exemption
 - No `NotPrincipal` in any SCP (SCPs do not support this element)

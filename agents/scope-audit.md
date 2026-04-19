@@ -514,7 +514,7 @@ Wait for the attack-paths subagent to complete and return its summary.
 Expected summary format:
   STATUS: complete|partial|error
   FILE: $RUN_DIR/results.json
-  METRICS: {attack_paths: N, risk_score: CRITICAL|HIGH|MEDIUM|LOW, categories: N}
+  METRICS: {attack_paths: N, risk_score: critical|high|medium|low, categories: N}
   ERRORS: [any issues]
 ```
 
@@ -552,10 +552,10 @@ Display:
 GATE 4: Analysis Complete
 
 Attack paths identified: [count]
-  CRITICAL: [count] paths
-  HIGH: [count] paths
-  MEDIUM: [count] paths
-  LOW: [count] paths
+  critical: [count] paths
+  high: [count] paths
+  medium: [count] paths
+  low: [count] paths
   Speculative (stripped by verify): [count] paths — gating conditions not satisfiable
 
 Top findings:
@@ -591,7 +591,7 @@ Account: [account ID]
 
 ---
 
-## RISK SUMMARY: [account-id] -- LOW
+## RISK SUMMARY: [account-id] -- low
 
 No security findings detected. All checks passed.
 
@@ -621,7 +621,7 @@ Account: [account ID]
 
 ---
 
-## RISK SUMMARY: [account-id] — [CRITICAL/HIGH/MEDIUM/LOW]
+## RISK SUMMARY: [account-id] -- [critical/high/medium/low]
 
 * [Most critical finding — one sentence, specific, include resource ARN or name]
 * [Second most critical finding]
@@ -642,16 +642,16 @@ Rules: Maximum 5 bullets. Each bullet is one sentence with real ARN/resource nam
 ```
 ## FINDINGS BY SEVERITY
 
-### CRITICAL
+### critical
 - **[Finding name]** — [specific resource ARN/name and why it's critical]
 
-### HIGH
+### high
 - **[Finding name]** — [specific resource ARN/name]
 
-### MEDIUM
+### medium
 - **[Finding name]** — [specific resource ARN/name]
 
-### LOW
+### low
 - **[Finding name]** — [specific resource ARN/name]
 ```
 
@@ -671,8 +671,8 @@ Order by exploitability score DESC, then confidence DESC.
 ```
 ## ATTACK PATHS
 
-### ATTACK PATH #1: [Descriptive Name] — [CRITICAL/HIGH/MEDIUM/LOW]
-**Exploitability:** [CRITICAL/HIGH/MEDIUM/LOW]
+### ATTACK PATH #1: [Descriptive Name] -- [critical/high/medium/low]
+**Exploitability:** [critical/high/medium/low]
 **Confidence:** [what was verified and what was not — e.g., "IAM policy confirmed; SCP status unknown"]
 **MITRE:** [T1078.004], [T1548]
 
@@ -977,7 +977,7 @@ After each run completes, append to `./audit/INDEX.md` (create if missing):
 ```markdown
 | Run ID | Date | Target | Risk | Paths | Directory |
 |--------|------|--------|------|-------|-----------|
-| audit-20260301-143022-all | 2026-03-01 14:30 | --all | CRITICAL | 3 | ./audit/audit-20260301-143022-all/ |
+| audit-20260301-143022-all | 2026-03-01 14:30 | --all | critical | 3 | ./audit/audit-20260301-143022-all/ |
 ```
 
 Also upsert into `./audit/index.json` (create with `{"runs": []}` if missing):
