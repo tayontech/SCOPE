@@ -16,18 +16,6 @@ agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hu
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
 
 ```
-agents/subagents/scope-enum-iam.md         IAM enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-sts.md         STS/identity enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-s3.md          S3 enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-kms.md         KMS enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-secrets.md     Secrets Manager enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-lambda.md      Lambda enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-ec2.md         EC2/VPC/EBS/ELB/SSM enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-rds.md         RDS enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-sns.md         SNS enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-sqs.md         SQS enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-apigateway.md  API Gateway enumeration (model: claude-haiku-4-5)
-agents/subagents/scope-enum-codebuild.md   CodeBuild enumeration (model: claude-haiku-4-5)
 agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert parsing, investigation_context, HYPO-01 (model: claude-sonnet-4-6)
 agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses (model: claude-sonnet-4-6)
 agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths (model: claude-sonnet-4-6)

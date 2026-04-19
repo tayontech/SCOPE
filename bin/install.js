@@ -450,18 +450,6 @@ function installSubagentsGemini(subagents, scope) {
   // Inject appropriate turn limits and explicit tool access per agent type.
   // NOTE: timeout_mins removed — was causing agents to be killed mid-execution.
   const GEMINI_AGENT_CONFIG = {
-    'scope-enum-iam':        { max_turns: 50, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-ec2':        { max_turns: 50, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-s3':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-lambda':     { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-kms':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-secrets':    { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-sts':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-rds':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-sns':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-sqs':        { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-apigateway': { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
-    'scope-enum-codebuild':  { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search'] },
     'scope-attack-paths':    { max_turns: 80, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-defend':          { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
   };

@@ -14,8 +14,8 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 **Operator-invoked or orchestrator-dispatched:**
 - `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
 
-**Enumeration subagents** (dispatched in parallel by scope-audit, model: haiku):
-- `scope-enum-iam`, `scope-enum-sts`, `scope-enum-s3`, `scope-enum-kms`, `scope-enum-secrets`, `scope-enum-lambda`, `scope-enum-ec2`, `scope-enum-rds`, `scope-enum-sns`, `scope-enum-sqs`, `scope-enum-apigateway`, `scope-enum-codebuild`
+**Enumeration scripts** (invoked directly by scope-audit via Bash, model: none — deterministic Node.js):
+- Enumeration agents removed in v1.14 — replaced by SDK scripts in `scripts/enum/`
 
 **Analysis subagent** (dispatched as fresh-context by scope-audit, model: inherit):
 - `scope-attack-paths` — Reads per-module JSON from disk, performs cross-service attack path analysis
@@ -39,9 +39,9 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  Gate 1: credential check         │
     │                               │  Gate 2: batch dispatch approval  │
     │                               │                                   │
-    │                               │  Parallel subagent dispatch:      │
+    │                               │  Enumeration (SDK scripts):       │
     │                               │  ┌──────────────────────────┐    │
-    │                               │  │ 12 enum subagents (haiku)│    │
+    │                               │  │ scripts/enum/*.js        │    │
     │                               │  │ iam, sts, s3, kms,       │    │
     │                               │  │ secrets, lambda, ec2,    │    │
     │                               │  │ rds, sns, sqs,           │    │
@@ -200,8 +200,8 @@ Verification results are in-memory — scope-verify returns corrections to the c
 ```
                    ┌───────────────────────────────────┐
                    │           scope-audit              │
-                   │  (orchestrator — dispatches        │
-                   │   12 enum subagents + attack-paths) │
+                   │  (orchestrator — runs SDK scripts  │
+                   │   + dispatches attack-paths)        │
                    └──────────┬────────────────────────┘
                               │ writes ./audit/
                               │
@@ -269,7 +269,7 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 12 enum subagents + attack-paths + defend |
+| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | runs SDK enum scripts + dispatches attack-paths + defend |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **hunt** | `/scope:hunt [input]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json`. Intel mode: WebFetch (URL) or NL parse, `./hunt/context.json`, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in any mode) |
