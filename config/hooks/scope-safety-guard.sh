@@ -1,29 +1,86 @@
 #!/bin/bash
 # SCOPE Safety Guard — PreToolUse / BeforeTool hook
-# Blocks destructive AWS operations. SCOPE agents are read-only by default.
-# Destructive operations require explicit operator approval at runtime,
-# not silent execution through agent commands.
+# Blocks destructive AWS operations and enforces path sanitization.
+# SCOPE agents are read-only by default. Destructive operations require
+# explicit operator approval at runtime, not silent execution through agent commands.
 #
 # Exit 0 = allow, Exit 2 = block (stderr = reason)
 #
-# Design: Only blocks commands where `aws <service> <destructive-action>` appears
-# as an executable invocation. Does NOT block quoted text, heredocs, or echo'd
-# strings that merely contain AWS CLI examples (e.g., playbook generation).
+# Design:
+# 1. Parse command from JSON input
+# 2. Path sanitization — blocks commands referencing paths outside allowed prefixes
+# 3. AWS fast-path — exit early if no 'aws' in command (remaining checks are AWS-only)
+# 4. Block eval/xargs wrappers hiding AWS calls
+# 5. Strip heredocs and quotes to get executable text
+# 6. Check executable text against destructive AWS patterns
 
 set -euo pipefail
 
-# Fast-path: read stdin once, check for 'aws' before parsing JSON.
-# Avoids jq overhead on non-AWS commands (mkdir, echo, cp, etc.)
-# Case-insensitive match — covers 'aws', 'AWS', and 'Aws'
+# Read stdin once
 INPUT=$(cat /dev/stdin)
-if ! echo "$INPUT" | grep -qi 'aws '; then
-  exit 0
-fi
 
+# Parse command from JSON
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || COMMAND=""
 
-# Empty command after parse — allow (no AWS call possible)
+# Empty command — allow
 [ -z "$COMMAND" ] && exit 0
+
+# =============================================================================
+# PATH SANITIZATION — applies to ALL commands (not just AWS)
+# =============================================================================
+
+# Path traversal detection — block any command containing ../
+if echo "$COMMAND" | grep -qE '\.\./' ; then
+  echo "SCOPE Safety Guard: Blocked — path traversal (..) detected. Use direct paths within allowed prefixes." >&2
+  exit 2
+fi
+
+# Extract all relative path references (./something/)
+PATHS=$(echo "$COMMAND" | grep -oE '\./[a-zA-Z0-9_.-]+/' | sort -u) || true
+
+if [ -n "$PATHS" ]; then
+  # Allowed output directories (operator-provided run paths land here)
+  ALLOWED_PREFIXES=('./audit/' './exploit/' './hunt/' './data/' './engagements/')
+
+  # Internal project directories (never block — not operator-provided)
+  INTERNAL_PREFIXES=('./config/' './bin/' './agents/' './dashboard/' './test/' './node_modules/' './.planning/' './.claude/' './.git/' './.codex/' './.gemini/')
+
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+
+    # Skip internal project paths
+    is_internal=false
+    for ip in "${INTERNAL_PREFIXES[@]}"; do
+      if [[ "$p" == "$ip"* ]]; then
+        is_internal=true
+        break
+      fi
+    done
+    $is_internal && continue
+
+    # Check against allowlist
+    is_allowed=false
+    for ap in "${ALLOWED_PREFIXES[@]}"; do
+      if [[ "$p" == "$ap"* ]]; then
+        is_allowed=true
+        break
+      fi
+    done
+
+    if ! $is_allowed; then
+      echo "SCOPE Safety Guard: Blocked — path outside allowed prefixes: '$p'. Allowed: ./audit/, ./exploit/, ./hunt/, ./data/, ./engagements/" >&2
+      exit 2
+    fi
+  done <<< "$PATHS"
+fi
+
+# =============================================================================
+# AWS FAST-PATH — if no 'aws' in command, skip destructive pattern checks
+# =============================================================================
+
+if ! echo "$COMMAND" | grep -qi 'aws '; then
+  exit 0
+fi
 
 # Block dangerous command wrappers that can hide AWS calls from text inspection.
 # eval can construct any command from string arguments; xargs can pipe args into aws.
