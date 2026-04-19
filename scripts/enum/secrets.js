@@ -96,22 +96,19 @@ function generateFindings(secret) {
   return findings;
 }
 
-// --- Main ---
+// --- Run (dependency-injectable) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/secrets.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
+  const client = opts.clients?.secrets ?? new SecretsManagerClient({ region });
+  const stsClient = opts.clients?.sts ?? new STSClient({});
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'Secrets_Enumeration_Start', { region: args.region });
+  const logger = createLogger(runDir);
+  logger.log('info', 'Secrets_Enumeration_Start', { region });
 
   // Get account ID
-  const stsClient = new STSClient({});
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -119,11 +116,9 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
 
-  const client = new SecretsManagerClient({ region: args.region });
   const findings = [];
   let status = 'complete';
   const errors = [];
@@ -138,13 +133,13 @@ async function main() {
     const envelope = createEnvelope({
       module: 'secrets',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'error',
       findings: [],
     });
-    writeEnvelope(args.runDir, envelope);
+    writeEnvelope(runDir, envelope);
     await logger.flush();
-    process.exit(1);
+    throw new Error(`ListSecrets failed: ${err.message}`);
   }
 
   // Per-secret: GetResourcePolicy
@@ -156,7 +151,7 @@ async function main() {
       resource_type: 'secrets_secret',
       resource_id: secretName,
       arn: secretArn,
-      region: args.region,
+      region,
       rotation_enabled: secret.RotationEnabled || false,
       last_rotated_date: secret.LastRotatedDate?.toISOString() || null,
       last_accessed_date: secret.LastAccessedDate?.toISOString() || null,
@@ -194,12 +189,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'secrets',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'Secrets_Enumeration_Complete', {
     status,
     secrets: findings.length,
@@ -211,7 +206,26 @@ async function main() {
   console.log(`Secrets enumeration complete: ${outPath} (${findings.length} secrets, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- Main (CLI entry point) ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/secrets.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

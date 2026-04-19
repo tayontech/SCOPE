@@ -147,22 +147,19 @@ function generateFindings(bucket) {
   return findings;
 }
 
-// --- Main ---
+// --- Run (dependency-injectable) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/s3.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
+  const s3Client = opts.clients?.s3 ?? new S3Client({ region: 'us-east-1' });
+  const stsClient = opts.clients?.sts ?? new STSClient({});
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'S3_Enumeration_Start', { region: args.region });
+  const logger = createLogger(runDir);
+  logger.log('info', 'S3_Enumeration_Start', { region });
 
   // Get account ID via STS
-  const stsClient = new STSClient({});
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -170,29 +167,27 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
 
-  // ListBuckets is global — use us-east-1
-  const globalClient = new S3Client({ region: 'us-east-1' });
+  // ListBuckets is global — use the provided s3 client (defaults to us-east-1)
   let allBuckets;
   try {
     logger.log('api_call', 'ListBuckets', { service: 's3' });
-    const resp = await withRetry(() => globalClient.send(new ListBucketsCommand({})));
+    const resp = await withRetry(() => s3Client.send(new ListBucketsCommand({})));
     allBuckets = resp.Buckets || [];
   } catch (err) {
     logger.log('error', 'ListBuckets', { error: err.message });
     const envelope = createEnvelope({
       module: 's3',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'error',
       findings: [],
     });
-    writeEnvelope(args.runDir, envelope);
+    writeEnvelope(runDir, envelope);
     await logger.flush();
-    process.exit(1);
+    throw new Error(`ListBuckets failed: ${err.message}`);
   }
 
   // Discover bucket regions and filter to requested region
@@ -207,7 +202,7 @@ async function main() {
     try {
       logger.log('api_call', 'GetBucketLocation', { bucket: bucketName });
       const locResp = await withRetry(() =>
-        globalClient.send(new GetBucketLocationCommand({ Bucket: bucketName }))
+        s3Client.send(new GetBucketLocationCommand({ Bucket: bucketName }))
       );
       bucketRegion = normalizeBucketRegion(locResp.LocationConstraint);
     } catch (err) {
@@ -218,10 +213,10 @@ async function main() {
     }
 
     // Only enumerate buckets in the requested region
-    if (bucketRegion !== args.region) continue;
+    if (bucketRegion !== region) continue;
 
-    // Create a regional client for this bucket's region
-    const regionalClient = new S3Client({ region: bucketRegion });
+    // Use the provided client for regional requests too
+    const regionalClient = s3Client;
 
     const bucketFinding = {
       resource_type: 's3_bucket',
@@ -329,12 +324,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 's3',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'S3_Enumeration_Complete', {
     status,
     buckets_in_region: findings.length,
@@ -344,10 +339,29 @@ async function main() {
   });
 
   await logger.flush();
-  console.log(`S3 enumeration complete: ${outPath} (${findings.length} buckets in ${args.region}, status: ${status})`);
+  console.log(`S3 enumeration complete: ${outPath} (${findings.length} buckets in ${region}, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- Main (CLI entry point) ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/s3.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

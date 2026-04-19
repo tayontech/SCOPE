@@ -102,22 +102,19 @@ function generateSnapshotFindings(snapshot) {
   return findings;
 }
 
-// --- Main ---
+// --- Run (dependency-injectable) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/rds.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
+  const client = opts.clients?.rds ?? new RDSClient({ region });
+  const stsClient = opts.clients?.sts ?? new STSClient({});
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'RDS_Enumeration_Start', { region: args.region });
+  const logger = createLogger(runDir);
+  logger.log('info', 'RDS_Enumeration_Start', { region });
 
   // Get account ID
-  const stsClient = new STSClient({});
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -125,11 +122,9 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
 
-  const client = new RDSClient({ region: args.region });
   const findings = [];
   let status = 'complete';
   const errors = [];
@@ -147,13 +142,13 @@ async function main() {
     const envelope = createEnvelope({
       module: 'rds',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'error',
       findings: [],
     });
-    writeEnvelope(args.runDir, envelope);
+    writeEnvelope(runDir, envelope);
     await logger.flush();
-    process.exit(1);
+    throw new Error(`DescribeDBInstances failed: ${err.message}`);
   }
 
   for (const db of allInstances) {
@@ -161,7 +156,7 @@ async function main() {
       resource_type: 'rds_instance',
       resource_id: db.DBInstanceIdentifier,
       arn: db.DBInstanceArn,
-      region: args.region,
+      region,
       engine: db.Engine,
       engine_version: db.EngineVersion,
       publicly_accessible: db.PubliclyAccessible || false,
@@ -202,7 +197,7 @@ async function main() {
       resource_type: 'rds_snapshot',
       resource_id: snap.DBSnapshotIdentifier,
       arn: snap.DBSnapshotArn,
-      region: args.region,
+      region,
       engine: snap.Engine,
       encrypted: snap.Encrypted || false,
       kms_key_id: snap.KmsKeyId || null,
@@ -250,12 +245,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'rds',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'RDS_Enumeration_Complete', {
     status,
     instances: allInstances.length,
@@ -268,7 +263,26 @@ async function main() {
   console.log(`RDS enumeration complete: ${outPath} (${allInstances.length} instances, ${allSnapshots.length} snapshots, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- Main (CLI entry point) ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/rds.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };

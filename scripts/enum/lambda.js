@@ -86,22 +86,19 @@ function extractPolicyPrincipals(policyJson) {
   }
 }
 
-// --- Main ---
+// --- Run (dependency-injectable) ---
 
-async function main() {
-  const args = parseArgs(process.argv);
+async function run(opts = {}) {
+  const runDir = opts.runDir;
+  const region = opts.region;
 
-  if (!args.runDir || !args.region) {
-    console.error('Error: --run-dir and --region are required');
-    console.error('Usage: node scripts/enum/lambda.js --run-dir <dir> --region <region>');
-    process.exit(1);
-  }
+  const lambda = opts.clients?.lambda ?? new LambdaClient({ region });
+  const stsClient = opts.clients?.sts ?? new STSClient({ region });
 
-  const logger = createLogger(args.runDir);
-  logger.log('info', 'Lambda_Enumeration_Start', { region: args.region });
+  const logger = createLogger(runDir);
+  logger.log('info', 'Lambda_Enumeration_Start', { region });
 
   // Get account ID via STS
-  const stsClient = new STSClient({ region: args.region });
   let accountId;
   try {
     const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
@@ -109,11 +106,8 @@ async function main() {
   } catch (err) {
     logger.log('error', 'GetCallerIdentity', { error: err.message });
     await logger.flush();
-    console.error(`FATAL: GetCallerIdentity failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`GetCallerIdentity failed: ${err.message}`);
   }
-
-  const lambda = new LambdaClient({ region: args.region });
 
   // List all functions (paginated via Marker/NextMarker)
   logger.log('api_call', 'ListFunctions', { service: 'lambda' });
@@ -128,14 +122,13 @@ async function main() {
     const envelope = createEnvelope({
       module: 'lambda',
       account_id: accountId,
-      region: args.region,
+      region,
       status: 'error',
       findings: [],
     });
-    writeEnvelope(args.runDir, envelope);
+    writeEnvelope(runDir, envelope);
     await logger.flush();
-    console.error(`FATAL: ListFunctions failed: ${err.message}`);
-    process.exit(1);
+    throw new Error(`ListFunctions failed: ${err.message}`);
   }
 
   const findings = [];
@@ -159,14 +152,12 @@ async function main() {
 
     // Get resource policy
     let resourcePolicyPrincipals = [];
-    let rawPolicy = null;
     try {
       logger.log('api_call', 'GetPolicy', { function: func.FunctionName });
       const policyResp = await safeGetResource(() =>
         lambda.send(new GetPolicyCommand({ FunctionName: func.FunctionName }))
       );
       if (policyResp && policyResp.Policy) {
-        rawPolicy = policyResp.Policy;
         resourcePolicyPrincipals = extractPolicyPrincipals(policyResp.Policy);
       }
     } catch (err) {
@@ -237,12 +228,12 @@ async function main() {
   const envelope = createEnvelope({
     module: 'lambda',
     account_id: accountId,
-    region: args.region,
+    region,
     status,
     findings,
   });
 
-  const outPath = writeEnvelope(args.runDir, envelope);
+  const outPath = writeEnvelope(runDir, envelope);
 
   logger.log('info', 'Lambda_Enumeration_Complete', {
     status,
@@ -255,7 +246,26 @@ async function main() {
   console.log(`Lambda enumeration complete: ${outPath} (${findings.length} functions, status: ${status})`);
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+// --- Main (CLI entry point) ---
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.runDir || !args.region) {
+    console.error('Error: --run-dir and --region are required');
+    console.error('Usage: node scripts/enum/lambda.js --run-dir <dir> --region <region>');
+    process.exit(1);
+  }
+  try {
+    await run({ runDir: args.runDir, region: args.region });
+    process.exit(0);
+  } catch (err) {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { run };
