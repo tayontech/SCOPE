@@ -157,12 +157,24 @@ For each path block, extract:
   - exploitability: from "**Exploitability:**" line
 ```
 
+**Guard:** If the extraction above produced no `account_id` and no `attack_paths` array, emit:
+```
+[PIPELINE_ERROR] audit/extraction: no account_id or attack_paths extractable — halting audit normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
+
 **Step 2: Build graph from findings**
 
 Construct `graph.nodes[]` and `graph.edges[]` from the extracted attack path data:
 - Create nodes for each unique principal, role, escalation vector, and data resource referenced
 - Create edges for trust relationships, privilege escalation paths, and data access chains
 - Use the node ID conventions: user:, role:, esc:, data:, external:
+
+**Guard:** If `graph.nodes` or `graph.edges` is null or not an array after this step, emit:
+```
+[PIPELINE_ERROR] audit/graph: graph construction produced null nodes or edges — halting audit normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
 
 The graph is built from findings.md data. The pipeline does NOT need to handle HTML — visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`), which reads `results.json` and the normalized JSON files in `./data/`.
 
@@ -281,6 +293,12 @@ Extract:
 - Attack path totals: total, systemic vs one-off, by severity
 - Top quick wins: list of prioritized actions
 
+**Guard:** If none of `risk_posture`, `quick_wins`, or `category_breakdown` were extracted from the executive summary, emit:
+```
+[PIPELINE_ERROR] defend/summary: no executive summary fields extractable — halting defend normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
+
 **Step 2: Read technical-remediation.md**
 
 Extract:
@@ -290,12 +308,24 @@ Extract:
 - SPL detections: name, SPL query, MITRE technique, severity
 - Prioritization matrix: rank, action, risk, effort, category
 
+**Guard:** If none of SCPs, RCPs, detections, or security controls were extracted from the technical remediation, emit:
+```
+[PIPELINE_ERROR] defend/remediation: no technical recommendations extractable — halting defend normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
+
 **Step 3: Read policy files**
 
 For each `$RUN_DIR/policies/*.json`:
 - Read the JSON content
 - Classify as SCP or RCP from filename prefix
 - Include the parsed policy JSON in the payload
+
+**Guard:** If any policy file read in this step fails JSON parsing, emit:
+```
+[PIPELINE_ERROR] defend/policy: <filename> is not valid JSON — halting defend normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
 
 ### Defend Payload Schema
 
@@ -460,6 +490,12 @@ For each attack path:
   - exfiltration_vectors: array of {vector, available, permission, scope_estimate}
 ```
 
+**Guard:** If `target_arn` is null or empty after extraction, emit:
+```
+[PIPELINE_ERROR] exploit/extraction: target_arn not extractable — halting exploit normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
+
 **Step 2: Extract PassRole graph**
 
 If present, extract the PassRole attack surface section:
@@ -467,6 +503,12 @@ If present, extract the PassRole attack surface section:
 - nodes: array of {id, type, arn/service}
 - edges: array of {from, to, type, action, role, capabilities}
 If PassRole was skipped, set passrole_graph to null.
+
+**Guard:** If the passrole section exists in the source but extraction produced null or missing `nodes`/`edges` arrays, emit:
+```
+[PIPELINE_ERROR] exploit/passrole: passrole section exists but graph extraction failed — halting exploit normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected. If passrole section does not exist, skip this guard.
 
 **Step 3: Extract persistence analysis**
 
@@ -481,6 +523,16 @@ If present, extract the exfiltration analysis section:
 - For each of the 10 vectors: vector name, availability, required permission, permission status
 - Enumeration commands for available vectors
 - Data reachable description and scope estimates
+
+**Guard:** If persistence or exfiltration extraction produced null instead of arrays, emit:
+```
+[PIPELINE_ERROR] exploit/persistence: extraction produced null — halting exploit normalization
+```
+or:
+```
+[PIPELINE_ERROR] exploit/exfiltration: extraction produced null — halting exploit normalization
+```
+Do not proceed to the next step within this normalizer. Return partial status to the envelope. Other normalizer invocations are not affected.
 
 ### Exploit Payload Schema
 
