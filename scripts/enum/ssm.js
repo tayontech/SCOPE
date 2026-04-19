@@ -111,7 +111,7 @@ async function run(opts = {}) {
         tier: param.Tier || 'Standard',
         kms_key_id: kmsKeyId,
         data_type: param.DataType || null,
-        last_modified: param.LastModifiedDate ? param.LastModifiedDate.toISOString() : null,
+        last_modified: param.LastModifiedDate ? (param.LastModifiedDate instanceof Date ? param.LastModifiedDate.toISOString() : String(param.LastModifiedDate)) : null,
         version: param.Version || null,
         has_resource_policy: resourcePolicy !== null,
         resource_policy: resourcePolicy,

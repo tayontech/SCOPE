@@ -1,0 +1,88 @@
+{
+  "ListIdentityPoolsCommand": {
+    "IdentityPools": [
+      {
+        "IdentityPoolId": "us-east-1:pool-abc123",
+        "IdentityPoolName": "TestIdentityPool"
+      }
+    ]
+  },
+  "DescribeIdentityPoolCommand": {
+    "IdentityPoolId": "us-east-1:pool-abc123",
+    "IdentityPoolName": "TestIdentityPool",
+    "AllowUnauthenticatedIdentities": true,
+    "Roles": {
+      "authenticated": "arn:aws:iam::123456789012:role/Cognito_TestIdentityPoolAuth_Role",
+      "unauthenticated": "arn:aws:iam::123456789012:role/Cognito_TestIdentityPoolUnauth_Role"
+    },
+    "SupportedLoginProviders": {},
+    "OpenIdConnectProviderARNs": [],
+    "CognitoIdentityProviders": [
+      {
+        "ProviderName": "cognito-idp.us-east-1.amazonaws.com/us-east-1_TestPool",
+        "ClientId": "client123",
+        "ServerSideTokenCheck": false
+      }
+    ],
+    "SamlProviderARNs": []
+  },
+  "ListUserPoolsCommand": {
+    "UserPools": [
+      {
+        "Id": "us-east-1_TestPool",
+        "Name": "TestUserPool"
+      }
+    ]
+  },
+  "DescribeUserPoolCommand": {
+    "UserPool": {
+      "Id": "us-east-1_TestPool",
+      "Name": "TestUserPool",
+      "Arn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_TestPool",
+      "MfaConfiguration": "OFF",
+      "AdminCreateUserConfig": {
+        "AllowAdminCreateUserOnly": false
+      },
+      "Policies": {
+        "PasswordPolicy": {
+          "MinimumLength": 8,
+          "RequireUppercase": true,
+          "RequireLowercase": true,
+          "RequireNumbers": true,
+          "RequireSymbols": false,
+          "TemporaryPasswordValidityDays": 7
+        }
+      },
+      "SchemaAttributes": [],
+      "EstimatedNumberOfUsers": 42,
+      "CreationDate": "2024-01-01T00:00:00Z",
+      "LastModifiedDate": "2024-06-01T00:00:00Z"
+    }
+  },
+  "ListUserPoolClientsCommand": {
+    "UserPoolClients": [
+      {
+        "ClientId": "clientabc123",
+        "ClientName": "TestWebClient",
+        "UserPoolId": "us-east-1_TestPool"
+      }
+    ]
+  },
+  "DescribeUserPoolClientCommand": {
+    "UserPoolClient": {
+      "ClientId": "clientabc123",
+      "ClientName": "TestWebClient",
+      "UserPoolId": "us-east-1_TestPool",
+      "AllowedOAuthFlows": ["code"],
+      "AllowedOAuthFlowsUserPoolClient": true,
+      "AllowedOAuthScopes": ["email", "openid"],
+      "CallbackURLs": ["https://example.com/callback"],
+      "LogoutURLs": ["https://example.com/logout"],
+      "ExplicitAuthFlows": ["ALLOW_REFRESH_TOKEN_AUTH"],
+      "AccessTokenValidity": 60,
+      "IdTokenValidity": 60,
+      "RefreshTokenValidity": 30,
+      "PreventUserExistenceErrors": "ENABLED"
+    }
+  }
+}

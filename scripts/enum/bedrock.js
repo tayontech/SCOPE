@@ -60,13 +60,15 @@ function isRegionNotAvailableError(err) {
 
 // --- Enumeration functions ---
 
-async function enumerateFoundationModels(client, logger) {
+async function enumerateFoundationModels(client, region, logger) {
   logger.log('api_call', 'ListFoundationModels', {});
   const resp = await withRetry(() => client.send(new ListFoundationModelsCommand({})));
   const models = resp.modelSummaries || [];
   return models.map((m) => ({
     resource_type: 'bedrock_model',
     resource_id: m.modelId,
+    arn: m.modelArn || `arn:aws:bedrock:${region}::foundation-model/${m.modelId}`,
+    region,
     model_name: m.modelName || null,
     provider: m.providerName || null,
     model_arn: m.modelArn || null,
@@ -78,12 +80,14 @@ async function enumerateFoundationModels(client, logger) {
   }));
 }
 
-async function enumerateCustomModels(client, logger) {
+async function enumerateCustomModels(client, region, logger) {
   logger.log('api_call', 'ListCustomModels', {});
   const models = await paginate(client, ListCustomModelsCommand, 'modelSummaries', {});
   return models.map((m) => ({
     resource_type: 'bedrock_custom_model',
     resource_id: m.modelName || m.modelArn,
+    arn: m.modelArn || `arn:aws:bedrock:${region}:unknown:custom-model/${m.modelName}`,
+    region,
     model_name: m.modelName || null,
     model_arn: m.modelArn || null,
     base_model_arn: m.baseModelArn || null,
@@ -92,7 +96,7 @@ async function enumerateCustomModels(client, logger) {
   }));
 }
 
-async function enumerateAgents(agentClient, logger) {
+async function enumerateAgents(agentClient, region, logger) {
   logger.log('api_call', 'ListAgents', {});
   const agents = await paginate(agentClient, ListAgentsCommand, 'agentSummaries', {});
   const findings = [];
@@ -107,6 +111,8 @@ async function enumerateAgents(agentClient, logger) {
       findings.push({
         resource_type: 'bedrock_agent',
         resource_id: detail.agentName || agent.agentId,
+        arn: detail.agentArn || `arn:aws:bedrock:${region}:unknown:agent/${agent.agentId}`,
+        region,
         agent_id: agent.agentId,
         agent_arn: detail.agentArn || null,
         status: detail.agentStatus || agent.agentStatus || null,
@@ -124,6 +130,8 @@ async function enumerateAgents(agentClient, logger) {
       findings.push({
         resource_type: 'bedrock_agent',
         resource_id: agent.agentId,
+        arn: `arn:aws:bedrock:${region}:unknown:agent/${agent.agentId}`,
+        region,
         agent_id: agent.agentId,
         status: agent.agentStatus || null,
         execution_role_arn: null,
@@ -135,7 +143,7 @@ async function enumerateAgents(agentClient, logger) {
   return findings;
 }
 
-async function enumerateKnowledgeBases(agentClient, logger) {
+async function enumerateKnowledgeBases(agentClient, region, logger) {
   logger.log('api_call', 'ListKnowledgeBases', {});
   const kbs = await paginate(agentClient, ListKnowledgeBasesCommand, 'knowledgeBaseSummaries', {});
   const findings = [];
@@ -151,6 +159,8 @@ async function enumerateKnowledgeBases(agentClient, logger) {
       findings.push({
         resource_type: 'bedrock_knowledge_base',
         resource_id: detail.name || kb.knowledgeBaseId,
+        arn: detail.knowledgeBaseArn || `arn:aws:bedrock:${region}:unknown:knowledge-base/${kb.knowledgeBaseId}`,
+        region,
         knowledge_base_id: kb.knowledgeBaseId,
         knowledge_base_arn: detail.knowledgeBaseArn || null,
         status: detail.status || kb.status || null,
@@ -167,6 +177,8 @@ async function enumerateKnowledgeBases(agentClient, logger) {
       findings.push({
         resource_type: 'bedrock_knowledge_base',
         resource_id: kb.knowledgeBaseId,
+        arn: `arn:aws:bedrock:${region}:unknown:knowledge-base/${kb.knowledgeBaseId}`,
+        region,
         knowledge_base_id: kb.knowledgeBaseId,
         status: kb.status || null,
         findings: [],
@@ -177,12 +189,14 @@ async function enumerateKnowledgeBases(agentClient, logger) {
   return findings;
 }
 
-async function enumerateGuardrails(client, logger) {
+async function enumerateGuardrails(client, region, logger) {
   logger.log('api_call', 'ListGuardrails', {});
   const guardrails = await paginate(client, ListGuardrailsCommand, 'guardrails', {});
   return guardrails.map((g) => ({
     resource_type: 'bedrock_guardrail',
     resource_id: g.name || g.id,
+    arn: g.arn || `arn:aws:bedrock:${region}:unknown:guardrail/${g.id}`,
+    region,
     guardrail_id: g.id || null,
     guardrail_arn: g.arn || null,
     name: g.name || null,
@@ -256,7 +270,7 @@ async function run(opts = {}) {
   try {
     // Foundation models
     try {
-      const models = await enumerateFoundationModels(bedrockClient, logger);
+      const models = await enumerateFoundationModels(bedrockClient, region, logger);
       findings.push(...models);
     } catch (err) {
       if (isRegionNotAvailableError(err)) {
@@ -277,7 +291,7 @@ async function run(opts = {}) {
 
     // Custom models
     try {
-      const customModels = await enumerateCustomModels(bedrockClient, logger);
+      const customModels = await enumerateCustomModels(bedrockClient, region, logger);
       findings.push(...customModels);
     } catch (err) {
       partialErrors.push({ resource: 'custom_models', error: err.message });
@@ -286,7 +300,7 @@ async function run(opts = {}) {
 
     // Agents
     try {
-      const agents = await enumerateAgents(agentClient, logger);
+      const agents = await enumerateAgents(agentClient, region, logger);
       findings.push(...agents);
     } catch (err) {
       partialErrors.push({ resource: 'agents', error: err.message });
@@ -295,7 +309,7 @@ async function run(opts = {}) {
 
     // Knowledge bases
     try {
-      const kbs = await enumerateKnowledgeBases(agentClient, logger);
+      const kbs = await enumerateKnowledgeBases(agentClient, region, logger);
       findings.push(...kbs);
     } catch (err) {
       partialErrors.push({ resource: 'knowledge_bases', error: err.message });
@@ -304,7 +318,7 @@ async function run(opts = {}) {
 
     // Guardrails
     try {
-      const guardrails = await enumerateGuardrails(bedrockClient, logger);
+      const guardrails = await enumerateGuardrails(bedrockClient, region, logger);
       findings.push(...guardrails);
     } catch (err) {
       partialErrors.push({ resource: 'guardrails', error: err.message });
@@ -318,6 +332,8 @@ async function run(opts = {}) {
         findings.push({
           resource_type: 'bedrock_logging',
           resource_id: 'invocation_logging',
+          arn: `arn:aws:bedrock:${region}:unknown:logging/invocation_logging`,
+          region,
           logging_enabled: loggingResult.logging_enabled,
           logging_config: loggingResult.logging_config,
           findings: [loggingResult.finding],
