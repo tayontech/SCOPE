@@ -3,30 +3,30 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-19T08:00:00.000Z"
-last_activity: "2026-04-19 — Completed 58-02: all 12 enum agents updated with @include agents/shared/enum-output-contract.md"
+last_updated: "2026-04-19T09:00:00.000Z"
+last_activity: "2026-04-19 — Completed 58-03: all 4 orchestrators updated with @include shared sections, <session_isolation> removed"
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 58 — Shared Content Extraction — Verification, Enum Contract, Role Compression
-Plan: 58-02 complete (2/3 plans for Phase 58)
-Status: In progress — Phase 58 Plans 01–02 complete, ready for Plan 03
-Last activity: 2026-04-19 — Completed 58-02: all 12 enum agents updated with @include agents/shared/enum-output-contract.md
+Phase: 58 — COMPLETE
+Plan: 58-03 complete (3/3 plans for Phase 58)
+Status: Phase 58 complete — ready for Phase 59 (scope-defend Intake Consolidation)
+Last activity: 2026-04-19 — Completed 58-03: all 4 orchestrators updated with @include shared sections, <session_isolation> removed
 
 ## Phase Index
 
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
 | 57 | !INCLUDE Infrastructure & Tier Model Declarations | PROM-01 | Complete (2026-04-19) |
-| 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | In Progress (Plan 1/3 complete) |
+| 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | Complete (2026-04-19) |
 | 59 | scope-defend Intake Consolidation | PROM-04 | Pending |
 | 60 | Runtime Reference Loading | PROM-06 | Pending |
 | 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | Pending |
@@ -50,6 +50,9 @@ Last activity: 2026-04-19 — Completed 58-02: all 12 enum agents updated with @
 - Phase 58-01 decision: --argjson canonical for enum output contract (11/12 agents); IAM's --slurpfile form stays inline
 - Phase 58-01 decision: effective_permissions and flush-on-save excluded from shared evidence-logging.md (exploit/hunt-specific)
 - Phase 58-01 decision: agent-preamble.md contains only 4 truly cross-agent mandates (read-only, no auto-deploy, external:* IDs, lowercase severity)
+- Phase 58-03 decision: scope-audit's agent_log_protocol renamed to evidence_protocol + @include added at top; audit-specific record types (subagent_dispatch, gate_transition) kept as inline extensions
+- Phase 58-03 decision: scope-attack-paths and scope-pipeline contain no repeated project context — no changes needed
+- Phase 58-03 decision: <session_isolation> renamed to <run_directory> in exploit/defend/hunt; audit replaced with <run_index> for index content; mandate line removed from all
 
 ## Dependency Order
 
