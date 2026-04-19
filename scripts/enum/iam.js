@@ -29,6 +29,8 @@ const {
   GetCredentialReportCommand,
   GenerateServiceLastAccessedDetailsCommand,
   GetServiceLastAccessedDetailsCommand,
+  ListOpenIDConnectProvidersCommand,
+  GetOpenIDConnectProviderCommand,
 } = require('@aws-sdk/client-iam');
 
 const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
@@ -626,6 +628,57 @@ async function enrichGroupMembers(client, groupFindings, logger) {
   }
 }
 
+// --- OIDC Provider Enumeration ---
+
+async function enumerateOIDCProviders(client, roleFindings, logger) {
+  logger.log('api_call', 'ListOpenIDConnectProviders', {});
+  const listResp = await withRetry(() => client.send(new ListOpenIDConnectProvidersCommand({})));
+  const providerList = listResp.OpenIDConnectProviderList || [];
+
+  // Build map of OIDC provider ARN -> roles that trust it
+  const oidcRoleMap = {};
+  for (const role of roleFindings) {
+    for (const trust of (role.trust_relationships || [])) {
+      if (trust.trust_type === 'federated' && trust.principal) {
+        const principalArn = trust.principal;
+        if (!oidcRoleMap[principalArn]) oidcRoleMap[principalArn] = [];
+        oidcRoleMap[principalArn].push({ arn: role.arn, conditions: trust });
+      }
+    }
+  }
+
+  const oidcFindings = [];
+  for (const providerRef of providerList) {
+    const providerArn = providerRef.Arn;
+    try {
+      logger.log('api_call', 'GetOpenIDConnectProvider', { arn: providerArn });
+      const detail = await withRetry(() =>
+        client.send(new GetOpenIDConnectProviderCommand({ OpenIDConnectProviderArn: providerArn }))
+      );
+
+      const assumedRoles = oidcRoleMap[providerArn] || [];
+
+      oidcFindings.push({
+        resource_type: 'oidc_provider',
+        resource_id: providerArn,
+        arn: providerArn,
+        region: 'global',
+        url: detail.Url,
+        client_ids: detail.ClientIDList || [],
+        thumbprints: detail.ThumbprintList || [],
+        create_date: detail.CreateDate ? new Date(detail.CreateDate).toISOString() : null,
+        assumed_role_arns: assumedRoles.map((r) => r.arn),
+        trust_conditions: assumedRoles.map((r) => r.conditions),
+        findings: [],
+      });
+    } catch (err) {
+      logger.log('warning', 'GetOpenIDConnectProvider', { arn: providerArn, error: err.message });
+    }
+  }
+
+  return oidcFindings;
+}
+
 // --- Run (DI-injectable) ---
 
 async function run(opts = {}) {
@@ -706,13 +759,22 @@ async function run(opts = {}) {
     if (status === 'complete') status = 'partial';
   }
 
+  // Enumerate OIDC providers and cross-reference with role trust relationships
+  let oidcFindings = [];
+  try {
+    oidcFindings = await enumerateOIDCProviders(client, roleFindings, logger);
+  } catch (err) {
+    logger.log('warning', 'OIDCProviders', { error: err.message });
+    if (status === 'complete') status = 'partial';
+  }
+
   // Set final status
   if (partialErrors.length > 0 && status === 'complete') {
     status = 'partial';
   }
 
   // Build and write envelope
-  const findings = [...userFindings, ...roleFindings, ...groupFindings];
+  const findings = [...userFindings, ...roleFindings, ...groupFindings, ...oidcFindings];
   const envelope = createEnvelope({
     module: 'iam',
     account_id: accountId,
@@ -727,6 +789,7 @@ async function run(opts = {}) {
     users: userFindings.length,
     roles: roleFindings.length,
     groups: groupFindings.length,
+    oidc: oidcFindings.length,
     errors: partialErrors.length,
     output: outputPath,
   });

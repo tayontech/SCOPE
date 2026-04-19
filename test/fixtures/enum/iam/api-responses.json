@@ -40,6 +40,9 @@
     "MFADevices": [],
     "IsTruncated": false
   },
+  "ListOpenIDConnectProvidersCommand": {
+    "OpenIDConnectProviderList": []
+  },
   "GenerateServiceLastAccessedDetailsCommand": [
     { "JobId": "job-user-123" },
     { "JobId": "job-role-456" }
