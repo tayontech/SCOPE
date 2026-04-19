@@ -1,71 +1,69 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.13
-milestone_name: milestone
+milestone: v1.14
+milestone_name: SDK Architecture & Intelligent Agents
 status: executing
-last_updated: "2026-04-19T14:18:00.000Z"
-last_activity: "2026-04-19 — Completed 62-02: credential isolation shared include + exploit hop template subshell rewrite"
+last_updated: "2026-04-19T17:36:00.000Z"
+last_activity: "2026-04-19 — Created DynamoDB & SSM Parameter Store SDK enum scripts (68-02)"
 progress:
-  total_phases: 8
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 10
+  total_phases: 11
+  completed_phases: 1
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 62 — IN PROGRESS
-Plan: 62-02 complete (plan 62-01 pending)
-Status: Phase 62 in progress — 62-02 complete, 62-01 pending
-Last activity: 2026-04-19 — Completed 62-02: credential isolation shared include + exploit hop template subshell rewrite
+Phase: 68 — In Progress
+Plan: 68-02 complete
+Status: Phase 68 plan 02 complete — DynamoDB & SSM enum scripts created
+Last activity: 2026-04-19 — Created scripts/enum/dynamodb.js and scripts/enum/ssm.js
 
 ## Phase Index
 
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
-| 57 | !INCLUDE Infrastructure & Tier Model Declarations | PROM-01 | Complete (2026-04-19) |
-| 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | Complete (2026-04-19) |
-| 59 | scope-defend Intake Consolidation | PROM-04 | Complete (2026-04-19) |
-| 60 | Runtime Reference Loading | PROM-06 | Complete (2026-04-19) |
-| 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | In Progress (61-02 complete) |
-| 62 | Input Safety — Path Sanitization & Credential Isolation | DET-03, DET-04 | In Progress (62-02 complete) |
-| 63 | IAM Simulator Wrapper | SIM-01 | Pending |
-| 64 | IAM Simulator Integration — Exploit & Attack Paths | SIM-02, SIM-03, SIM-04 | Pending |
+| 65 | Project Foundation — package.json & SDK Setup | SDK-01 | Complete (2026-04-19) |
+| 66 | Policy Resolution Script | POL-01, POL-02, POL-03 | Pending |
+| 67 | SDK Enum Scripts — IAM & STS (with Staleness) | SDK-02, SDK-04, SDK-05 | Pending |
+| 68 | SDK Enum Scripts — Data & Secrets Services | SDK-02, SDK-03, SDK-05 | Pending |
+| 69 | SDK Enum Scripts — Compute & Network Services | SDK-02, SDK-03, SDK-05 | Pending |
+| 70 | SDK Enum Scripts — Messaging, API & Identity Services | SDK-02, SDK-03, SDK-05 | Pending |
+| 71 | Migration Testing & Enum Agent Removal | TEST-01, TEST-02, ORCH-02 | Pending |
+| 72 | Orchestrator Rewrite | ORCH-01, ORCH-03 | Pending |
+| 73 | Policy Resolution Integration | POL-04 | Pending |
+| 74 | Research Subagent | AGENT-01, AGENT-03 | Pending |
+| 75 | Reporting Agent | AGENT-02, AGENT-03 | Pending |
 
 ## Accumulated Context
 
-- v1.12 shipped: exploit contract fixes, hook security hardening, hunt subagent split, memory removal, model routing, severity/edge/ID standardization
-- Root cause of contract drift identified: same rules repeated in 15+ files — centralizing is the fix
-- Multi-model analysis (GPT-5.4, Gemini 3.1 Pro, Claude Sonnet 4.6) converged on: LLM for creative reasoning, code/APIs for verification
-- Prompt lengths (exploit 129K, defend 116K) exceed reliable instruction adherence window (30-50K)
-- Phase A jq pipeline silently fails on cross-platform syntax drift
-- IAM Simulator identified as highest-ROI quality improvement
-- Phase 57 decision: config/models.json uses inherit:null to signal no model field in installed output (session model passthrough)
-- Tier names established: enum (haiku-class), reasoning (sonnet-class), inherit (session passthrough)
-- Phase 57-02 decision: resolveModelTier passes through literal model strings unchanged for backward compat — only symbolic tier labels (enum/reasoning/inherit) are mapped via config/models.json
-- Phase 57-02 decision: resolveIncludes placed before all platform-specific transformation; no nesting allowed; hard-fail on missing file
-- Phase 57-02 decision: Codex TOML developer_instructions uses expandedBody (post-include-resolution) so inlined instructions have @include directives already expanded
-- Phase 58-01 decision: --argjson canonical for enum output contract (11/12 agents); IAM's --slurpfile form stays inline
-- Phase 58-01 decision: effective_permissions and flush-on-save excluded from shared evidence-logging.md (exploit/hunt-specific)
-- Phase 58-01 decision: agent-preamble.md contains only 4 truly cross-agent mandates (read-only, no auto-deploy, external:* IDs, lowercase severity)
-- Phase 58-03 decision: scope-audit's agent_log_protocol renamed to evidence_protocol + @include added at top; audit-specific record types (subagent_dispatch, gate_transition) kept as inline extensions
-- Phase 58-03 decision: scope-attack-paths and scope-pipeline contain no repeated project context — no changes needed
-- Phase 58-03 decision: <session_isolation> renamed to <run_directory> in exploit/defend/hunt; audit replaced with <run_index> for index content; mandate line removed from all
-- Phase 59-01 decision: scope-defend intake consolidated into <intake_protocol>; no orchestrator-vs-operator distinction — same routing logic either way; no multi-run aggregation; most-recent fallback selects single audit run
-- Phase 60-02 decision: ESC_CAT/PERSIST_CAT/POSTEX_CAT loads are hard-fail mandatory (no fallback); cloudtrail-classes.json retains existing graceful degradation; all four loads co-located in cloudtrail_classification section
-- Phase 62-02 decision: Nested subshells for multi-hop chains — each hop opens a child subshell inside parent hop's subshell (not sequential subshells)
+- v1.13 completed: !INCLUDE infrastructure, shared contracts, extract-graph.js, pipeline guards, path sanitization, credential isolation (Phases 57-62)
+- Architecture decision: LLM for reasoning, code for deterministic logic — enum is deterministic, replace with SDK scripts
+- Clean cut migration: all 12 enum agents replaced simultaneously, output format unchanged
+- New services: Bedrock, ECS/Fargate, DynamoDB, SSM Parameter Store, Cognito (17 total)
+- Staleness detection: IAM enum must include RoleLastUsed, credential report (Anodot-style 3rd-party compromise vector)
+- IAM Simulator unnecessary: effective permissions resolvable locally from policy documents + SCPs/RCPs + boundaries
+- Policy resolution replaces simulator: deterministic script layers managed policies + customer policies + SCPs + boundaries
+- AWS managed policy definitions stored in config (like accounts.json pattern)
+- SCPs/RCPs pre-loaded from org management account into config/scps/ (existing convention)
+- Research subagent shared by attack-paths, hunt, exploit — uses WebSearch + MCP tools at runtime
+- MCP-extensible: no SCOPE config for MCPs, operators configure in platform settings, agents discover at runtime
+- Core enum logic preserved in SDK scripts: service-linked role exclusion, trust type classification, risk labeling
+- Scripts live in scripts/enum/{service}.js, shared lib at scripts/lib/
+- Pipeline no longer normalizes enum data — SDK scripts produce final format directly
 
 ## Dependency Order
 
 ```
-Phase 57 (PROM-01)
-    └── Phase 58 (PROM-02, 03, 05)
-    └── Phase 59 (PROM-04)
-Phase 60 (PROM-06)           — independent
-Phase 61 (DET-01, 02)        — independent
-Phase 62 (DET-03, 04)        — independent
-Phase 63 (SIM-01)
-    └── Phase 64 (SIM-02, 03, 04)
+Phase 65 (SDK-01: foundation) — COMPLETE
+    ├── Phase 66 (POL-01, 02, 03: policy resolution)
+    │       └── Phase 73 (POL-04: attack-paths integration)
+    ├── Phase 67 (SDK-02, 04, 05: IAM + STS)  ─┐
+    ├── Phase 68 (SDK-02, 03, 05: data services) ├─ Phase 71 (testing + removal)
+    ├── Phase 69 (SDK-02, 03, 05: compute)       │       └── Phase 72 (orchestrator)
+    └── Phase 70 (SDK-02, 03, 05: messaging)   ─┘
+Phase 74 (AGENT-01, 03: research) — independent
+Phase 75 (AGENT-02, 03: reporting) — independent
 ```
