@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-19T09:00:00.000Z"
-last_activity: "2026-04-19 — Completed 58-03: all 4 orchestrators updated with @include shared sections, <session_isolation> removed"
+last_updated: "2026-04-19T12:34:52.000Z"
+last_activity: "2026-04-19 — Completed 60-02: wired ESC_CAT, PERSIST_CAT, POSTEX_CAT into scope-exploit.md; removed inline catalogue entries (-138 lines/-12K chars)"
 progress:
   total_phases: 8
-  completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 4
+  total_plans: 8
+  completed_plans: 8
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 58 — COMPLETE
-Plan: 58-03 complete (3/3 plans for Phase 58)
-Status: Phase 58 complete — ready for Phase 59 (scope-defend Intake Consolidation)
-Last activity: 2026-04-19 — Completed 58-03: all 4 orchestrators updated with @include shared sections, <session_isolation> removed
+Phase: 60 — COMPLETE
+Plan: 60-02 complete (2/2 plans for Phase 60)
+Status: Phase 60 complete — ready for Phase 61 (Graph Extraction & Pipeline Guards)
+Last activity: 2026-04-19 — Completed 60-02: wired ESC_CAT, PERSIST_CAT, POSTEX_CAT into scope-exploit.md; removed inline catalogue entries (-138 lines/-12K chars)
 
 ## Phase Index
 
@@ -27,8 +27,8 @@ Last activity: 2026-04-19 — Completed 58-03: all 4 orchestrators updated with 
 |-------|------|-------------|--------|
 | 57 | !INCLUDE Infrastructure & Tier Model Declarations | PROM-01 | Complete (2026-04-19) |
 | 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | Complete (2026-04-19) |
-| 59 | scope-defend Intake Consolidation | PROM-04 | Pending |
-| 60 | Runtime Reference Loading | PROM-06 | Pending |
+| 59 | scope-defend Intake Consolidation | PROM-04 | Complete (2026-04-19) |
+| 60 | Runtime Reference Loading | PROM-06 | Complete (2026-04-19) |
 | 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | Pending |
 | 62 | Input Safety — Path Sanitization & Credential Isolation | DET-03, DET-04 | Pending |
 | 63 | IAM Simulator Wrapper | SIM-01 | Pending |
@@ -53,6 +53,8 @@ Last activity: 2026-04-19 — Completed 58-03: all 4 orchestrators updated with 
 - Phase 58-03 decision: scope-audit's agent_log_protocol renamed to evidence_protocol + @include added at top; audit-specific record types (subagent_dispatch, gate_transition) kept as inline extensions
 - Phase 58-03 decision: scope-attack-paths and scope-pipeline contain no repeated project context — no changes needed
 - Phase 58-03 decision: <session_isolation> renamed to <run_directory> in exploit/defend/hunt; audit replaced with <run_index> for index content; mandate line removed from all
+- Phase 59-01 decision: scope-defend intake consolidated into <intake_protocol>; no orchestrator-vs-operator distinction — same routing logic either way; no multi-run aggregation; most-recent fallback selects single audit run
+- Phase 60-02 decision: ESC_CAT/PERSIST_CAT/POSTEX_CAT loads are hard-fail mandatory (no fallback); cloudtrail-classes.json retains existing graceful degradation; all four loads co-located in cloudtrail_classification section
 
 ## Dependency Order
 

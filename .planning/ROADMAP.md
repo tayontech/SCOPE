@@ -49,7 +49,7 @@
 
 ---
 
-## Phase 59: scope-defend Intake Consolidation
+## Phase 59: scope-defend Intake Consolidation ✓ COMPLETE (2026-04-19)
 
 **Requirements:** PROM-04
 **Target file:** `agents/scope-defend.md`
@@ -68,7 +68,7 @@
 
 ---
 
-## Phase 60: Runtime Reference Loading
+## Phase 60: Runtime Reference Loading ✓ COMPLETE (2026-04-19)
 
 **Requirements:** PROM-06
 **Target files:** `agents/scope-exploit.md`, `agents/subagents/scope-attack-paths.md`, `agents/scope-hunt.md`, relevant config files under `config/`
@@ -178,8 +178,10 @@
 
 | Phase | Requirements | Req Count |
 |-------|-------------|-----------|
-| 57 | 2/2 | Complete   | 2026-04-19 | 58 | 2/3 | In Progress|  | 59 | PROM-04 | 1 |
-| 60 | PROM-06 | 1 |
+| 57 | PROM-01 | 1 | Complete (2026-04-19) |
+| 58 | PROM-02, PROM-03, PROM-05 | 3 | Complete (2026-04-19) |
+| 59 | PROM-04 | 1 | Complete (2026-04-19) |
+| 60 | PROM-06 | 1 | Complete (2026-04-19) |
 | 61 | DET-01, DET-02, TEST-02 | 3 |
 | 62 | DET-03, DET-04 | 2 |
 | 63 | SIM-01 | 1 |
@@ -213,4 +215,4 @@ SIM workstream: Phase 63 must complete before Phase 64.
 ---
 
 *Roadmap defined: 2026-04-18*
-*Last updated: 2026-04-19*
+*Last updated: 2026-04-19 (Phase 60 complete)*
