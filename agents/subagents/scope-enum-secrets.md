@@ -219,11 +219,11 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 
 ### Per-Resource Checks
 - Rotation disabled: flag as finding
-- Last rotated >90 days ago: flag as HIGH
+- Last rotated >90 days ago: flag as high
 - Last accessed never or >180 days ago: flag as potentially unused secret
 - KMS key used: DefaultEncryptionKey (aws/secretsmanager) vs customer-managed -- flag if using default
-- Resource policy Principal:*: CRITICAL
-- Resource policy cross-account principal: HIGH -- external account can access secret
+- Resource policy Principal:*: critical
+- Resource policy cross-account principal: high -- external account can access secret
 - GetSecretValue granted without conditions: flag as "money action" exposed broadly
 - PutSecretValue without conditions: flag as potential backdoor path
 - Condition checks: note aws:SourceVpc, aws:SourceVpce, aws:PrincipalOrgID -- reduce risk, do not eliminate
@@ -246,37 +246,6 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/secrets.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "secrets" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/secrets.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-secrets" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/secrets.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only):**
 ```
 STATUS: complete|partial|error
@@ -287,20 +256,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where secrets were found, 
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
-After writing `$RUN_DIR/secrets.json`, validate output against the per-service schema:
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/secrets.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] secrets.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="secrets"
+OUTPUT_FILE="$RUN_DIR/secrets.json"
+AGENT_NAME="scope-enum-secrets"
+REGION="multi-region"
 ```
-
-Do NOT report STATUS: complete if any validation step fails.
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

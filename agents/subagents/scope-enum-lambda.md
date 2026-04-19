@@ -241,11 +241,11 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 - Event source mappings (list-event-source-mappings)
 
 ### Per-Resource Checks
-- Execution role with iam:* or AdministratorAccess: CRITICAL -- Methods 23-25, 45 target
+- Execution role with iam:* or AdministratorAccess: critical -- Methods 23-25, 45 target
 - Deprecated runtime: flag as security risk
 - Function URL enabled: flag as direct invocation path (no IAM auth by default)
-- Resource policy Principal:*: CRITICAL -- publicly invocable function
-- Resource policy cross-account invoke: HIGH -- external account can invoke
+- Resource policy Principal:*: critical -- publicly invocable function
+- Resource policy cross-account invoke: high -- external account can invoke
 - lambda:UpdateFunctionCode in resource policy: flag as code injection vector
 - lambda:AddPermission in resource policy: flag -- allows modifying resource policy itself
 - Environment variables with secret-pattern names: flag existence only, never values
@@ -258,7 +258,7 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 - Nodes: data:lambda:FUNCTION_NAME (type: "data") for each function
 - Edges: execution role (data:lambda:FUNCTION_NAME -> role:ROLE_NAME, trust_type: "service", label: "exec_role")
 - Edges: resource policy external (external:<id> -> data:lambda:FUNCTION_NAME, trust_type: "cross-account")
-- Edges: public invoke (external:internet -> data:lambda:FUNCTION_NAME, edge_type: "public_access", access_level: "read")
+- Edges: public invoke (external:public -> data:lambda:FUNCTION_NAME, edge_type: "public_access", access_level: "read")
 - Edges: code injection priv_esc if principal has UpdateFunctionCode on function with admin role
 - Edges: event source triggers (data:<svc>:<id> -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "triggers")
 - access_level: read = InvokeFunction only; write = UpdateFunctionCode or UpdateFunctionConfiguration
@@ -274,37 +274,6 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/lambda.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "lambda" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/lambda.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-lambda" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/lambda.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only):**
 ```
 STATUS: complete|partial|error
@@ -315,18 +284,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where functions were found
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
-After writing `$RUN_DIR/lambda.json`, validate output against the per-service schema:
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/lambda.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] lambda.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="lambda"
+OUTPUT_FILE="$RUN_DIR/lambda.json"
+AGENT_NAME="scope-enum-lambda"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

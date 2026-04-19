@@ -296,7 +296,7 @@ If writing the final ec2.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 - Per-instance: IMDS configuration (HttpTokens optional vs required, HttpPutResponseHopLimit)
 
   **MANDATORY IMDS extraction** — for EVERY instance returned by describe-instances, you MUST extract and evaluate:
-  1. `MetadataOptions.HttpTokens` — if "optional", flag as HIGH (IMDSv1 enabled)
+  1. `MetadataOptions.HttpTokens` — if "optional", flag as high (IMDSv1 enabled)
   2. `MetadataOptions.HttpPutResponseHopLimit` — if > 1, flag (container IMDS exposure)
   Do NOT skip this check. If MetadataOptions is absent from the API response, flag as UNKNOWN and note in findings.
 - Per-instance: launch template versions and legacy launch configurations — check UserData for credentials
@@ -312,20 +312,20 @@ If writing the final ec2.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 - Active SSM sessions (ssm describe-sessions --state Active)
 
 ### Per-Resource Checks
-- IMDSv1 enabled (HttpTokens: "optional"): HIGH — SSRF credential theft path; flag per instance
+- IMDSv1 enabled (HttpTokens: "optional"): high — SSRF credential theft path; flag per instance
 - HttpPutResponseHopLimit > 1: flag — containers on instance can reach IMDS
-- Credential patterns in user data or launch template UserData: CRITICAL — include line numbers, not values
-- IAM instance profile with admin-level role: CRITICAL
+- Credential patterns in user data or launch template UserData: critical — include line numbers, not values
+- IAM instance profile with admin-level role: critical
 - Unencrypted EBS volumes attached to instances with sensitive roles: flag
-- Snapshots shared publicly (CreateVolumePermission Group: all): CRITICAL
-- Snapshots shared with external accounts: HIGH — cross-account data exposure
-- Security group ingress 0.0.0.0/0 on sensitive ports: 22 = CRITICAL, 3389 = CRITICAL, 3306/5432/1433 = CRITICAL, -1 (ALL) = CRITICAL
-- SSM-managed instances with high-privilege roles: HIGH — ssm:SendCommand = arbitrary command execution
+- Snapshots shared publicly (CreateVolumePermission Group: all): critical
+- Snapshots shared with external accounts: high — cross-account data exposure
+- Security group ingress 0.0.0.0/0 on sensitive ports: 22 = critical, 3389 = critical, 3306/5432/1433 = critical, -1 (ALL) = critical
+- SSM-managed instances with high-privilege roles: high — ssm:SendCommand = arbitrary command execution
 - SSM Parameter Store plaintext parameters with secret-pattern names (password, secret, key, token, db_): flag existence only
 - Cross-account VPC peering: flag as lateral movement path
-- Client VPN with DestinationCidr 0.0.0.0/0 and AccessAll: true: HIGH
+- Client VPN with DestinationCidr 0.0.0.0/0 and AccessAll: true: high
 - ELB access logs disabled: flag
-- HTTP-only ELB listeners without HTTPS redirect: MEDIUM
+- HTTP-only ELB listeners without HTTPS redirect: medium
 
 ### Post-Enum Self-Check (MANDATORY)
 
@@ -348,7 +348,7 @@ Do NOT report STATUS: complete if instances exist but IMDS findings are absent.
 - Nodes: data:ec2:INSTANCE_ID (type: "data"), data:ssm:PARAM_NAME (type: "data")
 - Note: security groups, VPCs, ELBs are findings context — do NOT add as graph nodes
 - Edges: instance profile (data:ec2:INSTANCE_ID → role:ROLE_NAME, trust_type: "service", label: "instance_profile")
-- Edges: internet exposure for instances with high-privilege roles (external:internet → data:ec2:INSTANCE_ID, edge_type: "public_access", access_level: "read")
+- Edges: internet exposure for instances with high-privilege roles (external:public → data:ec2:INSTANCE_ID, edge_type: "public_access", access_level: "read")
 - Edges: SSM command vector priv_esc if principal has ssm:SendCommand on instance with admin role
 - Edges: SSM parameter access (role:<name> → data:ssm:PARAM_NAME, edge_type: "public_access", access_level: read|write|admin)
 - access_level: read = ssm:GetParameter/ec2:Describe*; write = ssm:PutParameter/ssm:SendCommand/ec2:RunInstances; admin = ssm:*/ec2:* broad scope
@@ -364,37 +364,6 @@ Do NOT report STATUS: complete if instances exist but IMDS findings are absent.
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/ec2.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "ec2" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/ec2.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-ec2" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/ec2.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
 STATUS: complete|partial|error
@@ -405,16 +374,13 @@ REGIONS_WITH_FINDINGS: [us-east-1, us-west-2] (list only regions where resources
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/ec2.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] ec2.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="ec2"
+OUTPUT_FILE="$RUN_DIR/ec2.json"
+AGENT_NAME="scope-enum-ec2"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 
