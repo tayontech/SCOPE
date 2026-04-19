@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.14
 milestone_name: SDK Architecture & Intelligent Agents
 status: executing
-last_updated: "2026-04-19T17:36:00.000Z"
-last_activity: "2026-04-19 — Created DynamoDB & SSM Parameter Store SDK enum scripts (68-02)"
+last_updated: "2026-04-19T17:53:00.000Z"
+last_activity: "2026-04-19 — Created EC2, Lambda, CodeBuild SDK enum scripts (69-01)"
 progress:
   total_phases: 11
   completed_phases: 1
@@ -16,10 +16,10 @@ progress:
 
 ## Current Position
 
-Phase: 68 — In Progress
-Plan: 68-02 complete
-Status: Phase 68 plan 02 complete — DynamoDB & SSM enum scripts created
-Last activity: 2026-04-19 — Created scripts/enum/dynamodb.js and scripts/enum/ssm.js
+Phase: 69 — In Progress
+Plan: 69-01 complete
+Status: Phase 69 plan 01 complete — EC2, Lambda, CodeBuild enum scripts created
+Last activity: 2026-04-19 — Created scripts/enum/ec2.js, scripts/enum/lambda.js, scripts/enum/codebuild.js
 
 ## Phase Index
 
@@ -29,7 +29,7 @@ Last activity: 2026-04-19 — Created scripts/enum/dynamodb.js and scripts/enum/
 | 66 | Policy Resolution Script | POL-01, POL-02, POL-03 | Pending |
 | 67 | SDK Enum Scripts — IAM & STS (with Staleness) | SDK-02, SDK-04, SDK-05 | Pending |
 | 68 | SDK Enum Scripts — Data & Secrets Services | SDK-02, SDK-03, SDK-05 | Pending |
-| 69 | SDK Enum Scripts — Compute & Network Services | SDK-02, SDK-03, SDK-05 | Pending |
+| 69 | SDK Enum Scripts — Compute & Network Services | SDK-02, SDK-05 | In Progress (1/1 plans) |
 | 70 | SDK Enum Scripts — Messaging, API & Identity Services | SDK-02, SDK-03, SDK-05 | Pending |
 | 71 | Migration Testing & Enum Agent Removal | TEST-01, TEST-02, ORCH-02 | Pending |
 | 72 | Orchestrator Rewrite | ORCH-01, ORCH-03 | Pending |
