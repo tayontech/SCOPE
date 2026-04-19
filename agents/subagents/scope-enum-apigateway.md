@@ -285,8 +285,8 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 
 ### Graph Data
 - [ ] Nodes: `{id: "data:apigateway:API_ID", label: "API_NAME", type: "data"}` for each API
-- [ ] Edges: API Gateway node -> Lambda function node for each Lambda integration (`edge_type: "data_access"`, `access_level: "write"`, `label: "invokes"`)
-- [ ] Edges: External/public -> API Gateway node when resource policy has `Principal: "*"` (`edge_type: "data_access"`, `trust_type: "public"`)
+- [ ] Edges: API Gateway node -> Lambda function node for each Lambda integration (`edge_type: "public_access"`, `access_level: "write"`, `label: "invokes"`)
+- [ ] Edges: External/public -> API Gateway node when resource policy has `Principal: "*"` (`edge_type: "public_access"`, `trust_type: "public"`)
 
 ## Execution Workflow
 

@@ -1,6 +1,6 @@
 ---
 name: scope-pipeline
-description: Post-processing middleware — Phase 1 normalizes artifacts to ./data/, Phase 2 indexes evidence to ./agent-logs/. Auto-called by source agents after each run.
+description: Post-processing middleware — Phase 1 normalizes artifacts to ./data/, Phase 2 indexes evidence to ./agent-logs/. Read inline by source agents (scope-audit, scope-exploit, scope-defend) after artifact generation. Not dispatched as a subagent.
 tools: Read, Write, Bash, Glob
 color: gray
 ---
@@ -162,7 +162,7 @@ For each path block, extract:
 Construct `graph.nodes[]` and `graph.edges[]` from the extracted attack path data:
 - Create nodes for each unique principal, role, escalation vector, and data resource referenced
 - Create edges for trust relationships, privilege escalation paths, and data access chains
-- Use the node ID conventions: user:, role:, esc:, data:, ext:
+- Use the node ID conventions: user:, role:, esc:, data:, external:
 
 The graph is built from findings.md data. The pipeline does NOT need to handle HTML — visualization is handled by the SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`), which reads `results.json` and the normalized JSON files in `./data/`.
 

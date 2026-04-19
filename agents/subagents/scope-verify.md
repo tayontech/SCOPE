@@ -1,6 +1,6 @@
 ---
 name: scope-verify
-description: Unified verification — claim ledger, AWS API validation, and SPL checks in a single file. Caller specifies domains via invocation context. Auto-called by other agents.
+description: Unified verification — claim ledger, AWS API validation, and SPL checks in a single file. Caller specifies domains via invocation context. Read inline by calling agents — not dispatched as a subagent.
 tools: Read, Edit, Bash, Grep, Glob, WebSearch, WebFetch
 color: yellow
 ---

@@ -144,7 +144,7 @@ TOTAL_FINDINGS=$(echo "$FINDINGS_JSON" | jq 'length')
 
 ### Graph Data
 - [ ] Nodes: `{id: "data:codebuild:PROJECT_NAME", label: "PROJECT_NAME", type: "data"}` for each project
-- [ ] Edges: CodeBuild project node → IAM role node (service role relationship — key for Method 15 and UpdateProject attack analysis)
+- [ ] Edges: CodeBuild project node → IAM role node (data:codebuild:PROJECT_NAME -> role:ROLE_NAME, edge_type: "iam_trust", trust_type: "service", label: "service_role" — key for Method 15 and UpdateProject attack analysis)
 
 ## Execution Workflow
 

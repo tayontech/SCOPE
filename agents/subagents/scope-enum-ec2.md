@@ -348,9 +348,9 @@ Do NOT report STATUS: complete if instances exist but IMDS findings are absent.
 - [ ] Nodes: data:ec2:INSTANCE_ID (type: "data"), data:ssm:PARAM_NAME (type: "data")
 - [ ] Note: security groups, VPCs, ELBs are findings context — do NOT add as graph nodes
 - [ ] Edges: instance profile (data:ec2:INSTANCE_ID → role:ROLE_NAME, trust_type: "service", label: "instance_profile")
-- [ ] Edges: internet exposure for instances with high-privilege roles (ext:internet → data:ec2:INSTANCE_ID, edge_type: "data_access", access_level: "read")
+- [ ] Edges: internet exposure for instances with high-privilege roles (external:internet → data:ec2:INSTANCE_ID, edge_type: "public_access", access_level: "read")
 - [ ] Edges: SSM command vector priv_esc if principal has ssm:SendCommand on instance with admin role
-- [ ] Edges: SSM parameter access (role:<name> → data:ssm:PARAM_NAME, edge_type: "data_access", access_level: read|write|admin)
+- [ ] Edges: SSM parameter access (role:<name> → data:ssm:PARAM_NAME, edge_type: "public_access", access_level: read|write|admin)
 - [ ] access_level: read = ssm:GetParameter/ec2:Describe*; write = ssm:PutParameter/ssm:SendCommand/ec2:RunInstances; admin = ssm:*/ec2:* broad scope
 
 ## Execution Workflow

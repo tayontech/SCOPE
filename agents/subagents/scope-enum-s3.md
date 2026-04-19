@@ -231,8 +231,8 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.arn)')
 ### Graph Data
 - [ ] Nodes: data:s3:BUCKET_NAME (type: "data") for each bucket
 - [ ] Edges: IAM principal access (user:<name>/role:<name> -> data:s3:BUCKET_NAME, access_level: read|write|admin)
-- [ ] Edges: public access (ext:internet -> data:s3:BUCKET_NAME, access_level: read|write|admin)
-- [ ] Edges: cross-account (ext:arn:aws:iam::<id>:root -> data:s3:BUCKET_NAME, trust_type: "cross-account")
+- [ ] Edges: public access (external:internet -> data:s3:BUCKET_NAME, access_level: read|write|admin)
+- [ ] Edges: cross-account (external:<id> -> data:s3:BUCKET_NAME, trust_type: "cross-account")
 - [ ] Edges: Lambda trigger (data:s3:BUCKET_NAME -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "s3_trigger")
 - [ ] access_level: read = Get*/List* only; write = Put*/Delete*; admin = s3:* or management actions
 

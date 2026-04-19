@@ -986,7 +986,7 @@ Also upsert into `./audit/index.json` (create with `{"runs": []}` if missing):
   "run_id": "audit-20260301-143022-all",
   "date": "2026-03-01T14:30:22Z",
   "target": "--all",
-  "risk": "CRITICAL",
+  "risk": "critical",
   "paths": 3,
   "directory": "./audit/audit-20260301-143022-all/"
 }

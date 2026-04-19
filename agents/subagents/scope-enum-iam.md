@@ -667,13 +667,13 @@ jq -s 'add | sort_by(.arn)' \
 - [ ] Credential report (if accessible)
 
 ### Per-Resource Checks
-- [ ] MFA enabled on users with console access (LoginProfile set); flag absent MFA as HIGH
-- [ ] Access key age: flag keys older than 90 days as HIGH
+- [ ] MFA enabled on users with console access (LoginProfile set); flag absent MFA as high
+- [ ] Access key age: flag keys older than 90 days as high
 - [ ] Users with both console access and programmatic access keys: flag as increased attack surface
-- [ ] Wildcard trust policies (Principal: "*" or Principal.AWS: "*"): flag as CRITICAL
+- [ ] Wildcard trust policies (Principal: "*" or Principal.AWS: "*"): flag as critical
 - [ ] Cross-account trust without sts:ExternalId condition: flag; classify as internal (in accounts.json) or external
 - [ ] Permission boundaries present on high-privilege roles: flag absent boundary on admin roles
-- [ ] Overly broad inline or managed policies granting iam:* or admin access: CRITICAL
+- [ ] Overly broad inline or managed policies granting iam:* or admin access: critical
 - [ ] Role trust policy principal type: AWS user/role/root, Service, Federated
 - [ ] Assumption chains: A assumes B assumes C — flag cross-account links in chain
 
@@ -684,8 +684,8 @@ jq -s 'add | sort_by(.arn)' \
 
 ### Graph Data
 - [ ] Nodes: user:<name>, role:<name> (skip AWSServiceRole-prefixed), svc:<service>.amazonaws.com, esc:iam:<Action>
-- [ ] Edges: trust relationships (same-account, cross-account internal/external, service), escalation paths (priv_esc), group memberships
-- [ ] Severity: admin/full access = CRITICAL; write on IAM/STS/Lambda = HIGH; read on sensitive data = MEDIUM; read-only non-sensitive = LOW
+- [ ] Edges: trust relationships (role:A -> role:B, edge_type: "iam_trust", trust_type: "same-account"|"cross-account-internal"|"cross-account-external"|"service"), escalation paths (user/role -> esc:iam:ACTION, edge_type: "priv_esc"), group memberships (user:<name> -> group:<name>, edge_type: "membership")
+- [ ] Severity: admin/full access = critical; write on IAM/STS/Lambda = high; read on sensitive data = medium; read-only non-sensitive = low
 
 ## Execution Workflow
 

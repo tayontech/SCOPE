@@ -191,9 +191,9 @@ Before writing results.json, verify ALL of the following. If any check fails, go
    Any escalation node without an incoming edge = disconnected node = the exact Codex v1.1 failure.
    If found: STOP. Add the missing priv_esc edge(s) connecting principal(s) to the disconnected node.
 
-5. **NETWORK COVERAGE (Phase B):** If EC2 enumeration found publicly exposed security groups or open ports,
+5. **PUBLIC ACCESS COVERAGE (Phase B):** If EC2 enumeration found publicly exposed security groups or open ports,
    then PHASE_B_EDGES MUST contain at least one edge with edge_type "network" and _source "reasoning".
-   If missing and public exposure data exists: go back and add network edges from external:public.
+   If missing and public exposure data exists: go back and add public_access edges from external:public.
 
 6. **SUMMARY COUNTS MATCH:** attack_paths_total in summary MUST equal the length of the attack_paths array.
    If mismatch: update summary.attack_paths_total to match the actual array length.
@@ -533,7 +533,7 @@ For each IAM user membership discovered by model reasoning (not already in Phase
 }
 ```
 
-### network edge — public exposure (default severity: high)
+### public_access edge — public exposure (default severity: high)
 For each publicly exposed resource (public security groups, open ports), connect to the external:public node:
 ```json
 {
@@ -870,57 +870,57 @@ Convert enumeration findings from all modules into categorized attack path entri
 #### 6A: Trust Misconfigurations (`trust_misconfiguration`)
 
 For each finding from IAM/STS enumeration:
-- **Wildcard trust (Principal: `"*"` or `{"AWS": "*"}`)** → CRITICAL. Name: "Wildcard Trust on {role}". Steps: show `aws sts assume-role` command. Detection: CloudTrail AssumeRole for that role.
+- **Wildcard trust (Principal: `"*"` or `{"AWS": "*"}`)** → critical. Name: "Wildcard Trust on {role}". Steps: show `aws sts assume-role` command. Detection: CloudTrail AssumeRole for that role.
 - **Broad account root trust (Principal: `arn:aws:iam::ACCT:root`)** on a high-privilege role:
-  - If the trusting account is in owned-accounts set → MEDIUM (internal cross-account, expected but worth noting). Name: "Internal Cross-Account Trust on {role}".
-  - If the trusting account is NOT in owned-accounts set → HIGH (unknown external account). Name: "Broad Account Trust on {role}". Steps: show assume-role from any identity in the account.
+  - If the trusting account is in owned-accounts set → medium (internal cross-account, expected but worth noting). Name: "Internal Cross-Account Trust on {role}".
+  - If the trusting account is NOT in owned-accounts set → high (unknown external account). Name: "Broad Account Trust on {role}". Steps: show assume-role from any identity in the account.
 - **Broad account root trust (Principal: `arn:aws:iam::ACCT:root`)** on a non-high-privilege role:
-  - If the trusting account is in owned-accounts set → LOW (internal cross-account on a limited role).
-  - If the trusting account is NOT in owned-accounts set → MEDIUM (unknown external account, but role has limited permissions). Name: "External Account Trust on {role}". Steps: show assume-role from any identity in the account.
+  - If the trusting account is in owned-accounts set → low (internal cross-account on a limited role).
+  - If the trusting account is NOT in owned-accounts set → medium (unknown external account, but role has limited permissions). Name: "External Account Trust on {role}". Steps: show assume-role from any identity in the account.
 - **Cross-account trust without `sts:ExternalId` condition:**
   - If owned account (in config/accounts.json) → **SKIP — not a finding.** ExternalId protects against confused deputy, which is not a risk when you control both accounts.
-  - If unknown external → HIGH (confused deputy vulnerability). Name: "Cross-Account Trust Without ExternalId on {role}". Steps: show confused deputy scenario.
+  - If unknown external → high (confused deputy vulnerability). Name: "Cross-Account Trust Without ExternalId on {role}". Steps: show confused deputy scenario.
 - **Cross-account trust without MFA condition on sensitive role:**
-  - If owned account → LOW. Name: "Cross-Account Trust Without MFA on {role} (internal)".
-  - If unknown external → MEDIUM. Name: "Cross-Account Trust Without MFA on {role}".
+  - If owned account → low. Name: "Cross-Account Trust Without MFA on {role} (internal)".
+  - If unknown external → medium. Name: "Cross-Account Trust Without MFA on {role}".
 
 MITRE: T1078.004 (Valid Accounts: Cloud Accounts).
 
 #### 6B: Data Exposure (`data_exposure`)
 
 For each finding from S3, Secrets Manager, EC2/EBS enumeration:
-- **Public S3 bucket** (public ACL or bucket policy allowing `Principal: "*"`) → CRITICAL if contains sensitive data indicators, HIGH otherwise. Name: "Public S3 Bucket: {bucket}". Steps: show `aws s3 ls s3://{bucket}` or direct HTTP access.
-- **Unencrypted Secrets Manager secret** → MEDIUM. Name: "Unencrypted Secret: {secret-name}". Steps: show `aws secretsmanager get-secret-value`.
-- **Public EBS snapshot** → HIGH. Name: "Public EBS Snapshot: {snap-id}". Steps: show `aws ec2 create-volume --snapshot-id` from attacker account.
-- **Public RDS snapshot** → HIGH. Name: "Public RDS Snapshot: {snap-id}".
+- **Public S3 bucket** (public ACL or bucket policy allowing `Principal: "*"`) → critical if contains sensitive data indicators, high otherwise. Name: "Public S3 Bucket: {bucket}". Steps: show `aws s3 ls s3://{bucket}` or direct HTTP access.
+- **Unencrypted Secrets Manager secret** → medium. Name: "Unencrypted Secret: {secret-name}". Steps: show `aws secretsmanager get-secret-value`.
+- **Public EBS snapshot** → high. Name: "Public EBS Snapshot: {snap-id}". Steps: show `aws ec2 create-volume --snapshot-id` from attacker account.
+- **Public RDS snapshot** → high. Name: "Public RDS Snapshot: {snap-id}".
 
 MITRE: T1530 (Data from Cloud Storage), T1537 (Transfer Data to Cloud Account) for snapshots.
 
 #### 6C: Credential Risks (`credential_risk`)
 
 For each finding from IAM enumeration:
-- **User with console access but no MFA, with admin-equivalent policies** → CRITICAL. Name: "Admin User Without MFA: {user}". Steps: show password spray / phishing scenario leading to full admin.
-- **User with console access but no MFA, non-admin** → HIGH. Name: "User Without MFA: {user}". Steps: show credential compromise leading to their permission set.
-- **Access keys older than 90 days** → MEDIUM. Name: "Stale Access Key: {user} (key age: {days}d)". Steps: show key reuse from leaked credentials.
-- **Unused access keys still active (no usage in 90+ days)** → MEDIUM. Name: "Unused Active Access Key: {user}".
+- **User with console access but no MFA, with admin-equivalent policies** → critical. Name: "Admin User Without MFA: {user}". Steps: show password spray / phishing scenario leading to full admin.
+- **User with console access but no MFA, non-admin** → high. Name: "User Without MFA: {user}". Steps: show credential compromise leading to their permission set.
+- **Access keys older than 90 days** → medium. Name: "Stale Access Key: {user} (key age: {days}d)". Steps: show key reuse from leaked credentials.
+- **Unused access keys still active (no usage in 90+ days)** → medium. Name: "Unused Active Access Key: {user}".
 
 MITRE: T1078.004 (Valid Accounts: Cloud Accounts), T1098.001 (Additional Cloud Credentials).
 
 #### 6D: Excessive Permissions (`excessive_permission`)
 
 For each finding from IAM policy analysis:
-- **Non-admin user/role with `Action: "*", Resource: "*"`** → CRITICAL. Name: "Wildcard Permissions on {principal}". Steps: show the principal can perform any action.
-- **Role with AdministratorAccess, IAMFullAccess, or PowerUserAccess managed policy that is NOT intended as an admin role** → HIGH. Name: "Admin-Equivalent Policy on {role}". Steps: show full admin capabilities.
-- **Lambda function with admin execution role** → HIGH. Name: "Lambda with Admin Role: {function}". Steps: show invoke or trigger leading to admin actions.
+- **Non-admin user/role with `Action: "*", Resource: "*"`** → critical. Name: "Wildcard Permissions on {principal}". Steps: show the principal can perform any action.
+- **Role with AdministratorAccess, IAMFullAccess, or PowerUserAccess managed policy that is NOT intended as an admin role** → high. Name: "Admin-Equivalent Policy on {role}". Steps: show full admin capabilities.
+- **Lambda function with admin execution role** → high. Name: "Lambda with Admin Role: {function}". Steps: show invoke or trigger leading to admin actions.
 
 MITRE: T1548 (Abuse Elevation Control Mechanism), T1078.004.
 
 #### 6E: Network Exposure (`network_exposure`)
 
 For each finding from EC2/VPC enumeration:
-- **Internet-facing EC2 instance with admin or high-privilege IAM role** → CRITICAL. Name: "Internet-Facing EC2 with Admin Role: {instance}". Steps: show SSRF/RCE → IMDS → admin credentials.
-- **Security group with 0.0.0.0/0 ingress on sensitive ports (22, 3389, 3306, 5432, 6379, 27017)** → MEDIUM. Name: "Open Ingress on {port}: {sg-id}". Steps: show direct connection from internet.
-- **Security group with 0.0.0.0/0 ingress on all ports** → HIGH. Name: "Fully Open Security Group: {sg-id}".
+- **Internet-facing EC2 instance with admin or high-privilege IAM role** → critical. Name: "Internet-Facing EC2 with Admin Role: {instance}". Steps: show SSRF/RCE → IMDS → admin credentials.
+- **Security group with 0.0.0.0/0 ingress on sensitive ports (22, 3389, 3306, 5432, 6379, 27017)** → medium. Name: "Open Ingress on {port}: {sg-id}". Steps: show direct connection from internet.
+- **Security group with 0.0.0.0/0 ingress on all ports** → high. Name: "Fully Open Security Group: {sg-id}".
 
 MITRE: T1190 (Exploit Public-Facing Application), T1552.005 (Cloud Instance Metadata API) for IMDS paths.
 
@@ -1110,7 +1110,7 @@ After identifying escalation and misconfiguration paths, analyze each principal'
 **Reasoning approach:** For each principal with interesting permissions, ask: "If this principal were compromised, what persistence mechanisms could an attacker establish?" Reference `$PERSISTENCE_CATALOGUE` (loaded above) for known persistence methods across IAM, STS, EC2, Lambda, S3/KMS/Secrets Manager. Apply the 7-step policy evaluation from Part 1 to validate each capability.
 **Emit as attack paths:** For each principal that has the required permissions for a persistence method, emit an attack path with `"category": "persistence"`. Include:
 - **name**: "Persistence: {method} via {principal}"
-- **severity**: CRITICAL for methods that survive credential rotation (backdoor trust, federation, eternal grants); HIGH for durable access (long-lived tokens, cron triggers, ACLs); MEDIUM for methods requiring additional steps
+- **severity**: critical for methods that survive credential rotation (backdoor trust, federation, eternal grants); high for durable access (long-lived tokens, cron triggers, ACLs); medium for methods requiring additional steps
 - **steps**: Concrete AWS CLI commands using real ARNs from enumeration data
 - **detection_opportunities**: CloudTrail events + SPL queries
 - **remediation**: Specific policy changes to block the persistence vector

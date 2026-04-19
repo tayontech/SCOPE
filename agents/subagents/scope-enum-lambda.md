@@ -257,8 +257,8 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ### Graph Data
 - [ ] Nodes: data:lambda:FUNCTION_NAME (type: "data") for each function
 - [ ] Edges: execution role (data:lambda:FUNCTION_NAME -> role:ROLE_NAME, trust_type: "service", label: "exec_role")
-- [ ] Edges: resource policy external (ext:arn:aws:iam::<id>:root -> data:lambda:FUNCTION_NAME, trust_type: "cross-account")
-- [ ] Edges: public invoke (ext:internet -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "read")
+- [ ] Edges: resource policy external (external:<id> -> data:lambda:FUNCTION_NAME, trust_type: "cross-account")
+- [ ] Edges: public invoke (external:internet -> data:lambda:FUNCTION_NAME, edge_type: "public_access", access_level: "read")
 - [ ] Edges: code injection priv_esc if principal has UpdateFunctionCode on function with admin role
 - [ ] Edges: event source triggers (data:<svc>:<id> -> data:lambda:FUNCTION_NAME, edge_type: "data_access", access_level: "write", label: "triggers")
 - [ ] access_level: read = InvokeFunction only; write = UpdateFunctionCode or UpdateFunctionConfiguration

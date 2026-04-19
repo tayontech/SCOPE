@@ -121,7 +121,7 @@ FINDINGS_JSON=$(echo "[]" | jq \
 - [ ] SCP coverage gaps: accounts or OUs not covered by any restrictive SCP
 
 ### Graph Data
-- [ ] Nodes: external account nodes (ext:arn:aws:iam::<id>:root), owned=true/false from accounts.json
+- [ ] Nodes: external account nodes (external:<id>), owned=true/false from accounts.json
 - [ ] Edges: cross-account trust (source: ext node, target: role:<name>), verified assumption paths (priv_esc if high-privilege role)
 - [ ] Source node type for caller: match actual caller type — user:<name>, role:<role-name>, user:root — do not hardcode
 

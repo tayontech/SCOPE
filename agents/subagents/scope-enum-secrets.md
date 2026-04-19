@@ -231,7 +231,7 @@ FINDINGS_JSON=$(echo "$ALL_FINDINGS" | jq 'sort_by(.region + ":" + .arn)')
 ### Graph Data
 - [ ] Nodes: data:secrets:SECRET_NAME (type: "data") for each secret
 - [ ] Edges: IAM-based access (user:<name>/role:<name> -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: read|write|admin)
-- [ ] Edges: cross-account resource policy (ext:arn:aws:iam::<id>:root -> data:secrets:SECRET_NAME, trust_type: "cross-account")
+- [ ] Edges: cross-account resource policy (external:<id> -> data:secrets:SECRET_NAME, trust_type: "cross-account")
 - [ ] Edges: KMS dependency (data:kms:KEY_ID -> data:secrets:SECRET_NAME, edge_type: "data_access", access_level: "read")
 - [ ] access_level: read = GetSecretValue/DescribeSecret/ListSecrets; write = PutSecretValue/UpdateSecret/CreateSecret; admin = secretsmanager:* or DeleteSecret+PutResourcePolicy
 

@@ -206,8 +206,8 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 
 ### Graph Data
 - [ ] Nodes: `{id: "data:sqs:QUEUE_NAME", label: "QUEUE_NAME", type: "data"}` for each queue
-- [ ] Edges: Lambda function → SQS queue node when event source mapping exists from Lambda module cross-reference (`edge_type: "data_access"`, `access_level: "read"`, `label: "consumes"`)
-- [ ] Edges: External account → SQS queue when cross-account policy principal found (`edge_type: "data_access"`, `trust_type: "cross-account"`)
+- [ ] Edges: Lambda function → SQS queue node when event source mapping exists from Lambda module cross-reference (`edge_type: "public_access"`, `access_level: "read"`, `label: "consumes"`)
+- [ ] Edges: External account → SQS queue when cross-account policy principal found (`edge_type: "public_access"`, `trust_type: "cross-account"`)
 
 ## Execution Workflow
 

@@ -220,8 +220,8 @@ If writing the final sns.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 
 ### Graph Data
 - [ ] Nodes: `{id: "data:sns:TOPIC_NAME", label: "TOPIC_NAME", type: "data"}` for each topic
-- [ ] Edges: Lambda function node → SNS topic node when Lambda subscription found (`edge_type: "data_access"`, `access_level: "read"`, `label: "triggered_by"`)
-- [ ] Edges: External account → SNS topic when cross-account subscription or policy principal found (`edge_type: "data_access"`, `trust_type: "cross-account"`)
+- [ ] Edges: Lambda function node → SNS topic node when Lambda subscription found (`edge_type: "public_access"`, `access_level: "read"`, `label: "triggered_by"`)
+- [ ] Edges: External account → SNS topic when cross-account subscription or policy principal found (`edge_type: "public_access"`, `trust_type: "cross-account"`)
 
 ## Execution Workflow
 
