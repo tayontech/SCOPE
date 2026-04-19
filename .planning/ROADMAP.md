@@ -178,8 +178,7 @@
 
 | Phase | Requirements | Req Count |
 |-------|-------------|-----------|
-| 57 | 2/2 | Complete   | 2026-04-19 | 58 | PROM-02, PROM-03, PROM-05 | 3 |
-| 59 | PROM-04 | 1 |
+| 57 | 2/2 | Complete   | 2026-04-19 | 58 | 1/3 | In Progress|  | 59 | PROM-04 | 1 |
 | 60 | PROM-06 | 1 |
 | 61 | DET-01, DET-02, TEST-02 | 3 |
 | 62 | DET-03, DET-04 | 2 |

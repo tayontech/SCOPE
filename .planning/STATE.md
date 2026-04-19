@@ -1,32 +1,32 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.13
-milestone_name: prompt-architecture-hardening
-status: in_progress
-last_updated: "2026-04-18"
-last_activity: 2026-04-18 — Completed Phase 57 Plan 02 (@include resolver + tier model routing in bin/install.js)
+milestone_name: milestone
+status: executing
+last_updated: "2026-04-19T05:02:16.525Z"
+last_activity: "2026-04-19 — Completed 58-01: 4 shared content files extracted to agents/shared/"
 progress:
   total_phases: 8
-  completed_phases: 0
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 1
+  total_plans: 5
+  completed_plans: 3
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 57 — !INCLUDE Infrastructure & Tier Model Declarations
-Plan: 57-02 complete (2/2 plans for Phase 57)
-Status: In progress — Phase 57 complete, ready for Phase 58
-Last activity: 2026-04-18 — Completed 57-02: @include resolver + resolveModelTier in bin/install.js
+Phase: 58 — Shared Content Extraction — Verification, Enum Contract, Role Compression
+Plan: 58-01 complete (1/3 plans for Phase 58)
+Status: In progress — Phase 58 Plan 01 complete, ready for Plan 02
+Last activity: 2026-04-19 — Completed 58-01: 4 shared content files extracted to agents/shared/
 
 ## Phase Index
 
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
 | 57 | !INCLUDE Infrastructure & Tier Model Declarations | PROM-01 | Complete (2026-04-19) |
-| 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | Pending |
+| 58 | Shared Content Extraction — Verification, Enum Contract, Role Compression | PROM-02, PROM-03, PROM-05 | In Progress (Plan 1/3 complete) |
 | 59 | scope-defend Intake Consolidation | PROM-04 | Pending |
 | 60 | Runtime Reference Loading | PROM-06 | Pending |
 | 61 | Graph Extraction & Pipeline Guards | DET-01, DET-02 | Pending |
@@ -47,6 +47,9 @@ Last activity: 2026-04-18 — Completed 57-02: @include resolver + resolveModelT
 - Phase 57-02 decision: resolveModelTier passes through literal model strings unchanged for backward compat — only symbolic tier labels (enum/reasoning/inherit) are mapped via config/models.json
 - Phase 57-02 decision: resolveIncludes placed before all platform-specific transformation; no nesting allowed; hard-fail on missing file
 - Phase 57-02 decision: Codex TOML developer_instructions uses expandedBody (post-include-resolution) so inlined instructions have @include directives already expanded
+- Phase 58-01 decision: --argjson canonical for enum output contract (11/12 agents); IAM's --slurpfile form stays inline
+- Phase 58-01 decision: effective_permissions and flush-on-save excluded from shared evidence-logging.md (exploit/hunt-specific)
+- Phase 58-01 decision: agent-preamble.md contains only 4 truly cross-agent mandates (read-only, no auto-deploy, external:* IDs, lowercase severity)
 
 ## Dependency Order
 
