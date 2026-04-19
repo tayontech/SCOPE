@@ -21,12 +21,16 @@ function parseArgs(argv) {
       args.runDir = argv[++i];
     } else if (argv[i] === '--region' && argv[i + 1]) {
       args.region = argv[++i];
+    } else if (argv[i] === '--regions' && argv[i + 1]) {
+      args.regions = argv[++i];
     } else if (argv[i] === '--help' || argv[i] === '-h') {
       console.log('Usage: node scripts/enum/dynamodb.js --run-dir <dir> --region <region>');
+      console.log('       node scripts/enum/dynamodb.js --run-dir <dir> --regions <r1,r2,...>');
       console.log('');
       console.log('Options:');
       console.log('  --run-dir  Path to the run output directory (required)');
-      console.log('  --region   AWS region to enumerate (required)');
+      console.log('  --region   AWS region to enumerate (required, or use --regions)');
+      console.log('  --regions  Comma-separated list of regions to enumerate');
       console.log('  --help     Show this help message');
       process.exit(0);
     }
@@ -217,6 +221,11 @@ async function run(opts = {}) {
     status = 'partial';
   }
 
+  if (opts.returnOnly) {
+    await logger.flush();
+    return findings;
+  }
+
   const envelope = createEnvelope({
     module: 'dynamodb',
     account_id: accountId,
@@ -240,17 +249,27 @@ async function run(opts = {}) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  if (!args.runDir || !args.region) {
+  if (!args.runDir || (!args.region && !args.regions)) {
+    console.error('Error: --run-dir and --region (or --regions) are required');
     console.error('Usage: node scripts/enum/dynamodb.js --run-dir <dir> --region <region>');
-    console.error('');
-    console.error('Options:');
-    console.error('  --run-dir  Path to the run output directory (required)');
-    console.error('  --region   AWS region to enumerate (required)');
+    console.error('       node scripts/enum/dynamodb.js --run-dir <dir> --regions <r1,r2,...>');
     process.exit(1);
   }
 
+  const regionList = args.regions ? args.regions.split(',') : [args.region];
+
   try {
-    await run({ runDir: args.runDir, region: args.region });
+    if (regionList.length === 1) {
+      await run({ runDir: args.runDir, region: regionList[0].trim() });
+    } else {
+      const allFindings = [];
+      for (const region of regionList) {
+        const findings = await run({ runDir: args.runDir, region: region.trim(), returnOnly: true });
+        if (Array.isArray(findings)) allFindings.push(...findings);
+      }
+      const envelope = createEnvelope({ module: 'dynamodb', account_id: null, region: 'multi', status: 'complete', findings: allFindings });
+      writeEnvelope(args.runDir, envelope);
+    }
     process.exit(0);
   } catch (err) {
     console.error(`Fatal error: ${err.message}`);
