@@ -1068,8 +1068,8 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 
 1. **Credential verified** — `aws sts get-caller-identity` succeeded, caller identity displayed
 2. **Operator gates honored** — Gate 1 auto-continued. Gates 2, 3, and 4 displayed and operator approval received before proceeding. No step past Gate 1 executed without explicit operator go-ahead.
-3. **Target parsed and routed** — Input correctly identified (ARN, service name, `--all`, `@targets.csv`) and service list resolved. ARN inputs trigger targeted API calls in the dispatched subagent.
-4. **Dispatch mode applied** — Single service → inline execution. Two or more services → parallel subagent dispatch. All modules ran (or were operator-skipped) and per-module JSONs written.
+3. **Target parsed and routed** — Input correctly identified (ARN, service name, `--all`, `@targets.csv`) and service list resolved. Service list built for SDK script dispatch.
+4. **SDK scripts dispatched** — All approved services ran as parallel Bash background processes. All modules ran (or were operator-skipped) and per-module JSONs written.
 5. **Attack-paths dispatched as fresh-context subagent** — Always, regardless of service count. results.json written to $RUN_DIR/.
 6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
