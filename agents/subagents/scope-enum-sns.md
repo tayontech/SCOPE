@@ -211,9 +211,9 @@ If writing the final sns.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 - Subscriptions per topic: `list-subscriptions-by-topic` — endpoint type, endpoint, status, subscription ARN
 
 ### Per-Resource Checks
-- Flag topics with resource policy containing `Principal: "*"` — CRITICAL (public publish access)
-- Flag topics with cross-account principals in resource policy — HIGH (data exfiltration path)
-- Flag HTTP/HTTPS subscriptions with `PendingConfirmation` status — MEDIUM (subscription hijack if attacker controls endpoint domain)
+- Flag topics with resource policy containing `Principal: "*"` — critical (public publish access)
+- Flag topics with cross-account principals in resource policy — high (data exfiltration path)
+- Flag HTTP/HTTPS subscriptions with `PendingConfirmation` status — medium (subscription hijack if attacker controls endpoint domain)
 - Flag cross-account subscriptions (subscription endpoint ARN belongs to external account)
 - Note SNS → Lambda subscriptions: topic publish triggers Lambda function execution with Lambda's execution role (indirect code execution path)
 - Flag topics with no `KmsMasterKeyId` — messages unencrypted at rest
@@ -234,37 +234,6 @@ If writing the final sns.json and not all ENABLED_REGIONS are in COMPLETED_REGIO
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/sns.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "sns" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/sns.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-sns" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/sns.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
 STATUS: complete|partial|error
@@ -275,16 +244,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where topics were found, o
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/sns.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] sns.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="sns"
+OUTPUT_FILE="$RUN_DIR/sns.json"
+AGENT_NAME="scope-enum-sns"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

@@ -197,8 +197,8 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 - Queue URL to queue name mapping for all queues
 
 ### Per-Resource Checks
-- Flag queues with resource policy containing `Principal: "*"` — CRITICAL (public send/receive access)
-- Flag queues with cross-account principals in resource policy — HIGH (data exfiltration or message injection)
+- Flag queues with resource policy containing `Principal: "*"` — critical (public send/receive access)
+- Flag queues with cross-account principals in resource policy — high (data exfiltration or message injection)
 - Flag queues with no `KmsMasterKeyId` (SseType absent or DISABLED) — messages unencrypted at rest
 - Flag queues with no dead-letter queue (`RedrivePolicy` absent) — unprocessed messages silently dropped, potential data loss
 - Note SQS → Lambda event source mappings (Lambda module holds these; SQS should emit queue nodes for cross-reference)
@@ -220,37 +220,6 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/sqs.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "sqs" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/sqs.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-sqs" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/sqs.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
 STATUS: complete|partial|error
@@ -261,16 +230,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where queues were found, o
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/sqs.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] sqs.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="sqs"
+OUTPUT_FILE="$RUN_DIR/sqs.json"
+AGENT_NAME="scope-enum-sqs"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 

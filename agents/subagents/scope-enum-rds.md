@@ -170,10 +170,10 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 - DB subnet groups and parameter groups (metadata only — names and descriptions)
 
 ### Per-Resource Checks
-- Flag instances with `PubliclyAccessible: true` — HIGH finding
-- Flag instances with `StorageEncrypted: false` — MEDIUM finding
+- Flag instances with `PubliclyAccessible: true` — high finding
+- Flag instances with `StorageEncrypted: false` — medium finding
 - Flag instances with `IAMDatabaseAuthenticationEnabled: true` — enumerate which IAM roles have `rds-db:connect` permission (cross-reference with IAM findings if available)
-- Flag snapshots with `PubliclyAccessible: true` — CRITICAL finding (public data exposure)
+- Flag snapshots with `PubliclyAccessible: true` — critical finding (public data exposure)
 - Flag instances with `DeletionProtection: false` where instance appears production-grade (engine version, MultiAZ, size)
 - Note KMS key ARN encrypting each instance (feeds attack-paths KMS chain analysis)
 - Flag security groups on RDS instances allowing port 3306 or 5432 from `0.0.0.0/0`
@@ -194,37 +194,6 @@ Aggregate findings across all regions. Per-finding region tag: every finding obj
 
 ## Output Contract
 
-**Write this file:** `$RUN_DIR/rds.json`
-Write via Bash redirect (you do NOT have Write tool access):
-```bash
-jq -n \
-  --arg module "rds" \
-  --arg account_id "$ACCOUNT_ID" \
-  --arg region "multi-region" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --argjson findings "$FINDINGS_JSON" \
-  '{
-    module: $module,
-    account_id: $account_id,
-    region: $region,
-    timestamp: $ts,
-    status: $status,
-    findings: $findings
-  }' > "$RUN_DIR/rds.json"
-```
-
-**Append to agent log:**
-```bash
-jq -n \
-  --arg agent "scope-enum-rds" \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg status "$STATUS" \
-  --arg file "$RUN_DIR/rds.json" \
-  '{agent: $agent, timestamp: $ts, status: $status, file: $file}' \
-  >> "$RUN_DIR/agent-log.jsonl"
-```
-
 **Return to orchestrator (minimal summary only — do NOT return raw data):**
 ```
 STATUS: complete|partial|error
@@ -235,16 +204,13 @@ REGIONS_WITH_FINDINGS: [us-east-1] (list only regions where RDS instances were f
 ERRORS: [list of AccessDenied or partial failures, or empty]
 ```
 
-## Post-Write Validation
-
 ```bash
-node bin/validate-enum-output.js "$RUN_DIR/rds.json"
-VALIDATION_EXIT=$?
-if [ "$VALIDATION_EXIT" -ne 0 ]; then
-  ERRORS+=("[VALIDATION] rds.json failed schema validation (exit $VALIDATION_EXIT)")
-  STATUS="error"
-fi
+MODULE="rds"
+OUTPUT_FILE="$RUN_DIR/rds.json"
+AGENT_NAME="scope-enum-rds"
+REGION="multi-region"
 ```
+@include agents/shared/enum-output-contract.md
 
 ## Error Handling
 
