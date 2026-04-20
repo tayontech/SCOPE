@@ -87,7 +87,7 @@ done
 Extract audit run ID for provenance tracking:
 
 ```bash
-AUDIT_RUN_ID=$(basename "$AUDIT_RUN_DIR")
+AUDIT_RUN_ID=$(jq -r '.run_id // empty' "$AUDIT_RUN_DIR/results.json" 2>/dev/null || basename "$AUDIT_RUN_DIR")
 ```
 
 Extract risk_score from audit results.json for use in results.json assembly:
