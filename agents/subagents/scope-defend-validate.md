@@ -112,8 +112,9 @@ jq . < "$DEFEND_RUN_DIR/policies/scp-FILENAME.json" > /dev/null 2>&1 && echo "JS
 
 - **BLOCK** if JSON is syntactically invalid — `jq . < file.json` returns non-zero exit code
 - **BLOCK** if an SCP contains a statement with `"Action": "*"` and `"Resource": "*"` and `"Effect": "Deny"` and no `Condition` block. This is an organization-wide lockout risk. The break-glass pattern is a `Condition` key using `ArnNotLike` (or similar) to exempt emergency-access roles.
-  - Check for: `"Effect": "Deny"` + `"Action": "*"` or `["*"]` + `"Resource": "*"` or `["*"]` + absent `"Condition"` block
-  - If all four present simultaneously: BLOCK
+  - Check for: `"Effect": "Deny"` + (`"Action": "*"` **or** `"Action": ["*"]` — both the string form and the single-element array wildcard form must be caught) + `"Resource": "*"` or `["*"]` + absent `"Condition"` block
+  - Use jq: `.Statement[] | select(.Effect == "Deny" and (.Action == "*" or .Action == ["*"]) and (.Resource == "*" or .Resource == ["*"]) and ((.Condition // null) == null))`
+  - If all four conditions are simultaneously present: BLOCK
 - **BLOCK** if an RCP restricts access (`"Effect": "Deny"`) with no resource scope — applies to all resources in every AWS account in the organization with no scoping condition
 
 **WARN criteria:**
