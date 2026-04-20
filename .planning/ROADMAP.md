@@ -217,7 +217,8 @@
 **Requirements:** AGENT-02, AGENT-03
 **Target files:** `agents/subagents/scope-synthesizer.md` (new), `agents/scope-audit.md` (updated)
 **Dependency:** None — independent
-**Plans:** 2 plans
+**Status:** Complete (2026-04-19)
+**Plans:** 2/2 plans complete
 
 ### What changes
 
@@ -226,8 +227,8 @@
 
 ### Plans
 
-- [ ] 75-01-PLAN.md — Create scope-synthesizer.md subagent with input/output contract, report generation, MCP discovery
-- [ ] 75-02-PLAN.md — Wire synthesizer dispatch into scope-audit.md orchestrator
+- [x] 75-01-PLAN.md — Create scope-synthesizer.md subagent with input/output contract, report generation, MCP discovery
+- [x] 75-02-PLAN.md — Wire synthesizer dispatch into scope-audit.md orchestrator
 
 ### Success criteria
 
@@ -269,8 +270,14 @@ Update attack-paths, defend, and hunt agent prompts for the new SDK data model. 
 ## Phase 77: Exploit Agent Rework
 
 **Requirements:** None (rework — no new requirements)
-**Target files:** `agents/scope-exploit.md`
+**Target files:** `agents/scope-exploit.md`, `config/techniques.json` (new), `config/schemas/exploit.schema.json`, `config/escalation-catalogue.json` (deleted), `config/persistence-techniques.json` (deleted), `config/postex-vectors.json` (deleted), `CLAUDE.md`, `bin/install.js`
 **Dependency:** Phase 76 (attack-paths modernized), Phase 74 (research subagent available)
+**Plans:** 3 plans
+
+Plans:
+- [ ] 77-01-PLAN.md — Config consolidation (techniques.json) + simplified schema
+- [ ] 77-02-PLAN.md — Full agent rewrite (scope-exploit.md)
+- [ ] 77-03-PLAN.md — CLAUDE.md updates + install.js verification
 
 ### What changes
 
@@ -375,4 +382,4 @@ Phase 75 (engagement synthesizer) — independent
 ---
 
 *Roadmap defined: 2026-04-19*
-*Last updated: 2026-04-20 — Phase 75 planned (2 plans)*
+*Last updated: 2026-04-20 — Phase 77 planned (3 plans)*
