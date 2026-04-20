@@ -1075,7 +1075,11 @@ Read `./hunt/index.json`, parse the `runs` array, upsert by `run_id`, write back
 
 **5. Post-investigation learning:**
 
-After writing artifacts, run the post-investigation learning pipeline per `<error_handling>
+After writing artifacts, run the post-investigation learning pipeline. See `<error_handling>` section for post-investigation learning steps.
+
+</artifact_saving>
+
+<error_handling>
 ## Error Handling — Pivot Menu, Notable ID in Manual Mode, Completion Signal, MCP Failure
 
 ### Pivot Without Direction
