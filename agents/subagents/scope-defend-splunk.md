@@ -64,6 +64,7 @@ If results.json has no `attack_paths` array or it is empty, write a placeholder 
 - VCS events (GitHub, GitLab, Bitbucket) → use `vcs` group indexes from `config/index.json`
 - Endpoint events (EDR telemetry) → use `endpoint` group indexes from `config/index.json`
 - Network/firewall events → use `network` group indexes from `config/index.json`
+- AWS network events (VPC flow logs, Route53 query logs) → use `aws_network` group indexes from `config/index.json`
 - When `config/index.json` is absent → default to `index=cloudtrail` for backward compatibility (D-21)
 
 **D-22 unconfigured index handling:**
