@@ -47,7 +47,7 @@ if echo "$CONTENT" | grep -qi '\[COMPOSITE\]' && ! echo "$CONTENT" | grep -qi 's
 fi
 
 # Rule 3: Missing time bounds on any index= query (applies to ALL indexes, not just CloudTrail)
-if echo "$CONTENT" | grep -qE 'index=[a-zA-Z_]' && ! echo "$CONTENT" | grep -qE '(earliest=|latest=|-1h|-24h|-7d)'; then
+if echo "$CONTENT" | grep -qE 'index=[a-zA-Z_]' && ! echo "$CONTENT" | grep -qE '(earliest=|latest=)'; then
   ERRORS+=("SPL LINT WARNING: SPL query has no time bounds (earliest/latest). Unbounded queries are expensive and may timeout.")
 fi
 
