@@ -87,7 +87,7 @@ fi
 # If config/index.json absent or parse failed — $ALLOWED is empty — fall through (allow any index per D-15)
 
 # Rule 5: Leading wildcard ban
-if echo "$CONTENT" | grep -qE '[a-zA-Z_]+=\*[^" ]'; then
+if echo "$CONTENT" | grep -qE '[a-zA-Z_]+=\*[a-zA-Z0-9_]'; then
   ERRORS+=("SPL LINT FAIL: Leading wildcard detected (field=*value). Forces full raw-text scan. Use exact match or OR list instead.")
 fi
 
