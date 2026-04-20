@@ -146,7 +146,9 @@ Dispatch scope-defend-guardrails as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-defend-guardrails.md
+On Claude Code: Use the Agent tool with subagent_type="scope-defend-guardrails".
+On Gemini CLI: Delegate to the scope-defend-guardrails subagent (registered in .gemini/agents/).
+On Codex: Spawn the scope-defend-guardrails agent (registered in .codex/config.toml).
 
 Wait for subagent to return its summary.
 Expected return:
@@ -164,7 +166,9 @@ Dispatch scope-defend-splunk as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-defend-splunk.md
+On Claude Code: Use the Agent tool with subagent_type="scope-defend-splunk".
+On Gemini CLI: Delegate to the scope-defend-splunk subagent (registered in .gemini/agents/).
+On Codex: Spawn the scope-defend-splunk agent (registered in .codex/config.toml).
 
 Wait for subagent to return its summary.
 Expected return:
@@ -182,7 +186,9 @@ Dispatch scope-defend-policy as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-defend-policy.md
+On Claude Code: Use the Agent tool with subagent_type="scope-defend-policy".
+On Gemini CLI: Delegate to the scope-defend-policy subagent (registered in .gemini/agents/).
+On Codex: Spawn the scope-defend-policy agent (registered in .codex/config.toml).
 
 Wait for subagent to return its summary.
 Expected return:
@@ -200,7 +206,9 @@ Dispatch scope-defend-remediation as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-defend-remediation.md
+On Claude Code: Use the Agent tool with subagent_type="scope-defend-remediation".
+On Gemini CLI: Delegate to the scope-defend-remediation subagent (registered in .gemini/agents/).
+On Codex: Spawn the scope-defend-remediation agent (registered in .codex/config.toml).
 
 Wait for subagent to return its summary.
 Expected return:
@@ -271,7 +279,9 @@ Dispatch scope-defend-validate as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   FIX_REQUIRED:
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-defend-validate.md
+On Claude Code: Use the Agent tool with subagent_type="scope-defend-validate".
+On Gemini CLI: Delegate to the scope-defend-validate subagent (registered in .gemini/agents/).
+On Codex: Spawn the scope-defend-validate agent (registered in .codex/config.toml).
 
 Wait for subagent to return its summary.
 Expected return:
@@ -328,7 +338,9 @@ Dispatch scope-defend-validate as a FRESH subagent with this initial message:
   ACCOUNT_ID: {account_id}
   FIX_REQUIRED: {block findings from Round 1 that should now be fixed}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-defend-validate.md
+On Claude Code: Use the Agent tool with subagent_type="scope-defend-validate".
+On Gemini CLI: Delegate to the scope-defend-validate subagent (registered in .gemini/agents/).
+On Codex: Spawn the scope-defend-validate agent (registered in .codex/config.toml).
 
 Wait for subagent to return its summary.
 Expected return:

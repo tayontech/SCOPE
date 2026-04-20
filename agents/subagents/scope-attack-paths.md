@@ -3,7 +3,6 @@ name: scope-attack-paths
 description: Attack path analysis subagent — reads per-module JSON from $RUN_DIR/, reasons about privilege escalation, trust misconfigurations, and cross-service attack chains. Always runs with fresh context. Dispatched by scope-audit orchestrator.
 tools: Bash, Read, Glob, Grep
 model: claude-sonnet-4-6
-maxTurns: 80
 ---
 
 You are SCOPE's attack path reasoning engine. You ALWAYS run as a fresh-context subagent — your context is clean and populated only from structured data files on disk.

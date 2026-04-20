@@ -278,17 +278,26 @@ After mode is determined, dispatch the appropriate subagent. MCP detection order
 - Inputs to subagent: `INTEL_SOURCE_URL` or `INTEL_NL_INPUT`, `INTEL_TYPE`
 - Receive: `INTEL_HANDOFF` containing `intel_parsed`, `investigation_context`, `selected_hypothesis`, `all_hypotheses`, `investigation_mode`
 - On return: if `investigation_mode=all`, iterate through `all_hypotheses`; else proceed with `selected_hypothesis` to `<hunt_technique_patterns>` + `<investigation_loop>`
+- On Claude Code: Use the Agent tool with subagent_type="scope-hunt-intel".
+- On Gemini CLI: Delegate to the scope-hunt-intel subagent (registered in .gemini/agents/).
+- On Codex: Spawn the scope-hunt-intel agent (registered in .codex/config.toml).
 
 **MODE=HUNT → dispatch `scope-hunt-audit` (before MCP detection — does not need Splunk)**
 - Inputs to subagent: `HUNT_RUN_DIR`
 - Receive: `HUNT_HANDOFF` containing `hunt_run_dir`, `hunt_run_type`, `run_summary`, `selected_hypothesis`, `all_hypotheses`, `investigation_mode`
 - On return: if `fallback_to_investigation: true`, set MODE=INVESTIGATION and proceed to MCP detection; else load technique catalogue per `<hunt_technique_patterns>`, then proceed to `<investigation_loop>` with `selected_hypothesis`. If `investigation_mode="all"`, iterate through `all_hypotheses` sequentially — complete the investigation loop for each, prompting the analyst before advancing to the next hypothesis.
+- On Claude Code: Use the Agent tool with subagent_type="scope-hunt-audit".
+- On Gemini CLI: Delegate to the scope-hunt-audit subagent (registered in .gemini/agents/).
+- On Codex: Spawn the scope-hunt-audit agent (registered in .codex/config.toml).
 
 **MODE=INVESTIGATION → MCP detection first, then dispatch `scope-hunt-investigate`**
 - Run `<mcp_detection>` to determine `MCP_MODE` and `working_tool`
 - Inputs to subagent: raw operator input, `MCP_MODE`, `working_tool` (if CONNECTED)
 - Receive: `INVESTIGATE_HANDOFF` containing `investigation_context`, `active_hypothesis`
 - On return: `active_hypothesis` is set (single hypothesis, auto-proceed) — go directly to `<hunt_technique_patterns>` (skipped for INVESTIGATION mode) + `<investigation_loop>`
+- On Claude Code: Use the Agent tool with subagent_type="scope-hunt-investigate".
+- On Gemini CLI: Delegate to the scope-hunt-investigate subagent (registered in .gemini/agents/).
+- On Codex: Spawn the scope-hunt-investigate agent (registered in .codex/config.toml).
 
 **Fallback:** If subagent dispatch fails for any reason, the parent falls back to running the intake inline. Use the Read tool to load the respective subagent file and follow its intake instructions:
 - INVESTIGATION: `agents/subagents/scope-hunt-investigate.md`

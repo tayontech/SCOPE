@@ -1,4 +1,4 @@
-# SCOPE — Claude Code
+# SCOPE — Codex
 
 **Project:** SCOPE (Security Cloud Ops Purple Engagement) — AI agent set for purple team security operations against AWS accounts: resource audit → exploit playbook generation → defensive controls with SCPs and SPL detections → SOC alert investigation.
 
@@ -8,7 +8,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 
 ```
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
-agents/scope-defend.md      Defensive controls orchestrator (model: claude-sonnet-4-6) — dispatches 5 subagents in 2 waves, assembles results.json. Dispatched by audit or invoked via /scope:defend
+agents/scope-defend.md      Defensive controls orchestrator — dispatches 5 subagents in 2 waves, assembles results.json. Dispatched by audit or invoked via /scope:defend
 agents/scope-exploit.md     Red team operator — context-driven escalation playbooks with research integration (slash command)
 agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (slash command)
 ```
@@ -16,34 +16,18 @@ agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hu
 **Subagents** (`agents/subagents/` — dispatched by orchestrator or read inline):
 
 ```
-agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert parsing, investigation_context, HYPO-01 (model: claude-sonnet-4-6)
-agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses (model: claude-sonnet-4-6)
-agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths (model: claude-sonnet-4-6)
-agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON (model: claude-sonnet-4-6)
-agents/subagents/scope-defend-guardrails.md   Systemic pattern detection — SCPs/RCPs for widespread findings (model: claude-sonnet-4-6)
-agents/subagents/scope-defend-splunk.md       SPL detections mapped 1:1 to attack paths (model: claude-sonnet-4-6)
-agents/subagents/scope-defend-policy.md       IAM policy replacement using iam.json + staleness data (model: claude-sonnet-4-6)
-agents/subagents/scope-defend-remediation.md  Prioritized remediation plan with dependency mapping (model: claude-sonnet-4-6)
-agents/subagents/scope-defend-validate.md     Adversarial review of all generated controls (model: claude-sonnet-4-6)
+agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert parsing, investigation_context, HYPO-01
+agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses
+agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths
+agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON
+agents/subagents/scope-defend-guardrails.md   Systemic pattern detection — SCPs/RCPs for widespread findings
+agents/subagents/scope-defend-splunk.md       SPL detections mapped 1:1 to attack paths
+agents/subagents/scope-defend-policy.md       IAM policy replacement using iam.json + staleness data
+agents/subagents/scope-defend-remediation.md  Prioritized remediation plan with dependency mapping
+agents/subagents/scope-defend-validate.md     Adversarial review of all generated controls
 agents/subagents/scope-verify.md           Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
 agents/subagents/scope-pipeline.md         Post-processing middleware — data normalization then evidence indexing (read inline)
 ```
-
-> **WARNING -- Session Model Override:**
-> SCOPE security-reasoning agents (`scope-attack-paths`, `scope-defend`) require Sonnet-class capability.
-> Running Claude Code with `--model haiku` or `ANTHROPIC_MODEL=haiku` overrides subagent model routing
-> and will cause these agents to use Haiku regardless of their frontmatter `model: sonnet` pin
-> (see [GitHub issue #29768](https://github.com/anthropics/claude-code/issues/29768)).
-> **Do not run SCOPE audit sessions with `--model haiku`.**
-> If subagents appear to use the wrong model, check the installed `.claude/agents/*.md` file model field as a first diagnostic step.
-
-> **WARNING -- No Agent Memory:**
-> `memory:` is NOT permitted on any SCOPE agent. Do NOT add `memory:` to any agent or subagent file.
-> **Cross-account contamination risk:** Agents enumerate AWS resource identifiers (ARNs, account IDs,
-> role names, key IDs, bucket names) by design. If any agent wrote to MEMORY.md, resource identifiers
-> from one engagement would persist into future sessions on different AWS accounts, creating false
-> context and potential information disclosure across customer boundaries.
-> A dedicated memory milestone will design proper multi-environment isolation before enabling memory.
 
 ## Architecture
 
@@ -72,16 +56,15 @@ hunt/<run-id>/     Hunt artifacts
 
 SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool level. Hook source scripts are in `config/hooks/` and settings templates in `config/settings/`.
 
-**Installation:** Run `node bin/install.js` to copy hook scripts to platform-native locations (`.claude/hooks/`, `.gemini/hooks/`, or `.codex/hooks/`) and settings to `.claude/settings.json`, `.gemini/settings.json`, or `.codex/hooks.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
+**Installation:** Run `node bin/install.js` to copy hook scripts to `.codex/hooks/` and hook settings to `.codex/hooks.json`. The installer rewrites hook paths to absolute references so hooks resolve correctly regardless of CWD.
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `scope-safety-guard.sh` | PreToolUse (Bash, all platforms) | Block destructive AWS operations — agents are read-only |
-| `scope-aws-output-inject.sh` | BeforeTool (Bash, Gemini-only) | Auto-inject `--output json` into AWS CLI calls missing explicit output format |
-| `scope-spl-lint.sh` | PostToolUse (Write\|Edit, all platforms) | Validates SPL against `config/index.json` allowlist, blocks anti-patterns (transaction in composites, leading wildcards, index=*, missing time bounds) |
-| `scope-schema-validate.sh` | PostToolUse (Write\|Edit, all platforms) | Validate results.json and dashboard JSON against phase schemas — blocks writes with missing required fields |
+| `scope-safety-guard.sh` | PreToolUse (Bash) | Block destructive AWS operations — agents are read-only |
+| `scope-spl-lint.sh` | PostToolUse (Write\|Edit) | Validates SPL against `config/index.json` allowlist, blocks anti-patterns (transaction in composites, leading wildcards, index=*, missing time bounds) |
+| `scope-schema-validate.sh` | PostToolUse (Write\|Edit) | Validate results.json and dashboard JSON against phase schemas — blocks writes with missing required fields |
 | `scope-artifact-check.sh` | Stop (all platforms) | Verify mandatory artifacts exist before agent completes |
-| `scope-agent-logger.sh` | PostToolUse (Bash, async, all platforms) | Auto-log AWS CLI calls to agent-log.jsonl |
+| `scope-agent-logger.sh` | PostToolUse (Bash, async) | Auto-log AWS CLI calls to agent-log.jsonl |
 
 ## Slash Commands
 
@@ -140,8 +123,8 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 scope-hunt has three operating modes with different isolation properties:
 - **Detection investigation mode** (invoked without a path, or with a Splunk alert ID): standalone — does not read audit/exploit/defend output. Isolation matches v1.8 behavior.
-- **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped and must not be written to MEMORY.md.
-- **Intel mode** (invoked with a threat intel URL or natural language threat description): fetches the URL or parses the description, extracts IOCs and TTPs, generates hypotheses beyond the report, and hunts in Splunk. Extracted identifiers are session-scoped and must not be written to MEMORY.md.
+- **Hunt mode** (invoked with a SCOPE audit or exploit run directory path): reads `results.json`, attack path JSON, and per-module JSON from the provided run directory. Resource identifiers read in this mode are session-scoped.
+- **Intel mode** (invoked with a threat intel URL or natural language threat description): fetches the URL or parses the description, extracts IOCs and TTPs, generates hypotheses beyond the report, and hunts in Splunk. Extracted identifiers are session-scoped and must not be written to persistent memory.
 
 All other agents share data through the agent-logs/data layer.
 
@@ -158,11 +141,3 @@ All other agents share data through the agent-logs/data layer.
 | `config/splunk-patterns.md` | SPL query patterns, anti-patterns, and command selection rules for detection engineering and threat hunting (committed) |
 
 All config files are optional. `accounts.json`, `scps/*.json`, and `index.json` are gitignored. `cloudtrail-classes.json`, `index.example.json`, and `splunk-patterns.md` are committed.
-
-## Memory
-
-No SCOPE agent uses `memory:`. Agent memory is deferred to a future milestone that will design proper multi-environment isolation.
-
-**Intel mode (threat intel URL / natural language):** IOCs and extracted identifiers (IPs, ARNs, account IDs, hashes) are session-scoped — written to `context.json` (if the learning pipeline is implemented), not persisted across sessions. Threat intel from one engagement must not persist into future sessions.
-
-**context.json:** `./hunt/context.json` is an operator-managed environment knowledge file that scope-hunt reads at startup. It is currently read-only — no agent writes to it. Future learning pipeline milestone will add analyst-reviewed writes.

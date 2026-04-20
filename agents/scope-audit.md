@@ -510,14 +510,12 @@ Dispatch the attack-paths subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {comma-separated list of services with STATUS complete or partial}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-attack-paths.md
-(installed to .claude/agents/scope-attack-paths.md).
+On Claude Code: Use the Agent tool with subagent_type="scope-attack-paths".
 The attack-paths subagent uses model: sonnet — it requires full reasoning capability.
 
-On Gemini CLI: Delegate to the scope-attack-paths subagent in .agents/agents/.
+On Gemini CLI: Delegate to the scope-attack-paths subagent (registered in .gemini/agents/).
 
-On Codex: Dispatch the scope-attack-paths agent role registered in .codex/config.toml.
-With multi_agent enabled, Codex automatically spawns the registered role.
+On Codex: Spawn the scope-attack-paths agent (registered in .codex/config.toml).
 
 Wait for the attack-paths subagent to complete and return its summary.
 Expected summary format:
@@ -769,14 +767,18 @@ Dispatch scope-defend as a subagent with this initial message:
   AUDIT_RUN_DIR: {run_directory_path}
   ACCOUNT_ID: {account_id}
 
-On Claude Code: Use the Agent tool with subagent file path agents/scope-defend.md (read directly from repo, not installed as a subagent).
+On Claude Code: Use the Agent tool with subagent_type="scope-defend".
 Defend reads results.json and per-module JSONs from AUDIT_RUN_DIR/ for its full analysis.
 Defend also runs verify internally (domain-aws + domain-splunk) on its own output.
 
-On Gemini CLI: Delegate to scope-defend in .agents/agents/.
+On Gemini CLI: Gemini subagents cannot dispatch further subagents. Instead of delegating
+to scope-defend as a subagent, read agents/scope-defend.md inline using the Read tool and
+execute its instructions directly in the main agent context. This allows scope-defend's
+5 subagent dispatches (guardrails, splunk, policy, remediation, validate) to work because
+they run at level 0 (main agent), not level 1 (subagent).
 
-On Codex: Dispatch the scope-defend agent role registered in .codex/config.toml.
-With multi_agent enabled, Codex automatically spawns the registered role.
+On Codex: Spawn the scope-defend agent (registered in .codex/config.toml).
+Requires agents.max_depth = 2 in config.toml for scope-defend to dispatch its subagents.
 
 Wait for defend to complete and return its summary.
 Expected summary:
@@ -818,14 +820,12 @@ Dispatch scope-synthesizer as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {comma-separated list of services with STATUS complete or partial}
 
-On Claude Code: Use the Agent tool with agents/subagents/scope-synthesizer.md
-(installed to .claude/agents/scope-synthesizer.md).
-The synthesizer subagent uses model: sonnet -- it requires full reasoning capability.
+On Claude Code: Use the Agent tool with subagent_type="scope-synthesizer".
+The synthesizer subagent uses model: sonnet — it requires full reasoning capability.
 
-On Gemini CLI: Delegate to the scope-synthesizer subagent in .agents/agents/.
+On Gemini CLI: Delegate to the scope-synthesizer subagent (registered in .gemini/agents/).
 
-On Codex: Dispatch the scope-synthesizer agent role registered in .codex/config.toml.
-With multi_agent enabled, Codex automatically spawns the registered role.
+On Codex: Spawn the scope-synthesizer agent (registered in .codex/config.toml).
 
 Wait for the synthesizer subagent to complete and return its summary.
 Expected summary:
