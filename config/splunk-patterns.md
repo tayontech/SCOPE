@@ -35,10 +35,11 @@ Data availability check:
 Volume anomaly detection (spike/drop vs. baseline):
 
 ```spl
-| tstats median(count) AS median_count dc(host) AS host_count
+| tstats count AS hourly_count dc(host) AS host_count
     where index=cloudtrail
     by _time span=1h
-| where count < (median_count * 0.5)
+| eventstats median(hourly_count) AS median_count
+| where hourly_count < (median_count * 0.5)
 ```
 
 ### stats — Primary Event Analysis Command
