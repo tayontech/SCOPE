@@ -50,7 +50,7 @@ fi
 
 Defend writes its output into a timestamped subdirectory under `$RUN_DIR/defend/`. Glob for it:
 ```bash
-DEFEND_RESULTS=$(ls "$RUN_DIR/defend/"*/results.json 2>/dev/null | head -1)
+DEFEND_RESULTS=$(ls -t "$RUN_DIR/defend/"*/results.json 2>/dev/null | head -1)
 if [ -z "$DEFEND_RESULTS" ]; then
   echo "STATUS: error"
   echo "ERRORS: defend/results.json not found -- defend did not complete"
