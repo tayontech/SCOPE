@@ -1,7 +1,8 @@
 #!/bin/bash
 # SCOPE SPL Semantic Lint — PostToolUse / AfterTool hook
 # Runs after Write|Edit on files that contain SPL queries.
-# Hard-fails on known anti-patterns defined in scope-verify.md (domain-splunk section).
+# Hard-fails on known anti-patterns defined in config/splunk-patterns.md.
+# Multi-index aware: validates index= clauses against config/index.json allowlist when present.
 #
 # Exit 0 = pass (with optional feedback), Exit 2 = not used (PostToolUse can't block)
 # Instead, returns decision: "block" with reason in JSON to feed back to agent.
@@ -40,41 +41,59 @@ if echo "$CONTENT" | grep -qi '\[COMPOSITE\]' && echo "$CONTENT" | grep -qi '| *
   ERRORS+=("SPL LINT FAIL: Composite detection uses 'transaction'. Composites MUST use 'streamstats' for sliding-window correlation, not 'transaction'.")
 fi
 
-# Rule 2: All CloudTrail SPL must include index=cloudtrail
-# Require 2+ CloudTrail-specific fields to trigger (reduces false positives from generic field names)
-CT_FIELD_COUNT=0
-for ct_field in 'userIdentity\.' 'eventName' 'sourceIPAddress' 'requestParameters\.' 'responseElements\.' 'eventSource.*\.amazonaws\.com'; do
-  if echo "$CONTENT" | grep -qE "$ct_field"; then
-    CT_FIELD_COUNT=$((CT_FIELD_COUNT + 1))
-  fi
-done
-if [ "$CT_FIELD_COUNT" -ge 2 ] && ! echo "$CONTENT" | grep -q 'index=cloudtrail'; then
-  ERRORS+=("SPL LINT FAIL: SPL references $CT_FIELD_COUNT CloudTrail fields but missing 'index=cloudtrail'. All CloudTrail queries must specify the index.")
-fi
-
-# Rule 3: Wrong field name — userName instead of userIdentity.userName
-if echo "$CONTENT" | grep -qE '\buserName\b' && ! echo "$CONTENT" | grep -qE 'userIdentity\.userName|rename.*AS.*userName|eval.*userName'; then
-  ERRORS+=("SPL LINT FAIL: Raw 'userName' field used — CloudTrail nests this as 'userIdentity.userName'. Use 'rename userIdentity.userName AS user' first.")
-fi
-
-# Rule 4: Composite without streamstats
+# Rule 2: Composite without streamstats
 if echo "$CONTENT" | grep -qi '\[COMPOSITE\]' && ! echo "$CONTENT" | grep -qi 'streamstats'; then
   ERRORS+=("SPL LINT FAIL: Composite detection missing 'streamstats'. Composites MUST use 'streamstats time_window=... by src_user_arn' for sliding-window correlation.")
 fi
 
-# Rule 5: sourceIP instead of sourceIPAddress
-if echo "$CONTENT" | grep -qE '\bsourceIP\b' && ! echo "$CONTENT" | grep -qE 'sourceIPAddress|rename.*AS.*sourceIP'; then
-  ERRORS+=("SPL LINT FAIL: 'sourceIP' is not a CloudTrail field. Use 'sourceIPAddress'.")
+# Rule 3: Missing time bounds on any index= query (applies to ALL indexes, not just CloudTrail)
+if echo "$CONTENT" | grep -qE 'index=[a-zA-Z_]' && ! echo "$CONTENT" | grep -qE '(earliest=|latest=|-1h|-24h|-7d)'; then
+  ERRORS+=("SPL LINT WARNING: SPL query has no time bounds (earliest/latest). Unbounded queries are expensive and may timeout.")
 fi
 
-# Rule 6: eventSource should not be used as a filter without .amazonaws.com
-if echo "$CONTENT" | grep -qE 'eventSource\s*=' && ! echo "$CONTENT" | grep -qE 'eventSource\s*=\s*"[^"]*\.amazonaws\.com"'; then
-  ERRORS+=("SPL LINT WARNING: eventSource filter should use full service name (e.g., 'iam.amazonaws.com'), not shorthand.")
+# Rule 4: Index allowlist validation (D-15)
+# Requires config/index.json to exist; gracefully skips if absent (allows any index)
+# Splunk ES internal indexes always bypass the allowlist check
+INTERNAL_INDEXES="notable notable_summary risk threat_activity ioc ers ueba ueba_summaries endpoint_summary audit_summary _internal _audit _introspection summary history"
+
+# Determine the config path relative to the hook's location or use absolute path
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+INDEX_JSON="$REPO_ROOT/config/index.json"
+
+ALLOWED=$(jq -r '.groups | to_entries[] | .value.indexes[]' "$INDEX_JSON" 2>/dev/null || true)
+
+if [ -n "$ALLOWED" ]; then
+  # Extract index= clause values from the written file (skip * which is handled by Rule 6)
+  USED=$(grep -oP 'index=\K[a-zA-Z0-9_*-]+' "$FILE_PATH" 2>/dev/null | sort -u || true)
+
+  for idx in $USED; do
+    # Skip wildcard index=* — handled separately by Rule 6
+    if [ "$idx" = "*" ]; then
+      continue
+    fi
+
+    # Skip Splunk ES internal indexes — always valid
+    if echo "$INTERNAL_INDEXES" | grep -qw "$idx"; then
+      continue
+    fi
+
+    # Check against allowlist
+    if ! echo "$ALLOWED" | grep -qx "$idx"; then
+      ERRORS+=("SPL LINT FAIL: index=$idx not found in config/index.json allowlist. Add it to the appropriate group or run index discovery.")
+    fi
+  done
+fi
+# If config/index.json absent or parse failed — $ALLOWED is empty — fall through (allow any index per D-15)
+
+# Rule 5: Leading wildcard ban
+if echo "$CONTENT" | grep -qE '[a-zA-Z_]+=\*[^" ]'; then
+  ERRORS+=("SPL LINT FAIL: Leading wildcard detected (field=*value). Forces full raw-text scan. Use exact match or OR list instead.")
 fi
 
-# Rule 7: Missing earliest/latest time bounds
-if echo "$CONTENT" | grep -q 'index=cloudtrail' && ! echo "$CONTENT" | grep -qE '(earliest=|latest=|\-1h|\-24h|\-7d)'; then
-  ERRORS+=("SPL LINT WARNING: CloudTrail query has no time bounds (earliest/latest). Unbounded queries are expensive and may timeout.")
+# Rule 6: index=* ban
+if echo "$CONTENT" | grep -qE 'index=\*($|[^a-zA-Z0-9_-])'; then
+  ERRORS+=("SPL LINT FAIL: 'index=*' is not allowed. Always specify a named index.")
 fi
 
 # --- Report results ---
