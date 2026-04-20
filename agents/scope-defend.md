@@ -346,6 +346,7 @@ printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "sc
 
 **Parse Round 2 return:**
 
+- If STATUS: fail (validator itself errored — missing files, unreadable artifacts): STOP. Report STATUS: error to operator. Do not proceed to Results Assembly.
 - If BLOCKS == 0 (STATUS: pass): proceed to Results Assembly.
 - If BLOCKS > 0 (STATUS: partial): proceed to Results Assembly anyway — D-26 max 2 rounds cap reached. Report PARTIAL status to operator. The validation-report.md documents remaining issues.
 
