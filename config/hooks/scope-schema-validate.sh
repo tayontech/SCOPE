@@ -248,15 +248,15 @@ case "$SOURCE" in
     check_field "region" "AWS region or 'global' (defend is always 'global')"
     check_field "summary" "defend summary object"
     check_field "audit_runs_analyzed" "array of consumed audit run IDs"
-    check_field "scps" "array of SCPs"
-    check_field "rcps" "array of RCPs"
+    check_field "guardrails" "array of SCP/RCP guardrail policies"
     check_field "detections" "array of SPL detections"
-    check_field "security_controls" "array of security control recommendations"
-    check_field "prioritization" "prioritized remediation actions"
+    check_field "policy_replacements" "array of IAM replacement policies"
+    check_field "remediation" "remediation plan summary object"
+    check_field "validation" "validation results object"
 
     # summary required subfields
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      for subfield in scps_generated rcps_generated detections_generated controls_recommended risk_score; do
+      for subfield in guardrails detections policy_replacements remediation_items validation_status risk_score; do
         if [ "$(jq ".summary | has(\"$subfield\")" "$FILE_PATH")" != "true" ]; then
           ERRORS+=("Missing required field: 'summary.$subfield'")
         fi
@@ -271,20 +271,14 @@ case "$SOURCE" in
       fi
     fi
 
-    # scps items must have name, file, policy_json, source_attack_paths, source_run_ids, impact_analysis
-    check_array_item_fields "scps" "name,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "SCP entries"
-
-    # rcps items must have same fields
-    check_array_item_fields "rcps" "name,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "RCP entries"
+    # guardrails items must have name, type, file, policy_json, source_attack_paths, source_run_ids, impact_analysis
+    check_array_item_fields "guardrails" "name,type,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "guardrail entries"
 
     # detections items must have name, spl, severity, category, mitre_technique, source_attack_paths, source_run_ids
     check_array_item_fields "detections" "name,spl,severity,category,mitre_technique,source_attack_paths,source_run_ids" "detection entries"
 
-    # security_controls items must have service, recommendation, priority, effort, source_attack_paths
-    check_array_item_fields "security_controls" "service,recommendation,priority,effort,source_attack_paths" "security control entries"
-
-    # prioritization items must have rank, action, risk, effort, category
-    check_array_item_fields "prioritization" "rank,action,risk,effort,category" "prioritization entries"
+    # policy_replacements items must have role_name, file, original_policy_arn, replacement_policy_json, source_attack_paths, staleness_reasoning
+    check_array_item_fields "policy_replacements" "role_name,file,original_policy_arn,replacement_policy_json,source_attack_paths,staleness_reasoning" "policy replacement entries"
 
     # SCHM-01 (defend): Validate detections[].severity -- lowercase only
     if [ "$(jq 'has("detections")' "$FILE_PATH")" = "true" ]; then
@@ -296,8 +290,8 @@ case "$SOURCE" in
 
     # --- Type and consistency validation (SCHM-04, SCHM-05) ---
 
-    # SCHM-04: Validate scps[].policy_json and rcps[].policy_json are objects (not strings)
-    for ARRAY in scps rcps; do
+    # SCHM-04: Validate guardrails[].policy_json is an object (not a string)
+    for ARRAY in guardrails; do
       if [ "$(jq "has(\"$ARRAY\")" "$FILE_PATH")" = "true" ]; then
         INVALID_POLICY=$(jq -r --arg arr "$ARRAY" '[.[$arr][] | select(has("policy_json")) | select(.policy_json | type != "object") | .name // "unnamed"] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
         if [ -n "$INVALID_POLICY" ]; then
@@ -306,9 +300,17 @@ case "$SOURCE" in
       fi
     done
 
+    # SCHM-04 (policy_replacements): Validate policy_replacements[].replacement_policy_json is an object
+    if [ "$(jq 'has("policy_replacements")' "$FILE_PATH")" = "true" ]; then
+      INVALID_POLICY=$(jq -r '[.policy_replacements[] | select(has("replacement_policy_json")) | select(.replacement_policy_json | type != "object") | .role_name // "unnamed"] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_POLICY" ]; then
+        ERRORS+=("policy_replacements[].replacement_policy_json must be an object (not a string) — invalid items: $INVALID_POLICY")
+      fi
+    fi
+
     # SCHM-05: Validate defend summary counts match actual array lengths
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      for PAIR in "detections_generated:detections" "scps_generated:scps" "rcps_generated:rcps" "controls_recommended:security_controls"; do
+      for PAIR in "detections:detections" "guardrails:guardrails" "policy_replacements:policy_replacements"; do
         SUMMARY_FIELD="${PAIR%%:*}"
         ARRAY_FIELD="${PAIR##*:}"
         if [ "$(jq ".summary | has(\"$SUMMARY_FIELD\")" "$FILE_PATH")" = "true" ] && [ "$(jq "has(\"$ARRAY_FIELD\")" "$FILE_PATH")" = "true" ]; then
@@ -319,6 +321,15 @@ case "$SOURCE" in
           fi
         fi
       done
+    fi
+
+    # SCHM-05 (remediation): Validate summary.remediation_items matches remediation.items
+    if [ "$(jq '.summary | has("remediation_items")' "$FILE_PATH")" = "true" ] && [ "$(jq 'has("remediation")' "$FILE_PATH")" = "true" ]; then
+      SUMMARY_VAL=$(jq '.summary.remediation_items // 0' "$FILE_PATH" 2>/dev/null || echo "0")
+      ACTUAL_VAL=$(jq '.remediation.items // 0' "$FILE_PATH" 2>/dev/null || echo "0")
+      if [ "$SUMMARY_VAL" -ne "$ACTUAL_VAL" ] 2>/dev/null; then
+        ERRORS+=("summary.remediation_items (${SUMMARY_VAL}) does not match remediation.items (${ACTUAL_VAL})")
+      fi
     fi
     ;;
 
