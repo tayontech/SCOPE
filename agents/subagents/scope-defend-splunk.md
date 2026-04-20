@@ -163,7 +163,7 @@ Detections generated: {N}
 - **Description:** {what this detection catches and why it is relevant}
 
 ```spl
-index=cloudtrail earliest=-24h latest=now
+index=<aws_api_index> earliest=-24h latest=now
   eventName="{EventName}"
 | rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn
 | stats count by src_user_arn, eventName, sourceIPAddress, awsRegion
@@ -185,7 +185,7 @@ Format each detection object to match the defend schema's `detections[]` format:
 [
   {
     "name": "Detect IAM Policy Version Reversion",
-    "spl": "index=cloudtrail earliest=-24h latest=now eventName=SetDefaultPolicyVersion | rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn | stats count by src_user_arn, eventName, sourceIPAddress, awsRegion",
+    "spl": "index=<aws_api_index> earliest=-24h latest=now eventName=SetDefaultPolicyVersion | rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn | stats count by src_user_arn, eventName, sourceIPAddress, awsRegion",
     "severity": "critical",
     "category": "privilege_escalation",
     "mitre_technique": "T1548",
