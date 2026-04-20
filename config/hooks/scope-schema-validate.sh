@@ -75,7 +75,7 @@ case "$FILE_PATH" in
     # Validate account_id format
     ACCT_ID=$(jq -r '.account_id // empty' "$FILE_PATH")
     if [ -n "$ACCT_ID" ]; then
-      if ! echo "$ACCT_ID" | grep -qE '^\d{12}$'; then
+      if ! echo "$ACCT_ID" | grep -qE '^[0-9]{12}$'; then
         ERRORS+=("account_id '$ACCT_ID' is not a valid 12-digit AWS account ID")
       fi
     fi
@@ -177,7 +177,7 @@ check_field "timestamp" "ISO8601 timestamp"
 # Validate account_id format (12 digits) — allow "unknown" for defend fallback
 ACCOUNT_ID=$(jq -r '.account_id // empty' "$FILE_PATH")
 if [ -n "$ACCOUNT_ID" ] && [ "$ACCOUNT_ID" != "unknown" ]; then
-  if ! echo "$ACCOUNT_ID" | grep -qE '^\d{12}$'; then
+  if ! echo "$ACCOUNT_ID" | grep -qE '^[0-9]{12}$'; then
     ERRORS+=("account_id '$ACCOUNT_ID' is not a valid 12-digit AWS account ID")
   fi
 fi
