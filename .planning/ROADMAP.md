@@ -231,11 +231,11 @@
 **Requirements:** None (maintenance — no new requirements)
 **Target files:** `agents/subagents/scope-attack-paths.md`, `agents/scope-defend.md`, `agents/scope-hunt.md`, `agents/subagents/scope-hunt-*.md`
 **Dependency:** Phase 72 (orchestrator rewritten, new data model)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans executed
 
 Plans:
 - [x] 76-01-PLAN.md — attack-paths modernization (16 modules, OIDC, policy docs, edge types)
-- [ ] 76-02-PLAN.md — defend stale reference cleanup + hunt verification
+- [x] 76-02-PLAN.md — defend stale reference cleanup + hunt verification
 
 ### What changes
 
