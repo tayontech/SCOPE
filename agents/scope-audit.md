@@ -1,6 +1,6 @@
 ---
 name: scope-audit
-description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs parallel SDK enum scripts, chains attack-paths reasoning, verification, defensive controls, data pipeline, and dashboard generation. Invoke with /scope:audit <target>.
+description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs parallel SDK enum scripts, chains attack-paths reasoning, verification, defensive controls, engagement synthesis, data pipeline, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
@@ -23,8 +23,9 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 7. Present attack path findings, await operator approval before defend (Gate 4)
 8. Write the three-layer findings.md report to $RUN_DIR/
 9. Auto-chain defend as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
-10. Run the post-processing pipeline inline from agents/subagents/scope-pipeline.md
-11. Generate the dashboard report inline
+10. Auto-dispatch synthesizer subagent — it reads results.json and defend/results.json, produces engagement-report.md
+11. Run the post-processing pipeline inline from agents/subagents/scope-pipeline.md
+12. Generate the dashboard report inline
 
 **Operator-in-the-loop:** Pause at Gates 2, 3, and 4 and wait for operator approval before continuing. Gate 1 auto-continues. Never silently chain multiple gates or skip operator input.
 
@@ -799,10 +800,57 @@ SCPs: {N} | RCPs: {N} | Detections: {N}
 If defend failed, announce: `━━━ Defend: failed (non-blocking) ━━━` with the error summary.
 </defend_auto_chain>
 
+<synthesizer_dispatch>
+## Engagement Synthesis Dispatch
+
+After defend completes (or fails), automatically dispatch the synthesizer subagent.
+
+**Gate 4 skip exception:** If Gate 4 was skipped (GATE4_SKIP=true), do not dispatch synthesizer. The synthesizer requires results.json which is not written when Gate 4 is skipped.
+
+**Defend failure exception:** If defend failed, do not dispatch synthesizer. The synthesizer requires defend output to produce a complete engagement report (per D-12). Log that synthesizer was skipped due to defend failure.
+
+If GATE4_SKIP is not set and defend completed successfully, dispatch synthesizer as follows:
+
+```
+Dispatch scope-synthesizer as a subagent with this initial message:
+
+  RUN_DIR: {run_directory_path}
+  ACCOUNT_ID: {account_id}
+  SERVICES_COMPLETED: {comma-separated list of services with STATUS complete or partial}
+
+On Claude Code: Use the Agent tool with agents/subagents/scope-synthesizer.md
+(installed to .claude/agents/scope-synthesizer.md).
+The synthesizer subagent uses model: sonnet -- it requires full reasoning capability.
+
+On Gemini CLI: Delegate to the scope-synthesizer subagent in .agents/agents/.
+
+On Codex: Dispatch the scope-synthesizer agent role registered in .codex/config.toml.
+With multi_agent enabled, Codex automatically spawns the registered role.
+
+Wait for the synthesizer subagent to complete and return its summary.
+Expected summary:
+  STATUS: complete|error
+  FILE: $RUN_DIR/engagement-report.md
+  METRICS: {sections: N, attack_paths_covered: N, services_covered: N}
+  ERRORS: [any issues]
+```
+
+If synthesizer returns STATUS: error: log the error and report to operator. Synthesizer failure is blocking -- the operator gets an error message but the pipeline continues to post-processing and dashboard (the raw artifacts are still valid).
+
+**Announce synthesizer completion to the operator:**
+```
+━━━ Synthesizer: complete ━━━
+Report: $RUN_DIR/engagement-report.md
+Sections: {N} | Attack paths: {N} | Services: {N}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+If synthesizer failed: `━━━ Synthesizer: failed ━━━` with the error summary.
+</synthesizer_dispatch>
+
 <post_processing_pipeline>
 ## Post-Processing Pipeline (Inline)
 
-After defend completes, run the pipeline inline in this orchestrator context.
+After the synthesizer completes (or is skipped), run the pipeline inline in this orchestrator context.
 
 Read `agents/subagents/scope-pipeline.md` and execute:
 
@@ -882,6 +930,7 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 | 4 | `agent-log.jsonl` | `$RUN_DIR/agent-log.jsonl` | Agent activity log — one JSON line per event |
 | 5 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
 | 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
+| 7 | `engagement-report.md` | `$RUN_DIR/engagement-report.md` | Unified engagement narrative -- cross-phase synthesis |
 
 **Self-check — run before reporting completion:**
 ```bash
@@ -890,6 +939,7 @@ test -f "$RUN_DIR/agent-log.jsonl" && echo "agent-log.jsonl PRESENT" || echo "MI
 # Only if Gate 4 was not skipped:
 test -f "$RUN_DIR/results.json" && echo "results.json PRESENT" || echo "WARNING: results.json missing (Gate 4 skip?)"
 test -f "dashboard/public/$RUN_ID.json" && echo "dashboard export PRESENT" || echo "WARNING: dashboard export missing"
+test -f "$RUN_DIR/engagement-report.md" && echo "engagement report PRESENT" || echo "WARNING: engagement report missing"
 ```
 
 If ANY mandatory file is MISSING (and no applicable exception applies), go back and create it before proceeding.
@@ -1075,7 +1125,8 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory `./audit/$RUN_ID/` created, all artifacts written there, run appended to `./audit/INDEX.md` and `./audit/index.json`.
 9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its run directory at `$RUN_DIR/defend/defend-{timestamp}/` and returns DEFEND_RUN_DIR in its summary.
-10. **Pipeline ran inline** — agents/subagents/scope-pipeline.md invoked for both audit and defend phases. Failures logged as warnings (non-blocking).
-11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
-12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
+10. **Synthesizer dispatched** — scope-synthesizer dispatched as subagent after defend. engagement-report.md written to $RUN_DIR/. Skipped if Gate 4 was skipped or defend failed.
+11. **Pipeline ran inline** — agents/subagents/scope-pipeline.md invoked for both audit and defend phases. Failures logged as warnings (non-blocking).
+12. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
+13. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
 </success_criteria>
