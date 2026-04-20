@@ -190,11 +190,17 @@
 **Requirements:** AGENT-01, AGENT-03
 **Target files:** `agents/subagents/scope-research.md` (new)
 **Dependency:** None — independent
+**Status:** Complete (2026-04-19)
+**Plans:** 1/1 plans complete
 
 ### What changes
 
 - **AGENT-01**: Create research subagent that uses WebSearch and available MCP tools to find real-world abuse context. Dispatchable by attack-paths, hunt, and exploit.
 - **AGENT-03**: Agent discovers MCP tools at runtime, uses what's available.
+
+### Plans
+
+- [x] 74-01-PLAN.md — Create scope-research.md subagent with input/output contract, search strategy, MCP discovery, and RESEARCH_RESULT handoff
 
 ### Success criteria
 
@@ -206,23 +212,30 @@
 
 ---
 
-## Phase 75: Reporting Agent
+## Phase 75: Engagement Synthesizer
 
 **Requirements:** AGENT-02, AGENT-03
-**Target files:** `agents/scope-report.md` (new)
+**Target files:** `agents/subagents/scope-synthesizer.md` (new), `agents/scope-audit.md` (updated)
 **Dependency:** None — independent
+**Plans:** 2 plans
 
 ### What changes
 
-- **AGENT-02**: Create reporting agent that synthesizes across all phases into unified engagement report.
+- **AGENT-02**: Create synthesizer subagent (`scope-synthesizer`) that reads audit results.json and defend/results.json, produces unified engagement narrative (`engagement-report.md`). Auto-dispatched by audit orchestrator after defend completes.
 - **AGENT-03**: Discovers and uses available MCP tools at runtime.
+
+### Plans
+
+- [ ] 75-01-PLAN.md — Create scope-synthesizer.md subagent with input/output contract, report generation, MCP discovery
+- [ ] 75-02-PLAN.md — Wire synthesizer dispatch into scope-audit.md orchestrator
 
 ### Success criteria
 
-1. `scope-report.md` exists with input/output contract.
-2. Produces cross-phase engagement report (audit + research + exploit + hunt).
-3. Separate from scope-defend (which focuses on defensive recommendations only).
-4. Discovers and uses MCP tools when available.
+1. `scope-synthesizer.md` exists with input/output contract.
+2. Produces engagement narrative from audit + defend data (engagement-report.md).
+3. Auto-dispatched by audit orchestrator after defend completes.
+4. Separate from scope-defend (which focuses on defensive recommendations only).
+5. Discovers and uses MCP tools when available.
 
 ---
 
@@ -356,10 +369,10 @@ Phase 65 (SDK-01: foundation) — COMPLETE
                                                         │       └── Phase 79 (Splunk integration research)
                                                         └── Phase 80 (platform directory structure)
 Phase 74 (research subagent) — independent, but needed before Phase 77
-Phase 75 (reporting agent) — independent, but needs Phase 74's output format
+Phase 75 (engagement synthesizer) — independent
 ```
 
 ---
 
 *Roadmap defined: 2026-04-19*
-*Last updated: 2026-04-19 — Added Phase 80 (platform directory structure & install modernization)*
+*Last updated: 2026-04-20 — Phase 75 planned (2 plans)*
