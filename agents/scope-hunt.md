@@ -406,15 +406,19 @@ At startup, before asking for alert input, probe for Splunk MCP availability. Do
 Checking for Splunk MCP connection...
 ```
 
-**Step 2:** Attempt `search_splunk` with `query="index=cloudtrail | head 1"`:
+Read `config/index.json` if it exists.
+- If found: extract the first index from any group's `indexes[]` array — use this as PROBE_INDEX
+- If missing: set PROBE_INDEX="cloudtrail" (backward compat — D-21)
+
+**Step 2:** Attempt `search_splunk` with `query="index={PROBE_INDEX} earliest=-1h | head 1"`:
 - If succeeds: set MCP_MODE=CONNECTED, working_tool="search_splunk" — skip remaining attempts
 - If fails: continue to Step 3
 
-**Step 3:** Attempt `search_oneshot` with `query="index=cloudtrail | head 1"`:
+**Step 3:** Attempt `search_oneshot` with `query="index={PROBE_INDEX} earliest=-1h | head 1"`:
 - If succeeds: set MCP_MODE=CONNECTED, working_tool="search_oneshot" — skip remaining attempt
 - If fails: continue to Step 4
 
-**Step 4:** Attempt `splunk_search` with `query="index=cloudtrail | head 1"`:
+**Step 4:** Attempt `splunk_search` with `query="index={PROBE_INDEX} earliest=-1h | head 1"`:
 - If succeeds: set MCP_MODE=CONNECTED, working_tool="splunk_search"
 - If fails: set MCP_MODE=MANUAL
 
@@ -452,7 +456,7 @@ The `working_tool` name determined at startup is used for ALL subsequent query e
 
 If the analyst reports that Splunk MCP IS connected but the probe failed:
 - Ask: "Which Splunk MCP implementation are you using? (search_splunk / search_oneshot / splunk_search / other)"
-- Attempt that tool name directly with `query="index=cloudtrail | head 1"`
+- Attempt that tool name directly with `query="index={PROBE_INDEX} earliest=-1h | head 1"`
 - If it succeeds: set MCP_MODE=CONNECTED, working_tool=[analyst-specified tool]
 - If it fails: remain in MANUAL mode and explain the connection issue
 
@@ -474,6 +478,119 @@ Pass MCP_MODE, working_tool (if CONNECTED), and the operator's raw input to scop
 
 ```
 </mcp_detection>
+
+<index_discovery>
+## Index Discovery Protocol
+
+Use this protocol when `config/index.json` does not exist AND MCP_MODE=CONNECTED. Skip when `config/index.json` already exists and no refresh was requested (D-03).
+
+### When to Trigger
+
+- `config/index.json` does not exist AND Splunk MCP is CONNECTED → run full discovery
+- `config/index.json` exists AND operator requests a refresh → run merge flow (D-06)
+- `config/index.json` exists AND no refresh requested → skip entirely
+
+### Discovery Steps
+
+**Step 1: Get index list**
+
+Call the `get_indexes` MCP tool. If `get_indexes` is not available, fall back to:
+```spl
+| rest /services/data/indexes | table title, totalEventCount, currentDBSizeMB
+```
+
+**Step 2: Filter internal indexes**
+
+Remove all indexes that are Splunk-internal or Splunk ES internal. These are always valid for direct query but should NOT appear in `config/index.json`:
+
+```
+Internal index list (never add to config/index.json):
+  _internal, _audit, _introspection, _telemetry, _thefishbucket
+  summary, history, notable, notable_summary, risk
+  threat_activity, ioc, ers, ueba, ueba_summaries
+  cim_*, wineventlog (if Splunk-internal only), firewall_* (if vendor-internal)
+```
+
+Additionally filter any index prefixed with `_`.
+
+**Step 3: Reason about remaining indexes**
+
+For each index that survived filtering, reason about its name and classify into a type group:
+
+| Group key | Matches | Description |
+|-----------|---------|-------------|
+| `aws_api` | cloudtrail, aws*, awscloudtrail | AWS API call logs |
+| `aws_network` | vpc*, flowlogs*, aws_flow | AWS VPC flow / network logs |
+| `identity` | okta*, azure_ad*, aad*, idp*, sso* | Identity provider events |
+| `vcs` | github*, gitlab*, bitbucket* | Version control events |
+| `endpoint` | crowdstrike*, carbon_black*, cb*, edr*, endpoint* | Endpoint detection events |
+| `network` | palo*, cisco*, firewall*, proxy*, zscaler*, netflow* | Network/firewall logs |
+| `cloud_platform` | gcp*, azure*, o365*, office365* | Other cloud platform logs |
+
+Indexes that do not match any group are listed for operator review — do not discard them.
+
+**Step 4: Present proposed groupings to operator**
+
+Show a formatted table:
+
+```
+Index Discovery Results — {N} indexes found, {M} internal filtered
+
+Proposed groupings:
+
+| Group       | Indexes          | Confidence |
+|-------------|------------------|------------|
+| aws_api     | cloudtrail       | High       |
+| identity    | okta_logs        | High       |
+| vcs         | github_audit     | Medium     |
+| (unmatched) | custom_app_logs  | — review   |
+
+Write config/index.json with these groupings? (Y/N)
+If unmatched indexes should be added, specify which group each belongs to.
+```
+
+Wait for operator confirmation (Y/N). If Y, write the file. If operator specifies group reassignments, apply them before writing.
+
+**Step 5: Write config/index.json after confirmation**
+
+```json
+{
+  "version": "1.0",
+  "updated": "<ISO8601 timestamp>",
+  "discovery_method": "auto",
+  "groups": {
+    "aws_api": {
+      "description": "AWS API call logs",
+      "indexes": ["cloudtrail"],
+      "primary_fields": ["eventName", "eventSource", "userIdentity.arn", "userIdentity.userName", "sourceIPAddress"],
+      "time_field": "_time"
+    }
+  }
+}
+```
+
+`config/index.json` is gitignored — index names may reveal customer infrastructure.
+
+### Refresh Flow (D-06)
+
+When `config/index.json` already exists and operator requests a refresh:
+
+1. Read existing `config/index.json` — load current `groups`
+2. Run discovery Steps 1-3 above
+3. Compare discovered indexes against existing entries — identify NEW indexes only
+4. Present only the additions for operator confirmation:
+   ```
+   New indexes found since last discovery:
+
+   | Group    | New Index     | Confidence |
+   |----------|---------------|------------|
+   | identity | azure_ad_logs | Medium     |
+
+   Add these to config/index.json? (Y/N)
+   ```
+5. On confirmation: merge new indexes into existing group `indexes[]` arrays. Add new groups if needed. **Never remove existing entries.**
+
+</index_discovery>
 
 <investigation_loop>
 ## Investigation Loop — Step-by-Step Gate Pattern
@@ -605,8 +722,14 @@ Wait for analyst input. **Do NOT advance to the next step silently.** Do not gue
 These rules apply to every query generated in this skill. Embed them at the loop level — they are not in a separate section.
 
 **Index:**
-- ALWAYS use `index=cloudtrail` (literal string, no backtick macro). This is hardcoded per project decision.
-- Do not use `` `cloudtrail` `` or any macro reference. Ever.
+- ALWAYS read `config/index.json` before generating SPL. Load the type group that matches the investigation context (e.g., `aws_api` for CloudTrail-style events, `identity` for IdP events, `vcs` for VCS events).
+- Read `config/splunk-patterns.md` for command selection rules (tstats vs stats vs streamstats) and anti-pattern avoidance before writing queries.
+- Use a separate SPL query per index. Never combine multiple indexes in a single OR query (D-09). Different indexes have different field schemas — correlate results after querying each separately.
+- On the first query against a new index in this session: run `index=<name> earliest=-30d latest=now | head 1` to sample available field names. Cache the result in-session (D-11). Do not repeat sampling for the same index.
+- When `config/index.json` is absent and Splunk is unavailable: default to `index=cloudtrail` for backward compatibility (D-21).
+- When `config/index.json` is absent and Splunk IS available: trigger the index discovery protocol (see `<index_discovery>` section) before proceeding.
+- **D-19 index error handling:** When a query against a configured index returns zero results or an error response (e.g., "index not found", permission denied, timeout), do NOT skip silently or guess an alternative index. Ask the operator: "Query against index=<name> returned [zero results / error: <message>]. Is this index active and accessible? Should I retry, use a different index, or skip this data source?" Wait for operator response before proceeding.
+- Do not use backtick macros (`` `cloudtrail` `` etc.). Always use the literal `index=<name>` clause.
 
 **Sorting:**
 - End every query with `| sort _time`
@@ -618,19 +741,21 @@ Use this table as the default output for event display:
 | rename _time AS Time, eventName AS "Event Name", eventSource AS "Service", userIdentity.userName AS "User", userIdentity.arn AS "User ARN", userIdentity.type AS "Identity Type", sourceIPAddress AS "Source IP", userAgent AS "User Agent", errorCode AS "Error Code"
 ```
 
-Add or remove fields based on query context — this is the default, not a fixed template.
+Add or remove fields based on query context — this is the default, not a fixed template. Adjust field names to match the actual schema of the index being queried (discovered via lazy field sampling).
 
 **Time parameters:**
 Use ISO 8601 format for time scoping:
 ```spl
-index=cloudtrail earliest="YYYY-MM-DDTHH:MM:SS" latest="YYYY-MM-DDTHH:MM:SS"
+index=<index_from_config> earliest="YYYY-MM-DDTHH:MM:SS" latest="YYYY-MM-DDTHH:MM:SS"
 ```
+
+Read the index name from the appropriate group in `config/index.json`. Fall back to `index=cloudtrail` when `config/index.json` is absent (D-21).
 
 **Query construction patterns by scenario:**
 
-Lookup by event name and user:
+Lookup by event name and user (AWS API events — read index from config/index.json aws_api group):
 ```spl
-index=cloudtrail earliest="[time_range_earliest]" latest="[time_range_latest]"
+index=<aws_api_index> earliest="[time_range_earliest]" latest="[time_range_latest]"
     eventName="[alert_type]" userIdentity.userName="[user_name]"
 | table _time eventName eventSource userIdentity.userName userIdentity.arn sourceIPAddress userAgent errorCode
 | sort _time
@@ -638,20 +763,20 @@ index=cloudtrail earliest="[time_range_earliest]" latest="[time_range_latest]"
 
 Lookup by source IP (all events from IP):
 ```spl
-index=cloudtrail earliest="[time_range_earliest]" latest="[time_range_latest]"
+index=<aws_api_index> earliest="[time_range_earliest]" latest="[time_range_latest]"
     sourceIPAddress="[source_ip]"
 | table _time eventName eventSource userIdentity.userName userIdentity.arn sourceIPAddress userAgent errorCode
 | sort _time
 ```
 
-Lookup notable event by ID:
+Lookup notable event by ID (index=notable is a Splunk ES internal index — always valid, not in config/index.json):
 ```spl
 index=notable event_id="[notable_id]" | head 1
 ```
 
 Lookup activity before/after a pivot event (widened window):
 ```spl
-index=cloudtrail earliest="[wider_start]" latest="[wider_end]"
+index=<aws_api_index> earliest="[wider_start]" latest="[wider_end]"
     userIdentity.arn="[user_arn]"
 | table _time eventName eventSource userIdentity.userName userIdentity.arn sourceIPAddress userAgent errorCode
 | sort _time

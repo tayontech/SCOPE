@@ -49,14 +49,30 @@ If results.json has no `attack_paths` array or it is empty, write a placeholder 
 
 **Required conventions (enforced by scope-spl-lint.sh hook):**
 
-- Every SPL detection MUST use `index=cloudtrail`
-- Every SPL detection MUST include `earliest` and `latest` time bounds
-- Every SPL detection MUST include the rename: `| rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn`
-- Use CloudTrail field names: `eventName`, `eventSource`, `userIdentity.userName`, `userIdentity.arn`, `requestParameters.*`, `responseElements.*`
-- Use `sourceIPAddress` (not `sourceIP`)
-- Composite detections MUST use `| streamstats` for sliding-window correlation — NOT `| transaction`
-- Composite detections MUST have higher severity than their atomic components
-- No Sigma YAML — SPL only
+- Read `config/index.json` at session start. Map each attack path's data source to the appropriate index group.
+- Read `config/splunk-patterns.md` for command selection rules (tstats vs stats vs streamstats) and anti-pattern avoidance before generating detections.
+- Write a separate SPL detection per index type involved in the attack path (D-09). Do NOT combine multiple indexes in a single OR query — different indexes have different field schemas.
+- Every SPL detection MUST include `earliest` and `latest` time bounds.
+- Composite detections MUST use `| streamstats` for sliding-window correlation — NOT `| transaction`.
+- Composite detections MUST have higher severity than their atomic components.
+- No Sigma YAML — SPL only.
+
+**Index selection logic:**
+
+- AWS API call events (CloudTrail fields: `eventName`, `userIdentity.*`, `sourceIPAddress`) → use `aws_api` group indexes from `config/index.json`
+- Identity provider events (Okta, Azure AD, SSO) → use `identity` group indexes from `config/index.json`
+- VCS events (GitHub, GitLab, Bitbucket) → use `vcs` group indexes from `config/index.json`
+- Endpoint events (EDR telemetry) → use `endpoint` group indexes from `config/index.json`
+- Network/firewall events → use `network` group indexes from `config/index.json`
+- When `config/index.json` is absent → default to `index=cloudtrail` for backward compatibility (D-21)
+
+**D-22 unconfigured index handling:**
+
+When an attack path leads to a data source whose index group is not present in `config/index.json` (or `config/index.json` is absent for that group), do NOT silently skip or generate a detection against a guessed index. Ask the operator: "Attack path crosses into [data source] logs but no [group type] index is configured in `config/index.json`. Add it?" Wait for the operator's response before generating detections for that data source.
+
+**D-19 index error handling:**
+
+When a detection's target index returns zero results during validation or an error response (e.g., "index not found", permission denied, timeout), do NOT silently omit the detection or substitute a different index. Ask the operator: "Detection targets `index=<name>` but query returned [zero results / error: <message>]. Is this index active and accessible? Should I keep the detection as-is, target a different index, or remove it?" Wait for operator response before finalizing detection output.
 
 **Detection type model:**
 
@@ -64,8 +80,11 @@ If results.json has no `attack_paths` array or it is empty, write a placeholder 
 - **Composite detection** — correlates multiple events over a time window to detect multi-step TTPs (e.g., enumerate → escalate → persist). Use `| streamstats time_window=1h count by src_user_arn` to correlate events from the same identity. Mark composite detections with `[COMPOSITE]` in the detection name.
 
 **SPL detection template (Atomic):**
+
+Read the index name from the `aws_api` group in `config/index.json`. Fall back to `index=cloudtrail` when `config/index.json` is absent (D-21).
+
 ```spl
-index=cloudtrail earliest=-24h latest=now
+index=<aws_api_index> earliest=-24h latest=now
   eventName="{EventName}"
   [optional: eventSource="{service}.amazonaws.com"]
   [optional: requestParameters.{field}="{value}"]
@@ -75,8 +94,11 @@ index=cloudtrail earliest=-24h latest=now
 ```
 
 **SPL detection template (Composite):**
+
+Read the index name from the appropriate group in `config/index.json` matching the attack path's data source.
+
 ```spl
-index=cloudtrail earliest=-1h latest=now
+index=<aws_api_index> earliest=-1h latest=now
   (eventName="{EventName1}" OR eventName="{EventName2}")
   [optional: eventSource="{service}.amazonaws.com"]
 | rename userIdentity.userName AS user, userIdentity.arn AS src_user_arn
@@ -84,6 +106,17 @@ index=cloudtrail earliest=-1h latest=now
 | where count >= 2
 | eval detection="[COMPOSITE] {Detection Name}"
 ```
+
+**Multi-index attack path pattern (D-10):**
+
+When an attack path spans multiple data sources (e.g., AWS credential creation followed by GitHub repository access), write separate detections per data source. Name them to reflect the source:
+
+- "[Attack Path Name] — AWS Detection" (index from `aws_api` group)
+- "[Attack Path Name] — GitHub Detection" (index from `vcs` group)
+
+Do NOT combine them into a single query. List both detections under the attack path section with a correlation note: "Correlate manually by actor identity and timestamp."
+
+Only follow attack paths into other indexes when the attack path data explicitly warrants it (D-10). Do NOT generate detections for indexes not referenced by the attack path.
 
 **Writing detections for each attack path:**
 
@@ -176,11 +209,13 @@ AUDIT_RUN_ID=$(jq -r '.audit_runs_analyzed[0] // "unknown"' "$AUDIT_RUN_DIR/resu
 ## SPL Lint Hook
 
 The `scope-spl-lint.sh` hook fires automatically after every Write to files matching `*splunk*`. You do NOT need to manually invoke it. If the hook rejects a write, read the lint error, fix the SPL, and rewrite the file. The hook enforces:
-- `index=cloudtrail` presence when CloudTrail fields are used
 - `streamstats` (not `transaction`) in composite detections
-- Correct field name `sourceIPAddress` (not `sourceIP`)
-- Correct field path `userIdentity.userName` (not bare `userName`)
-- Time bounds on CloudTrail queries
+- Time bounds (`earliest` and `latest`) on all index queries
+- Index names present in `config/index.json` allowlist (when `config/index.json` exists) — unknown indexes are blocked
+- No `index=*` wildcard queries
+- No leading field wildcards (e.g., `field=*value`)
+
+When `config/index.json` is absent, the allowlist check is skipped and any named index is permitted. Splunk ES internal indexes (`notable`, `notable_summary`, `risk`, etc.) are always permitted regardless of the allowlist.
 
 ## Error Handling
 
