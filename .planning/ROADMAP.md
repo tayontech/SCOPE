@@ -231,10 +231,10 @@
 **Requirements:** None (maintenance — no new requirements)
 **Target files:** `agents/subagents/scope-attack-paths.md`, `agents/scope-defend.md`, `agents/scope-hunt.md`, `agents/subagents/scope-hunt-*.md`
 **Dependency:** Phase 72 (orchestrator rewritten, new data model)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 76-01-PLAN.md — attack-paths modernization (16 modules, OIDC, policy docs, edge types)
+- [x] 76-01-PLAN.md — attack-paths modernization (16 modules, OIDC, policy docs, edge types)
 - [ ] 76-02-PLAN.md — defend stale reference cleanup + hunt verification
 
 ### What changes
@@ -321,6 +321,26 @@ Research and design multi-index Splunk integration for hunt and defend-splunk. R
 
 ---
 
+## Phase 80: Platform Directory Structure & Install Modernization
+
+**Requirements:** None (infrastructure — no new requirements)
+**Target files:** `bin/install.js`, `.claude/`, `.gemini/`, `.codex/`
+**Dependency:** Phase 76 (agent prompts finalized before re-installing)
+
+### What changes
+
+Research and update the platform-specific directory structures (`.claude/`, `.gemini/`, `.codex/`) and `bin/install.js` to ensure correct agent installation, hook placement, and settings configuration across all three platforms. Address missing `.gemini/` directory, stale installed agent copies, and validate against current platform documentation.
+
+### Success criteria
+
+1. `bin/install.js` correctly installs all agents to `.claude/agents/`, `.gemini/agents/`, `.codex/agents/`.
+2. `.gemini/` directory structure created and populated.
+3. All installed agent copies match source files (no stale copies).
+4. Hooks installed correctly per platform conventions.
+5. Platform directory structures validated against current documentation.
+
+---
+
 ## Dependency Order
 
 ```
@@ -332,8 +352,9 @@ Phase 65 (SDK-01: foundation) — COMPLETE
     ├── Phase 69 (compute)       │       └── Phase 72 (orchestrator + policy docs) — COMPLETE
     └── Phase 70 (messaging)   ─┘               └── Phase 76 (attack-paths/hunt/defend cleanup)
                                                         ├── Phase 77 (exploit rework) ← also needs Phase 74
-                                                        └── Phase 78 (defend rework)
-                                                                └── Phase 79 (Splunk integration research)
+                                                        ├── Phase 78 (defend rework)
+                                                        │       └── Phase 79 (Splunk integration research)
+                                                        └── Phase 80 (platform directory structure)
 Phase 74 (research subagent) — independent, but needed before Phase 77
 Phase 75 (reporting agent) — independent, but needs Phase 74's output format
 ```
@@ -341,4 +362,4 @@ Phase 75 (reporting agent) — independent, but needs Phase 74's output format
 ---
 
 *Roadmap defined: 2026-04-19*
-*Last updated: 2026-04-19 — Narrowed Phase 76, added Phases 77-79 (exploit rework, defend rework, Splunk research)*
+*Last updated: 2026-04-19 — Added Phase 80 (platform directory structure & install modernization)*

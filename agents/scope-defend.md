@@ -667,9 +667,9 @@ OU Level: Root | Known break: Service roles using IAM credentials without MFA �
 ```
 Note: Global services (IAM, STS, Route53, CloudFront) are region-agnostic — exclude them from region restrictions via `NotAction`.
 
-### SCP Guidance — New Service Attack Vectors (Phase 4 Expansion)
+### SCP Guidance — Service-Specific Attack Vectors
 
-These SCPs address attack vectors from the 7 new services added in the scope-attack-paths expansion. Include in remediation output when the corresponding attack path is discovered.
+These SCPs address attack vectors from service-specific capabilities that enable privilege escalation or data exfiltration. Include in remediation output when the corresponding attack path is discovered.
 
 ---
 
@@ -746,7 +746,7 @@ OU Level: Workload OUs (especially ML/data science OUs) | Blast radius: medium �
 
 **SCP: Restrict Bedrock Agent Creation (PassRole Chain)**
 
-Addresses: Method 12 — `iam:PassRole` to Bedrock service principal + `bedrock:CreateAgent` privilege escalation chain. Non-admin principals should not be able to create Bedrock agents with admin-level execution roles.
+Addresses: `iam:PassRole` to Bedrock service principal + `bedrock:CreateAgent` privilege escalation chain. Non-admin principals should not be able to create Bedrock agents with admin-level execution roles.
 
 ```json
 {
@@ -1203,7 +1203,7 @@ Every AWS service writes CloudTrail events with a unique `eventSource` value. Us
 | Lambda | `lambda.amazonaws.com` |
 | EC2 | `ec2.amazonaws.com` |
 
-**New services added in Phase 4 (attack-paths module expansion):**
+**Additional services:**
 
 | Service | CloudTrail eventSource |
 |---|---|
