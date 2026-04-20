@@ -325,10 +325,11 @@ case "$SOURCE" in
   exploit)
     check_field "target_arn" "principal ARN analyzed"
     check_field "summary" "exploit summary object"
-    check_field "attack_paths" "array of attack paths"
+    check_field "discovery_mode" "standalone or audit"
+    check_field "paths" "array of attack paths"
 
-    # attack_paths items must have name, steps
-    check_array_item_fields "attack_paths" "name,steps" "attack path entries"
+    # paths items must have name, steps
+    check_array_item_fields "paths" "name,steps" "path entries"
     ;;
 
   *)
