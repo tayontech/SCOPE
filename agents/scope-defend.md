@@ -555,17 +555,23 @@ RISK_SCORE=$(jq -r '.summary.risk_score' "$DEFEND_RUN_DIR/results.json")
 VALIDATION_STATUS=$(jq -r '.summary.validation_status' "$DEFEND_RUN_DIR/results.json")
 
 if [ -f dashboard/public/index.json ]; then
-  node -e "
+  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" RISK_SCORE="$RISK_SCORE" VALIDATION_STATUS="$VALIDATION_STATUS" \
+  node -e "$(cat <<'JS'
+    const {DASHBOARD_RUN_ID, ACCOUNT_ID, RISK_SCORE, VALIDATION_STATUS} = process.env;
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
-    idx.runs = (idx.runs || []).filter(r => r.run_id !== '$DASHBOARD_RUN_ID');
-    idx.runs.unshift({ run_id: '$DASHBOARD_RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$VALIDATION_STATUS', file: '$DASHBOARD_RUN_ID.json' });
+    idx.runs = (idx.runs || []).filter(r => r.run_id !== DASHBOARD_RUN_ID);
+    idx.runs.unshift({ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'defend', target: ACCOUNT_ID, risk: RISK_SCORE, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' });
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
-  "
+JS
+  )"
 else
-  node -e "
-    const idx = { runs: [{ run_id: '$DASHBOARD_RUN_ID', date: new Date().toISOString(), source: 'defend', target: '$ACCOUNT_ID', risk: '$RISK_SCORE', status: '$VALIDATION_STATUS', file: '$DASHBOARD_RUN_ID.json' }] };
+  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" RISK_SCORE="$RISK_SCORE" VALIDATION_STATUS="$VALIDATION_STATUS" \
+  node -e "$(cat <<'JS'
+    const {DASHBOARD_RUN_ID, ACCOUNT_ID, RISK_SCORE, VALIDATION_STATUS} = process.env;
+    const idx = { runs: [{ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'defend', target: ACCOUNT_ID, risk: RISK_SCORE, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' }] };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
-  "
+JS
+  )"
 fi
 ```
 </dashboard_export>
