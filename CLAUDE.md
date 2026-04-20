@@ -8,7 +8,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 
 ```
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
-agents/scope-defend.md      Defensive controls generation (model: claude-sonnet-4-6) — dispatched by orchestrator or invoked via /scope:defend
+agents/scope-defend.md      Defensive controls orchestrator (model: claude-sonnet-4-6) — dispatches 5 subagents in 2 waves, assembles results.json. Dispatched by audit or invoked via /scope:defend
 agents/scope-exploit.md     Red team operator — context-driven escalation playbooks with research integration (slash command)
 agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (slash command)
 ```
@@ -20,6 +20,11 @@ agents/subagents/scope-hunt-investigate.md  Investigation mode intake — alert 
 agents/subagents/scope-hunt-intel.md        Intel mode intake — URL/NL parsing, IOC/TTP extraction, INTEL-03 hypotheses (model: claude-sonnet-4-6)
 agents/subagents/scope-hunt-audit.md        Hunt mode intake — run-dir loading, HYPO-02/03 hypotheses from attack paths (model: claude-sonnet-4-6)
 agents/subagents/scope-attack-paths.md     Attack path reasoning from per-module JSON (model: claude-sonnet-4-6)
+agents/subagents/scope-defend-guardrails.md   Systemic pattern detection — SCPs/RCPs for widespread findings (model: claude-sonnet-4-6)
+agents/subagents/scope-defend-splunk.md       SPL detections mapped 1:1 to attack paths (model: claude-sonnet-4-6)
+agents/subagents/scope-defend-policy.md       IAM policy replacement using iam.json + staleness data (model: claude-sonnet-4-6)
+agents/subagents/scope-defend-remediation.md  Prioritized remediation plan with dependency mapping (model: claude-sonnet-4-6)
+agents/subagents/scope-defend-validate.md     Adversarial review of all generated controls (model: claude-sonnet-4-6)
 agents/subagents/scope-verify.md           Unified verification — claim ledger, AWS API validation, SPL checks (read inline)
 agents/subagents/scope-pipeline.md         Post-processing middleware — data normalization then evidence indexing (read inline)
 ```
@@ -56,7 +61,9 @@ config/schemas/       JSON Schema definitions for results.json (audit, defend, e
 
 # Runtime output structure (gitignored):
 audit/<run-id>/           Audit run — enum JSONs, results.json, findings.md
-audit/<run-id>/defend/    Defend output nested under its parent audit run
+audit/<run-id>/defend/          Defend output — 5 subagent artifacts, results.json, validation report
+audit/<run-id>/defend/policies/ SCP/RCP JSON files from guardrails subagent
+audit/<run-id>/defend/replacements/ IAM replacement policy JSON files from policy subagent
 exploit/<run-id>/         Exploit run — playbooks, results.json
 hunt/<run-id>/     Hunt artifacts
 ```
@@ -81,6 +88,7 @@ SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool
 | Command | Description |
 |---------|-------------|
 | `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services) or inline execution (single service). Auto-chains defend after audit completes. |
+| `/scope:defend [run-dir]` | Defensive controls orchestrator — dispatches 5 subagents (guardrails, splunk, policy, remediation, validate) against audit data. Auto-chained by audit or invoked directly with a run directory. |
 | `/scope:exploit <arn> [--audit <run-dir>]` | Red team escalation playbooks — standalone context-driven probing or audit-data-driven analysis with real-world research integration |
 | `/scope:hunt [input]` | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing. Three entry points: alert/notable ID (investigation mode), audit/exploit run directory (hunt mode), or threat intel URL / natural language description (intel mode). |
 | `/scope:help` | List available commands, show usage examples |

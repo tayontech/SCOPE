@@ -177,9 +177,11 @@ all attack paths. Draw from attack_paths[].affected_resources to map findings to
 read the full defend output in the defend directory.
 
 Format:
-- **SCPs/RCPs:** `{DEFEND_RESULTS_DIR}/` — {N} organizational policies generated
-- **SPL Detections:** `{DEFEND_RESULTS_DIR}/` — {N} Splunk detection rules
-- **Remediation Plan:** `{DEFEND_RESULTS_DIR}/` — prioritized remediation with dependency mapping
+- **SCPs/RCPs:** `{DEFEND_RESULTS_DIR}/guardrails.md` — {N} organizational policies generated (policy JSON in `{DEFEND_RESULTS_DIR}/policies/`)
+- **SPL Detections:** `{DEFEND_RESULTS_DIR}/splunk-detections.md` — {N} Splunk detection rules
+- **IAM Policy Replacements:** `{DEFEND_RESULTS_DIR}/policy-replacements.md` — least-privilege replacement policies (JSON in `{DEFEND_RESULTS_DIR}/replacements/`)
+- **Remediation Plan:** `{DEFEND_RESULTS_DIR}/remediation-plan.md` — prioritized remediation with dependency mapping
+- **Validation Report:** `{DEFEND_RESULTS_DIR}/validation-report.md` — adversarial review of all generated controls
 
 Note: full policy text, detection rules, and remediation steps are in the defend output.
 This section provides navigation, not duplication.]
@@ -205,7 +207,7 @@ This section provides navigation, not duplication.]
 
 **Defend directory path:** Use the directory containing DEFEND_RESULTS (strip `results.json` from the glob result).
 
-**Counts from defend/results.json:** Read the file and extract SCP count, SPL detection count, and remediation item count. If defend/results.json does not have explicit counts, note "see defend output directory" instead.
+**Counts from defend/results.json:** Read the file and extract: guardrail count from `summary.guardrails`, detection count from `summary.detections`, remediation item count from `summary.remediation_items`, and validation status from `summary.validation_status`. If defend/results.json does not have explicit counts, note "see defend output directory" instead.
 
 ## Success Criteria
 
