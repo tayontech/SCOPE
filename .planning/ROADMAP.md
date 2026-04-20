@@ -24,25 +24,10 @@
 
 ---
 
-## Phase 66: Policy Resolution Script
+## ~~Phase 66: Policy Resolution Script~~ (CANCELLED)
 
-**Requirements:** POL-01, POL-02, POL-03
-**Target files:** `scripts/resolve-permissions.js` (new), `config/aws-managed-policies.json` (new)
-**Dependency:** Phase 65 (needs scripts/lib/)
-
-### What changes
-
-- **POL-01**: Create `scripts/resolve-permissions.js` — deterministic policy resolution. Takes a principal's attached policies (from IAM enum output), applies permission boundaries, layers SCPs/RCPs, and computes effective allowed/denied actions.
-- **POL-02**: Create `config/aws-managed-policies.json` — reference file mapping common AWS managed policy ARNs to their action lists.
-- **POL-03**: Script loads SCPs from `config/scps/*.json` (existing convention) and applies deny logic.
-
-### Success criteria
-
-1. `scripts/resolve-permissions.js` exists, accepts principal policy data on stdin, outputs effective actions JSON.
-2. `config/aws-managed-policies.json` exists with at least the top 20 most common AWS managed policies.
-3. Script correctly resolves: managed policy allows + SCP denies = effective deny.
-4. Script correctly resolves: permission boundary restricts broader policy.
-5. Output distinguishes CONFIRMED (fully resolved) from CONDITIONAL (complex logic, unresolvable locally).
+**Status:** Cancelled — superseded by Phase 72 (D-18 through D-22)
+**Reason:** IAM script now captures inline and customer-managed policy documents directly from GAAD. AWS managed policies resolved by name or targeted API call. Static `config/aws-managed-policies.json` dropped. Policy data is available in the IAM envelope for attack-paths to reason about directly — no separate resolution script needed.
 
 ---
 
@@ -168,39 +153,35 @@
 ## Phase 72: Orchestrator Rewrite
 
 **Requirements:** ORCH-01, ORCH-03
-**Target files:** `agents/scope-audit.md`, `bin/extract-graph.js`
+**Target files:** `agents/scope-audit.md`, `bin/extract-graph.js`, `scripts/lib/discover-regions.js`, `scripts/enum/iam.js`, `scripts/enum/*.js`
 **Dependency:** Phase 71
+**Plans:** 4/4 plans complete
 
 ### What changes
 
-- **ORCH-01**: Rewrite scope-audit.md to call SDK scripts directly via Bash tool instead of dispatching subagents. Preserve parallel execution, gate pattern, error handling.
-- **ORCH-03**: Update extract-graph.js to consume new service data (Bedrock, ECS, DynamoDB, SSM, Cognito nodes).
+- **ORCH-01**: Rewrite scope-audit.md to call SDK scripts directly via Bash tool instead of dispatching subagents. Preserve parallel execution, gate pattern, error handling. Add region discovery script, update all regional scripts for --regions flag support, add OIDC enumeration and policy document capture to IAM script.
+- **ORCH-03**: Update extract-graph.js to consume new service data (Bedrock, DynamoDB, SSM, Cognito, Lambda, EC2, CodeBuild, API Gateway, SNS, SQS nodes) with cross-service edges.
+
+### Plans
+
+- [x] 72-01-PLAN.md — Region discovery script + --regions flag update for all regional scripts
+- [x] 72-02-PLAN.md — IAM OIDC enumeration + policy document capture
+- [x] 72-03-PLAN.md — scope-audit.md orchestrator rewrite
+- [x] 72-04-PLAN.md — extract-graph.js 16-service expansion + test fixtures
 
 ### Success criteria
 
 1. scope-audit.md invokes `node scripts/enum/*.js`, not subagent dispatch.
 2. Parallel execution preserved.
-3. extract-graph.js produces nodes from all 17 services.
+3. extract-graph.js produces nodes from all 16 services with cross-service edges.
 4. Gate pattern unchanged.
 
 ---
 
-## Phase 73: Policy Resolution Integration
+## ~~Phase 73: Policy Resolution Integration~~ (CANCELLED)
 
-**Requirements:** POL-04
-**Target files:** `agents/subagents/scope-attack-paths.md`
-**Dependency:** Phase 66 (resolve-permissions.js must exist)
-
-### What changes
-
-- **POL-04**: Wire resolve-permissions.js into attack-paths. After graph construction, attack-paths calls the script to get effective permissions per principal. Uses resolved permissions for confidence labels: CONFIRMED (locally verified) or CONDITIONAL (unresolvable).
-
-### Success criteria
-
-1. Attack-paths invokes resolve-permissions.js for principals in candidate paths.
-2. Paths with CONFIRMED permissions are labeled as such in results.json.
-3. Paths with unresolvable policy logic are labeled CONDITIONAL.
-4. No API calls to SimulatePrincipalPolicy — all resolution is local.
+**Status:** Cancelled — Phase 66 (resolve-permissions.js) was dropped.
+**Reason:** Policy documents are now captured directly in the IAM envelope (Phase 72, D-18/D-19/D-20). Attack-paths can reason about effective permissions from the raw policy documents in iam.json — inline policies have full Statement arrays, customer-managed policies have full documents. No separate resolution script or integration needed. Permission reasoning folded into Phase 76 (reasoning agent modernization) where attack-paths prompts are updated to use the new policy document data.
 
 ---
 
@@ -245,21 +226,119 @@
 
 ---
 
+## Phase 76: Reasoning Agent Prompt Modernization
+
+**Requirements:** None (maintenance — no new requirements)
+**Target files:** `agents/subagents/scope-attack-paths.md`, `agents/scope-defend.md`, `agents/scope-hunt.md`, `agents/subagents/scope-hunt-*.md`
+**Dependency:** Phase 72 (orchestrator rewritten, new data model)
+**Plans:** 2 plans
+
+Plans:
+- [ ] 76-01-PLAN.md — attack-paths modernization (16 modules, OIDC, policy docs, edge types)
+- [ ] 76-02-PLAN.md — defend stale reference cleanup + hunt verification
+
+### What changes
+
+Update attack-paths, defend, and hunt agent prompts for the new SDK data model. Stale reference cleanup and data model alignment — not a rework of agent logic.
+
+- **attack-paths:** Add 4 new module JSONs (16 total), OIDC as first-class attack vector with trust condition analysis, direct reasoning from policy documents in iam.json, awareness of cross-service graph edges.
+- **defend:** Remove stale enum agent references, update service awareness to 16. Logic rework is a separate phase.
+- **hunt + subagents:** Remove stale enum agent references. Verify hunt-audit handles 16 module JSONs.
+
+### Success criteria
+
+1. attack-paths lists all 16 module JSONs and reasons about OIDC trusts + policy documents.
+2. No agent references Haiku enum agents, validate-enum-output.js, or subagent dispatch.
+3. All agent prompts tested with `node bin/install.js` to confirm valid frontmatter and installation.
+
+---
+
+## Phase 77: Exploit Agent Rework
+
+**Requirements:** None (rework — no new requirements)
+**Target files:** `agents/scope-exploit.md`
+**Dependency:** Phase 76 (attack-paths modernized), Phase 74 (research subagent available)
+
+### What changes
+
+Redesign the exploit agent as a red team operator. Rethink permission discovery for scenarios without IAM read access (probing, service-specific enumeration). Integrate research subagent for real-world technique lookup. Update to leverage policy document data from iam.json when audit data exists.
+
+### Success criteria
+
+1. Exploit works as standalone red team operator — doesn't require prior audit run.
+2. Permission discovery handles no-IAM-read scenarios (probing, error-based inference).
+3. Research subagent dispatched for technique context on discovered permissions.
+4. When audit data exists, exploit uses iam.json policy documents instead of re-enumerating.
+
+---
+
+## Phase 78: Defend Agent Rework
+
+**Requirements:** None (rework — no new requirements)
+**Target files:** `agents/scope-defend.md` (rewritten), `agents/subagents/scope-defend-*.md` (new subagents)
+**Dependency:** Phase 76 (prompts modernized)
+
+### What changes
+
+Redesign defend with subagent architecture producing account-specific, actionable output:
+
+- **scope-defend-guardrails** — Systemic pattern detection across all module JSONs. SCPs/RCPs only when a gap is widespread (e.g., 8/12 EC2 instances have IMDSv1). Not individual finding reactions.
+- **scope-defend-splunk** — SPL detections mapped 1:1 to attack paths from results.json. Account-specific, not generic rules.
+- **scope-defend-policy** — Scoped-down replacement policies using policy documents + staleness data. Actual replacement JSON, not "consider reducing permissions."
+- **scope-defend-remediation** — Prioritized remediation plan with dependency mapping. "Fix #1 eliminates findings #3, #5, #7."
+- **scope-defend-validate** — Adversarial review of all generated controls. Catches SCPs that break legitimate operations, noisy SPL queries, over-scoped policy replacements.
+
+### Success criteria
+
+1. Five defend subagents produce independent, parallelizable output.
+2. SCPs/RCPs only recommended for systemic patterns (not individual findings).
+3. SPL detections tied 1:1 to specific attack paths.
+4. Policy tightening uses actual policy documents and staleness data.
+5. Validator catches operational impact issues before delivery.
+
+---
+
+## Phase 79: Splunk Integration Research
+
+**Requirements:** None (research — no new requirements)
+**Target files:** `agents/scope-hunt.md`, `agents/subagents/scope-defend-splunk.md`, `hunt/context.json`
+**Dependency:** Phase 78 (defend-splunk subagent exists)
+
+### What changes
+
+Research and design multi-index Splunk integration for hunt and defend-splunk. Replace hardcoded `index=cloudtrail` with operator-configured data source awareness. Investigations may span multiple indexes (cloudtrail, github, okta, azure_ad, vpc_flow, guardduty).
+
+- Ask operator what indexes/data sources are available at session start
+- Route queries to correct index based on investigation type (OIDC trust → github index, federated auth → okta index)
+- Session-scoped configuration (not persisted across sessions per memory rules)
+
+### Success criteria
+
+1. No hardcoded `index=cloudtrail` in any agent.
+2. Operator asked for available indexes at session start.
+3. Hunt and defend-splunk use correct index per query type.
+4. Graceful fallback when an index isn't available.
+
+---
+
 ## Dependency Order
 
 ```
 Phase 65 (SDK-01: foundation) — COMPLETE
-    ├── Phase 66 (POL-01, 02, 03: policy resolution script)
-    │       └── Phase 73 (POL-04: attack-paths integration)
-    ├── Phase 67 (SDK-02, 04, 05: IAM + STS)  ─┐
-    ├── Phase 68 (SDK-02, 03, 05: data services) ├─ Phase 71 (TEST, ORCH-02: testing + removal)
-    ├── Phase 69 (SDK-02, 03, 05: compute)       │       └── Phase 72 (ORCH-01, 03: orchestrator)
-    └── Phase 70 (SDK-02, 03, 05: messaging)   ─┘
-Phase 74 (AGENT-01, 03: research) — independent
-Phase 75 (AGENT-02, 03: reporting) — independent
+    ├── ~~Phase 66~~ — CANCELLED
+    │       └── ~~Phase 73~~ — CANCELLED
+    ├── Phase 67 (IAM + STS)  ─┐
+    ├── Phase 68 (data services) ├─ Phase 71 (testing + removal) — COMPLETE
+    ├── Phase 69 (compute)       │       └── Phase 72 (orchestrator + policy docs) — COMPLETE
+    └── Phase 70 (messaging)   ─┘               └── Phase 76 (attack-paths/hunt/defend cleanup)
+                                                        ├── Phase 77 (exploit rework) ← also needs Phase 74
+                                                        └── Phase 78 (defend rework)
+                                                                └── Phase 79 (Splunk integration research)
+Phase 74 (research subagent) — independent, but needed before Phase 77
+Phase 75 (reporting agent) — independent, but needs Phase 74's output format
 ```
 
 ---
 
 *Roadmap defined: 2026-04-19*
-*Last updated: 2026-04-19 — Phase 71 plans created (5 plans)*
+*Last updated: 2026-04-19 — Narrowed Phase 76, added Phases 77-79 (exploit rework, defend rework, Splunk research)*

@@ -22,9 +22,9 @@
 
 ### Orchestrator (ORCH)
 
-- [ ] **ORCH-01**: `scope-audit.md` rewritten to call SDK enum scripts directly (via Bash tool: `node scripts/enum/iam.js --run-dir $RUN_DIR --region $REGION`) instead of dispatching Haiku subagents. Parallel execution preserved.
+- [x] **ORCH-01**: `scope-audit.md` rewritten to call SDK enum scripts directly (via Bash tool: `node scripts/enum/iam.js --run-dir $RUN_DIR --region $REGION`) instead of dispatching Haiku subagents. Parallel execution preserved.
 - [x] **ORCH-02**: 12 Haiku enum agent files (`agents/subagents/scope-enum-*.md`) removed after SDK scripts are verified to produce identical output.
-- [ ] **ORCH-03**: `extract-graph.js` updated to consume new service data (Bedrock, ECS, DynamoDB, SSM, Cognito) — produces nodes/edges from expanded enum output.
+- [x] **ORCH-03**: `extract-graph.js` updated to consume new service data (Bedrock, ECS, DynamoDB, SSM, Cognito) — produces nodes/edges from expanded enum output.
 
 ### Intelligent Agents (AGENT)
 
@@ -73,9 +73,9 @@
 | POL-02 | 66 | Pending |
 | POL-03 | 66 | Pending |
 | POL-04 | 73 | Pending |
-| ORCH-01 | 72 | Pending |
+| ORCH-01 | 72 | Complete |
 | ORCH-02 | 71 | Complete |
-| ORCH-03 | 72 | Pending |
+| ORCH-03 | 72 | Complete |
 | AGENT-01 | 74 | Pending |
 | AGENT-02 | 75 | Pending |
 | AGENT-03 | 74, 75 | Pending |

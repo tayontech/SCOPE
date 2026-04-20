@@ -30,7 +30,8 @@ Always include `$ACCOUNT_ID` in the owned-accounts set even if context.json is m
 
 Read per-module JSON files from $RUN_DIR/ by known naming convention:
 - iam.json, sts.json, s3.json, kms.json, secrets.json, lambda.json, ec2.json,
-  rds.json, sns.json, sqs.json, apigateway.json, codebuild.json
+  rds.json, sns.json, sqs.json, apigateway.json, codebuild.json,
+  bedrock.json, cognito.json, dynamodb.json, ssm.json
 
 For each file in SERVICES_COMPLETED:
 1. Read the file using the Read tool
@@ -55,6 +56,53 @@ PHASE_A_EDGES=$(echo "$GRAPH_OUTPUT" | jq '.edges')
 ```
 
 **Phase A completion gate:** Do not proceed to config reads or Phase B reasoning until PHASE_A_NODES and PHASE_A_EDGES are populated. If `extract-graph.js` exits non-zero or produces invalid JSON, investigate the run directory contents before continuing.
+
+Phase A edge types include:
+- `trust`: IAM role trust relationships (non-service principals)
+- `service`: IAM role trust relationships from AWS service principals
+- `membership`: IAM user-to-group membership
+- `executes_as`: compute/AI resources (Lambda, EC2, CodeBuild, Bedrock) → their execution roles
+- `invokes`: API Gateway → Lambda integrations
+- `authenticates_to`: identity providers (Cognito identity pools, OIDC providers) → roles they can assume
+
+Resource policy analysis (S3 bucket policies, KMS key policies, SNS/SQS topic policies) is performed during Phase B by reading per-module JSON directly — there are no Phase A edges for resource policy relationships.
+
+## OIDC Provider Trust Analysis
+
+iam.json contains `oidc_provider` findings with trust condition data. Phase A emits `oidc:` nodes and `authenticates_to` edges for each OIDC provider's assumed_role_arns. However, the edge `conditions` field may not be populated correctly — always read trust conditions directly from the iam.json oidc_provider findings.
+
+For each oidc_provider finding in iam.json:
+1. Read `trust_conditions` (StringEquals/StringLike maps on sub, aud claims)
+2. Evaluate permissiveness by provider type:
+   - **GitHub Actions** (`token.actions.githubusercontent.com`): Flag if `sub` condition is missing, uses wildcard `*`, or lacks repo/branch restriction (e.g., `repo:org/*` without `:ref:` constraint)
+   - **EKS** (`oidc.eks.<region>.amazonaws.com`): Flag if `sub` condition is missing or lacks namespace/service-account restriction
+   - **Cognito** (`cognito-identity.amazonaws.com`): Flag if `aud` condition is missing or does not restrict to a specific identity pool ID
+   - **Generic OIDC**: Flag if no `sub` or `aud` conditions exist at all — any token from the provider can assume the role
+3. Cross-reference `assumed_role_arns` with role findings to assess the privilege level of assumable roles
+4. An OIDC provider with permissive trust conditions pointing to a high-privilege role is a privilege_escalation or trust_misconfiguration finding
+
+Do NOT manually build oidc: nodes or authenticates_to edges — those exist in PHASE_A_NODES and PHASE_A_EDGES from extract-graph.js. Your job is to evaluate trust condition permissiveness from the iam.json data and reason about the attack implications.
+
+## Policy Document Reasoning
+
+IAM user and role findings in iam.json carry full policy documents:
+- `inline_policies`: array of `{"name": "<policy-name>", "document": {"Statement": [...]}}`
+- `attached_policies`: array of `{"arn": "<policy-arn>", "document": {"Statement": [...]}}`
+
+Use these directly during Stage 2 reasoning to determine what actions a principal can perform. Read the Statement arrays and evaluate Effect/Action/Resource/Condition per the 7-step policy evaluation in Part 1.
+
+Key dangerous action patterns to flag:
+- `iam:PassRole`, `iam:CreateUser`, `iam:CreateAccessKey`, `iam:AttachUserPolicy`, `iam:PutUserPolicy`
+- `sts:AssumeRole` (especially with broad Resource)
+- `lambda:UpdateFunctionCode`, `lambda:CreateFunction` (with PassRole = code execution as role)
+- `s3:*` or `s3:GetObject` on sensitive buckets (terraform state, secrets, backups)
+- `secretsmanager:GetSecretValue` on sensitive secrets
+- `bedrock:InvokeModel`, `bedrock:CreateAgent` (with PassRole = AI agent with role permissions)
+- `dynamodb:*` or `dynamodb:Scan`/`GetItem` on sensitive tables
+- `ssm:GetParameter` on SecureString parameters
+- `cognito-identity:SetIdentityPoolRoles` (can redirect auth to attacker-controlled role)
+
+Do not rely on an external resolution script — reason about the Statement arrays directly. The policy documents are the source of truth for what each principal can do.
 
 ## Config: Reference Catalogues
 
@@ -582,6 +630,9 @@ Questions to ground your observations:
 - Which data stores (S3 buckets, secrets, KMS keys, RDS instances) are accessible and to whom?
 - Which principals have iam:PassRole — and what roles could they pass?
 - What service integrations exist that create implicit privilege chains (S3 triggers, event source mappings, SSM associations)?
+- Which OIDC providers authenticate to roles, and are their trust conditions restrictive? (check authenticates_to edges + oidc_provider findings in iam.json)
+- Which Cognito identity pools map to IAM roles, and do unauthenticated pools grant role access? (check authenticates_to edges from idp:cognito nodes)
+- Which compute resources execute as IAM roles? (check executes_as edges: Lambda functions, EC2 instances, CodeBuild projects, Bedrock agents → roles)
 
 There is no required order. Observe what is actually present — don't map observations to techniques yet. Observe facts.
 
