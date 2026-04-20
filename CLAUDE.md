@@ -78,7 +78,7 @@ SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool
 |------|-------|---------|
 | `scope-safety-guard.sh` | PreToolUse (Bash, all platforms) | Block destructive AWS operations — agents are read-only |
 | `scope-aws-output-inject.sh` | BeforeTool (Bash, Gemini-only) | Auto-inject `--output json` into AWS CLI calls missing explicit output format |
-| `scope-spl-lint.sh` | PostToolUse (Write\|Edit, all platforms) | Hard-fail on SPL anti-patterns (missing index, wrong fields, transaction in composites) |
+| `scope-spl-lint.sh` | PostToolUse (Write\|Edit, all platforms) | Validates SPL against `config/index.json` allowlist, blocks anti-patterns (transaction in composites, leading wildcards, index=*, missing time bounds) |
 | `scope-schema-validate.sh` | PostToolUse (Write\|Edit, all platforms) | Validate results.json and dashboard JSON against phase schemas — blocks writes with missing required fields |
 | `scope-artifact-check.sh` | Stop (all platforms) | Verify mandatory artifacts exist before agent completes |
 | `scope-agent-logger.sh` | PostToolUse (Bash, async, all platforms) | Auto-log AWS CLI calls to agent-log.jsonl |
@@ -128,8 +128,12 @@ Standard workflows are read-only. Before ANY destructive AWS operation:
 
 ## CloudTrail + Splunk
 
-- CloudTrail is the only log source for Splunk (`index=cloudtrail`)
+- Splunk integration supports multiple indexes configured in `config/index.json` (operator-specific, gitignored)
+- Agents read `config/index.json` at session start for index routing — each attack path's data source maps to the appropriate index group (`aws_api`, `identity`, `vcs`, `endpoint`, `network`, `cloud_platform`)
+- First run can auto-discover indexes via the Splunk MCP `get_indexes` tool — agent filters internal indexes, reasons about groupings, and presents proposed configuration to the operator for confirmation before writing
+- When `config/index.json` is absent and Splunk is unavailable, agents default to `index=cloudtrail` for backward compatibility — no breaking change for existing users
 - Do not assume Splunk is available — agents must work standalone
+- Agents read `config/splunk-patterns.md` for SPL query generation best practices (command selection, anti-patterns, composite detection patterns)
 - CloudTrail delay: ~5-15 min after simulation before querying
 
 ## Agent Isolation
@@ -149,8 +153,11 @@ All other agents share data through the agent-logs/data layer.
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
 | `config/cloudtrail-classes.json` | CloudTrail event classification — used by exploit for visibility tagging |
 | `config/techniques.json` | Consolidated technique seed knowledge — escalation, persistence, post-exploitation vectors |
+| `config/index.json` | Operator Splunk index configuration — groups indexes by data source type (gitignored, auto-discovered or copied from example) |
+| `config/index.example.json` | Template with common security index groupings — copy to `config/index.json` and customize (committed) |
+| `config/splunk-patterns.md` | SPL query patterns, anti-patterns, and command selection rules for detection engineering and threat hunting (committed) |
 
-All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.
+All config files are optional. `accounts.json`, `scps/*.json`, and `index.json` are gitignored. `cloudtrail-classes.json`, `index.example.json`, and `splunk-patterns.md` are committed.
 
 ## Memory
 
