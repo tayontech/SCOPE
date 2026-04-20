@@ -45,5 +45,6 @@ dashboard/dashboard.html
 
 # Config (user-specific — contains real account IDs and policies)
 config/accounts.json
+config/index.json
 config/scps/*.json
 !config/scps/_example.json
