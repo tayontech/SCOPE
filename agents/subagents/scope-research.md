@@ -41,16 +41,22 @@ Construct initial WebSearch queries targeting known high-quality AWS security re
    - Query: `site:hackingthe.cloud {SERVICE} {technique_keywords}`
 2. **HackTricks Cloud** (cloud.hacktricks.wiki) — Cloud pentesting methodology
    - Query: `site:cloud.hacktricks.wiki AWS {SERVICE} {technique_keywords}`
-3. **Rhino Security Labs** (rhinosecuritylabs.com) — AWS-focused offensive research
-   - Query: `site:rhinosecuritylabs.com AWS {SERVICE} {technique_keywords}`
-4. **Nick Frichette** (frichetten.com) — Independent AWS security research
-   - Query: `site:frichetten.com AWS {technique_keywords}`
-5. **Datadog Security Labs** — Cloud threat research and detection
+3. **Datadog Security Labs** — Cloud threat research and detection
    - Query: `site:securitylabs.datadoghq.com AWS {technique_keywords}`
-6. **Wiz Research** (wiz.io/blog) — Cloud security research
+4. **Wiz Research** (wiz.io/blog) — Cloud security research
    - Query: `site:wiz.io AWS {SERVICE} {technique_keywords}`
+5. **AWS Security Digest** (awssecuritydigest.com) — Curated AWS security news and research
+   - Query: `site:awssecuritydigest.com {SERVICE} {technique_keywords}`
 
-**Query construction:** Extract technique keywords from PERMISSION_CONTEXT. For `iam:PassRole + lambda:CreateFunction`, keywords would be `PassRole`, `Lambda`, `privilege escalation`. For `sts:AssumeRole with external account`, keywords would be `AssumeRole`, `cross-account`, `lateral movement`.
+**Query construction:** Extract technique keywords from PERMISSION_CONTEXT based on the SERVICE and attack context. Examples across different services:
+- `iam:PassRole + lambda:CreateFunction` → keywords: `PassRole`, `Lambda`, `privilege escalation`
+- `sts:AssumeRole with external account` → keywords: `AssumeRole`, `cross-account`, `lateral movement`
+- `s3:PutBucketPolicy with wildcard principal` → keywords: `PutBucketPolicy`, `public access`, `data exfiltration`
+- `lambda:UpdateFunctionCode + lambda:InvokeFunction` → keywords: `Lambda`, `code injection`, `backdoor`
+- `kms:CreateGrant` → keywords: `KMS`, `grant`, `key access`, `decrypt`
+- `secretsmanager:GetSecretValue` → keywords: `Secrets Manager`, `credential theft`, `secret access`
+
+Adapt keywords to match the specific permission combination. Focus on the attack action (what the permission enables), not just the API name.
 
 Run 1-2 WebSearch calls targeting the most relevant preferred sources for the SERVICE and PERMISSION_CONTEXT combination.
 
