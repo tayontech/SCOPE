@@ -59,12 +59,10 @@ Read `AUDIT_RUN_DIR/results.json` and extract `attack_paths[].affected_resources
 If `config/scps/*.json` files exist, read them for SCP boundary context. This enhances boundary awareness (D-22) by identifying which permissions are already denied at the organization level before producing replacements.
 
 ```bash
-SCP_FILES=$(ls config/scps/*.json 2>/dev/null)
-if [ -n "$SCP_FILES" ]; then
-  for SCP_FILE in $SCP_FILES; do
-    # Read SCP for boundary context
-  done
-fi
+for SCP_FILE in config/scps/*.json; do
+  [ -f "$SCP_FILE" ] || continue
+  # Read SCP for boundary context
+done
 ```
 
 ## Policy Tightening Workflow
