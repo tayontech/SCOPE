@@ -350,6 +350,18 @@ printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "sc
 - If BLOCKS > 0 (STATUS: partial): proceed to Results Assembly anyway — D-26 max 2 rounds cap reached. Report PARTIAL status to operator. The validation-report.md documents remaining issues.
 
 Capture VALIDATION_STATUS, VALIDATION_BLOCKS, VALIDATION_WARNS for results.json assembly.
+
+Default all METRICS capture variables to 0 before assembly — guards against empty strings from failed subagents that would cause `jq --argjson` to exit non-zero:
+
+```bash
+GUARDRAILS_SCPS=${GUARDRAILS_SCPS:-0}
+GUARDRAILS_RCPS=${GUARDRAILS_RCPS:-0}
+DETECTIONS_COUNT=${DETECTIONS_COUNT:-0}
+POLICY_REPLACEMENTS_COUNT=${POLICY_REPLACEMENTS_COUNT:-0}
+REMEDIATION_ITEMS_COUNT=${REMEDIATION_ITEMS_COUNT:-0}
+VALIDATION_BLOCKS=${VALIDATION_BLOCKS:-0}
+VALIDATION_WARNS=${VALIDATION_WARNS:-0}
+```
 </wave2_validate>
 
 <results_assembly>
