@@ -394,6 +394,10 @@ for POLICY_FILE in "$DEFEND_RUN_DIR/policies/"*.json; do
     POLICY_TYPE="scp"
   fi
   POLICY_NAME="${BASENAME%.json}"
+  if ! jq empty "$POLICY_FILE" 2>/dev/null; then
+    echo "ERROR: Invalid JSON in $POLICY_FILE — skipping" >&2
+    continue
+  fi
   POLICY_JSON=$(jq '.' "$POLICY_FILE")
   ENTRY=$(jq -n \
     --arg name "$POLICY_NAME" \
