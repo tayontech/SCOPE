@@ -275,7 +275,7 @@ Update attack-paths, defend, and hunt agent prompts for the new SDK data model. 
 **Plans:** 3 plans
 
 Plans:
-- [ ] 77-01-PLAN.md — Config consolidation (techniques.json) + simplified schema
+- [x] 77-01-PLAN.md — Config consolidation (techniques.json) + simplified schema
 - [ ] 77-02-PLAN.md — Full agent rewrite (scope-exploit.md)
 - [ ] 77-03-PLAN.md — CLAUDE.md updates + install.js verification
 
