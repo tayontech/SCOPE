@@ -215,9 +215,10 @@ function normalizeForDashboard(json, indexSource) {
     }
 
     // Normalize remediation: new schema uses remediation.items count; legacy used prioritization[]
-    if (!data.prioritization && data.remediation?.items != null) {
-      // remediation.items is a count — PrioritizationSidebar expects an array; leave null if no array
-      // The sidebar handles null gracefully (returns null when items?.length is falsy)
+    if (!data.prioritization && data.remediation?.file) {
+      // New schema: expose file path and item count for the Remediation tab
+      data.remediationPlanFile = data.remediation.file;
+      data.remediationItemCount = data.remediation.items ?? 0;
     }
 
     // KPI derivation — array lengths ALWAYS win for defend KPIs
@@ -2338,7 +2339,21 @@ function DefendView({ data }) {
             {defendTab === "technical" && <TechnicalRecommendationsView data={data} />}
             {defendTab === "policies" && <PolicyViewer scps={data.scps} rcps={data.rcps} />}
             {defendTab === "detections" && <DetectionRulesList detections={data.detections} />}
-            {defendTab === "remediation" && <ControlsMatrix controls={data.prioritization ?? []} />}
+            {defendTab === "remediation" && (
+              data.prioritization?.length
+                ? <ControlsMatrix controls={data.prioritization} />
+                : data.remediationPlanFile
+                  ? <div style={{ padding: 20, color: "#c8d0e0" }}>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>Remediation Plan</div>
+                      <div style={{ fontSize: 13, marginBottom: 4 }}>
+                        <span style={{ color: "#8899aa" }}>Items: </span>{data.remediationItemCount ?? 0}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8899aa", wordBreak: "break-all" }}>
+                        {data.remediationPlanFile}
+                      </div>
+                    </div>
+                  : <div style={{ color: "#8899aa", fontSize: 13, padding: 20 }}>No remediation plan available.</div>
+            )}
           </div>
         </div>
       </div>
