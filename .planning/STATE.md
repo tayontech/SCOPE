@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.14
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-20T05:36:17.000Z"
-last_activity: 2026-04-20 -- Phase 77 Plan 01 complete
+last_updated: "2026-04-20T05:02:54.988Z"
+last_activity: 2026-04-20
 progress:
   total_phases: 14
   completed_phases: 10
   total_plans: 25
-  completed_plans: 22
-  percent: 88
+  completed_plans: 24
+  percent: 96
 ---
 
 # Project State
@@ -18,9 +18,9 @@ progress:
 ## Current Position
 
 Phase: 77 (Exploit Agent Rework) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Executing Phase 77
-Last activity: 2026-04-20 -- Phase 77 Plan 01 complete
+Last activity: 2026-04-20 -- Phase 77 Plan 02 complete
 
 ## Phase Index
 
@@ -59,6 +59,10 @@ Last activity: 2026-04-20 -- Phase 77 Plan 01 complete
 - SSM is now a standalone service in routing (was incorrectly aliased to ec2)
 - Synthesizer dispatch wired into audit orchestrator: enum → attack-paths → defend → synthesizer → pipeline → dashboard
 - Synthesizer failure is blocking (D-18) but pipeline/dashboard continue; defend failure and Gate 4 skip both prevent synthesizer dispatch
+- Exploit agent rewritten as red team operator: standalone by default, context-driven probing, per-path scope-research dispatch, narrative-first playbooks
+- Exploit D-05: standalone by default — no auto-detection, explicit --audit flag only
+- Exploit D-27: unified creative reasoning — no confidence tiers, stealth ordering, or catalogue-vs-novel distinction
+- Exploit D-47: no scope-pipeline dispatch for exploit — artifacts go directly to destinations
 
 ## Dependency Order
 

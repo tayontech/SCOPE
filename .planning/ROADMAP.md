@@ -272,11 +272,11 @@ Update attack-paths, defend, and hunt agent prompts for the new SDK data model. 
 **Requirements:** None (rework — no new requirements)
 **Target files:** `agents/scope-exploit.md`, `config/techniques.json` (new), `config/schemas/exploit.schema.json`, `config/escalation-catalogue.json` (deleted), `config/persistence-techniques.json` (deleted), `config/postex-vectors.json` (deleted), `CLAUDE.md`, `bin/install.js`
 **Dependency:** Phase 76 (attack-paths modernized), Phase 74 (research subagent available)
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [x] 77-01-PLAN.md — Config consolidation (techniques.json) + simplified schema
-- [ ] 77-02-PLAN.md — Full agent rewrite (scope-exploit.md)
+- [x] 77-02-PLAN.md — Full agent rewrite (scope-exploit.md)
 - [ ] 77-03-PLAN.md — CLAUDE.md updates + install.js verification
 
 ### What changes

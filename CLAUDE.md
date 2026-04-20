@@ -9,7 +9,7 @@ The audit agent is an orchestrator that dispatches enumeration subagents in para
 ```
 agents/scope-audit.md       AWS audit orchestrator (slash command) — dispatches enum subagents in parallel
 agents/scope-defend.md      Defensive controls generation (model: claude-sonnet-4-6) — dispatched by orchestrator or invoked via /scope:defend
-agents/scope-exploit.md     Privilege escalation playbooks (slash command)
+agents/scope-exploit.md     Red team operator — context-driven escalation playbooks with research integration (slash command)
 agents/scope-hunt.md        SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (slash command)
 ```
 
@@ -81,13 +81,13 @@ SCOPE uses lifecycle hooks to enforce safety and quality constraints at the tool
 | Command | Description |
 |---------|-------------|
 | `/scope:audit <target>` | Enumerate AWS resources — accepts ARN, service name, `--all`, `@targets.csv`, or multiple services inline. Orchestrates parallel subagent dispatch (2+ services) or inline execution (single service). Auto-chains defend after audit completes. |
-| `/scope:exploit <arn> [--fresh]` | Privilege escalation playbooks, persistence analysis, and exfiltration mapping for a specific principal |
+| `/scope:exploit <arn> [--audit <run-dir>]` | Red team escalation playbooks — standalone context-driven probing or audit-data-driven analysis with real-world research integration |
 | `/scope:hunt [input]` | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing. Three entry points: alert/notable ID (investigation mode), audit/exploit run directory (hunt mode), or threat intel URL / natural language description (intel mode). |
 | `/scope:help` | List available commands, show usage examples |
 
 ## Data Layer
 
-A single middleware agent runs automatically after audit, exploit, and defend:
+A single middleware agent runs automatically after audit and defend:
 - **scope-pipeline** (`agents/subagents/scope-pipeline.md`) — Phase 1 normalizes raw artifacts to `./data/<phase>/<run-id>.json`, then Phase 2 validates `agent-log.jsonl` into envelopes at `./agent-logs/<phase>/<run-id>.json`
 
 Invoked by the source agent after writing artifacts — sequential and non-blocking. Hunt does not run this pipeline.
@@ -139,7 +139,8 @@ All other agents share data through the agent-logs/data layer.
 |------|---------|
 | `config/accounts.json` | Owned AWS account IDs — distinguishes internal vs external cross-account trusts |
 | `config/scps/*.json` | Pre-loaded SCPs when caller lacks Organizations API access |
-| `config/cloudtrail-classes.json` | CloudTrail event classification — used by exploit for stealth-ordered playbooks |
+| `config/cloudtrail-classes.json` | CloudTrail event classification — used by exploit for visibility tagging |
+| `config/techniques.json` | Consolidated technique seed knowledge — escalation, persistence, post-exploitation vectors |
 
 All config files are optional. `accounts.json` and `scps/*.json` are gitignored. `cloudtrail-classes.json` is committed.
 
