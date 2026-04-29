@@ -175,17 +175,25 @@ Wait for operator response. Natural language is fine — "yes", "go", "proceed",
 <parallel_enumeration_dispatch>
 ## Parallel Enumeration Dispatch
 
-After Gate 2 approval, run all approved SDK enum scripts as parallel Bash background processes in a single Bash call.
+After Gate 2 approval, run all approved SDK enum scripts as parallel Bash background processes in a single Bash call. Use `bash` (not `sh` or `zsh`) for the dispatch script — some features require bash.
 
 ### Dispatch pattern
 
-Each service runs as: `node scripts/enum/{service}.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" [--region "$REGIONS_ARG"] >"$RUN_DIR/{service}.log" 2>&1 &`
+Set variables first, then dispatch each script:
+```
+RUN_DIR="$(pwd)/audit/audit-YYYYMMDD-HHMMSS-target"
+ACCOUNT_ID="123456789012"
+REGIONS_ARG="us-east-1,us-west-2,eu-west-1"
+```
 
-- **Global services** (iam, sts): pass `--account-id` only, no `--region`
-- **S3**: pass both `--account-id` and `--region` (global but region-aware)
-- **Regional services** (all others): pass `--region "$REGIONS_ARG"`, scripts iterate internally
+Each service runs as: `node scripts/enum/{service}.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --region "$REGIONS_ARG" >"$RUN_DIR/{service}.log" 2>&1 &`
 
-Track PIDs in an associative array (`SCRIPT_PIDS[$!]="service"`), then `wait` on all. For selective dispatch (not `--all`), loop over `APPROVED_SERVICES` with a `case` statement.
+- **Global services** (iam, sts): omit `--region` entirely — `node scripts/enum/iam.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID"`
+- **Regional services** (all others including S3): pass `--region "$REGIONS_ARG"` — the comma-separated string is passed as a single quoted argument, scripts split internally
+
+**Important:** Always double-quote `"$REGIONS_ARG"` to prevent shell word-splitting on commas. Do NOT use bash arrays, `declare -A`, or parameter expansion (`${VAR//,/ }`) — use simple quoted strings only.
+
+Track PIDs and their service names in parallel arrays (`PIDS+=($!)` and `NAMES+=("service")`), then `wait` on each PID and check exit codes. Do NOT use `declare -A` (associative arrays require bash 4+ and fail in zsh). Standard indexed arrays work everywhere. For selective dispatch (not `--all`), loop over `APPROVED_SERVICES` with a `case` statement.
 
 ### Rules
 
