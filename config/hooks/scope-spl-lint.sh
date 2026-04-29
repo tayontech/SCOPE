@@ -65,7 +65,7 @@ ALLOWED=$(jq -r '.groups | to_entries[] | .value.indexes[]' "$INDEX_JSON" 2>/dev
 
 if [ -n "$ALLOWED" ]; then
   # Extract index= clause values from the written file (skip * which is handled by Rule 6)
-  USED=$(grep -oP 'index="?\K[a-zA-Z0-9_*-]+' "$FILE_PATH" 2>/dev/null | sort -u || true)
+  USED=$(grep -oE 'index="?[a-zA-Z0-9_*-]+' "$FILE_PATH" 2>/dev/null | sed 's/^index="*//' | sort -u || true)
 
   for idx in $USED; do
     # Skip wildcard index=* — handled separately by Rule 6
