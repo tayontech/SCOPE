@@ -3,6 +3,7 @@
 module.exports = {
   ...require('./retry'),
   ...require('./envelope'),
-  ...require('./regions'),
   ...require('./logger'),
+  ...require('./policy-parser'),
+  ...require('./base-enum'),
 };

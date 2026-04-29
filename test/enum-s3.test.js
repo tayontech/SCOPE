@@ -34,20 +34,17 @@ async function runTests() {
 
   try {
     const mockS3 = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({ GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { s3: mockS3, sts: mockSts },
+      accountId: '123456789012',
+      clients: { s3: mockS3 },
     });
 
-    const outFile = path.join(tmpDir, 's3.json');
-    const actual = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
-    delete actual.timestamp;
-
     try {
-      assert.deepStrictEqual(actual, expected);
+      assert.strictEqual(result.status, expected.status);
+      assert.deepStrictEqual(result.findings, expected.findings);
       console.log('  PASS: s3 enum output matches expected');
       passed++;
     } catch (err) {

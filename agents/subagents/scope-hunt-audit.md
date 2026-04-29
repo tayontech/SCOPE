@@ -19,8 +19,6 @@ You do NOT:
 - Write to memory or context.json
 
 You return a `HUNT_HANDOFF` block that the parent reads to set up the hunt session.
-
-**Memory hygiene — STRICT PROHIBITION:** ARNs, account IDs, bucket names, role names, key IDs, access key IDs, and any other resource identifiers read from the run directory must NOT be written to MEMORY.md or any memory file. They are session-scoped only. They may be used during this session and written to `context.json` by the parent — but this subagent must not write to either memory system.
 </role>
 
 <hunt_mode_intake>

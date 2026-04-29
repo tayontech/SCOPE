@@ -8,64 +8,12 @@ const {
   ListGrantsCommand,
   GetKeyRotationStatusCommand,
 } = require('@aws-sdk/client-kms');
-const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
 
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
-
-// --- CLI ---
-
-function parseArgs(argv) {
-  const args = { runDir: null, region: null, regions: null };
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    } else if (argv[i] === '--region' && argv[i + 1]) {
-      args.region = argv[++i];
-    } else if (argv[i] === '--regions' && argv[i + 1]) {
-      args.regions = argv[++i];
-    } else if (argv[i] === '--help' || argv[i] === '-h') {
-      console.log('Usage: node scripts/enum/kms.js --run-dir <dir> --region <region>');
-      console.log('       node scripts/enum/kms.js --run-dir <dir> --regions <r1,r2,...>');
-      console.log('');
-      console.log('Options:');
-      console.log('  --run-dir  Path to the run output directory (required)');
-      console.log('  --region   AWS region to enumerate (required, or use --regions)');
-      console.log('  --regions  Comma-separated list of regions to enumerate');
-      console.log('  --help     Show this help message');
-      process.exit(0);
-    }
-  }
-  return args;
-}
+const { withRetry, paginate, createLogger } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
+const { extractPolicyPrincipals } = require('../lib/policy-parser');
 
 // --- Helpers ---
-
-function parsePolicyPrincipals(policyJson) {
-  if (!policyJson) return [];
-  try {
-    const doc = JSON.parse(policyJson);
-    const statements = Array.isArray(doc.Statement) ? doc.Statement : [];
-    const principals = [];
-    for (const stmt of statements) {
-      if (stmt.Effect !== 'Allow') continue;
-      const p = stmt.Principal;
-      if (!p) continue;
-      if (typeof p === 'string') {
-        principals.push(p);
-      } else if (typeof p === 'object') {
-        for (const key of ['AWS', 'Service', 'Federated']) {
-          const val = p[key];
-          if (!val) continue;
-          if (typeof val === 'string') principals.push(val);
-          else if (Array.isArray(val)) principals.push(...val);
-        }
-      }
-    }
-    return [...new Set(principals)];
-  } catch {
-    return [];
-  }
-}
 
 function generateFindings(key) {
   const findings = [];
@@ -112,23 +60,12 @@ function generateFindings(key) {
 async function run(opts = {}) {
   const runDir = opts.runDir;
   const region = opts.region;
+  const accountId = opts.accountId;
 
   const client = opts.clients?.kms ?? new KMSClient({ region });
-  const stsClient = opts.clients?.sts ?? new STSClient({});
 
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'kms');
   logger.log('info', 'KMS_Enumeration_Start', { region });
-
-  // Get account ID
-  let accountId;
-  try {
-    const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
-    accountId = identity.Account;
-  } catch (err) {
-    logger.log('error', 'GetCallerIdentity', { error: err.message });
-    await logger.flush();
-    throw new Error(`GetCallerIdentity failed: ${err.message}`);
-  }
 
   const findings = [];
   let status = 'complete';
@@ -141,14 +78,6 @@ async function run(opts = {}) {
     allKeys = await paginate(client, ListKeysCommand, 'Keys', {});
   } catch (err) {
     logger.log('error', 'ListKeys', { error: err.message });
-    const envelope = createEnvelope({
-      module: 'kms',
-      account_id: accountId,
-      region,
-      status: 'error',
-      findings: [],
-    });
-    writeEnvelope(runDir, envelope);
     await logger.flush();
     throw new Error(`ListKeys failed: ${err.message}`);
   }
@@ -194,7 +123,7 @@ async function run(opts = {}) {
       const policyResp = await withRetry(() =>
         client.send(new GetKeyPolicyCommand({ KeyId: keyId, PolicyName: 'default' }))
       );
-      keyFinding.policy_principals = parsePolicyPrincipals(policyResp.Policy);
+      keyFinding.policy_principals = extractPolicyPrincipals(policyResp.Policy);
     } catch (err) {
       errors.push({ resource: keyId, error: `GetKeyPolicy: ${err.message}` });
       logger.log('warning', 'GetKeyPolicy', { key_id: keyId, error: err.message });
@@ -241,66 +170,12 @@ async function run(opts = {}) {
 
   if (errors.length > 0) status = 'partial';
 
-  if (opts.returnOnly) {
-    await logger.flush();
-    return findings;
-  }
-
-  const envelope = createEnvelope({
-    module: 'kms',
-    account_id: accountId,
-    region,
-    status,
-    findings,
-  });
-
-  const outPath = writeEnvelope(runDir, envelope);
-  logger.log('info', 'KMS_Enumeration_Complete', {
-    status,
-    customer_keys: findings.length,
-    total_keys: allKeys.length,
-    errors: errors.length,
-    output: outPath,
-  });
-
   await logger.flush();
-  console.log(`KMS enumeration complete: ${outPath} (${findings.length} customer-managed keys, status: ${status})`);
-}
-
-// --- Main (CLI entry point) ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir || (!args.region && !args.regions)) {
-    console.error('Error: --run-dir and --region (or --regions) are required');
-    console.error('Usage: node scripts/enum/kms.js --run-dir <dir> --region <region>');
-    console.error('       node scripts/enum/kms.js --run-dir <dir> --regions <r1,r2,...>');
-    process.exit(1);
-  }
-
-  const regionList = args.regions ? args.regions.split(',') : [args.region];
-
-  try {
-    if (regionList.length === 1) {
-      await run({ runDir: args.runDir, region: regionList[0].trim() });
-    } else {
-      const allFindings = [];
-      for (const region of regionList) {
-        const findings = await run({ runDir: args.runDir, region: region.trim(), returnOnly: true });
-        allFindings.push(...findings);
-      }
-      const envelope = createEnvelope({ module: 'kms', account_id: null, region: 'multi', status: 'complete', findings: allFindings });
-      writeEnvelope(args.runDir, envelope);
-    }
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main();
+  baseEnum({ module: 'kms', run });
 }
 
 module.exports = { run };

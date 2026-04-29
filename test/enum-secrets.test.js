@@ -34,20 +34,17 @@ async function runTests() {
 
   try {
     const mockSecrets = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({ GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { secrets: mockSecrets, sts: mockSts },
+      accountId: '123456789012',
+      clients: { secrets: mockSecrets },
     });
 
-    const outFile = path.join(tmpDir, 'secrets.json');
-    const actual = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
-    delete actual.timestamp;
-
     try {
-      assert.deepStrictEqual(actual, expected);
+      assert.strictEqual(result.status, expected.status);
+      assert.deepStrictEqual(result.findings, expected.findings);
       console.log('  PASS: secrets enum output matches expected');
       passed++;
     } catch (err) {

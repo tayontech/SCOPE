@@ -5,64 +5,12 @@ const {
   ListSecretsCommand,
   GetResourcePolicyCommand,
 } = require('@aws-sdk/client-secrets-manager');
-const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
 
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
-
-// --- CLI ---
-
-function parseArgs(argv) {
-  const args = { runDir: null, region: null, regions: null };
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    } else if (argv[i] === '--region' && argv[i + 1]) {
-      args.region = argv[++i];
-    } else if (argv[i] === '--regions' && argv[i + 1]) {
-      args.regions = argv[++i];
-    } else if (argv[i] === '--help' || argv[i] === '-h') {
-      console.log('Usage: node scripts/enum/secrets.js --run-dir <dir> --region <region>');
-      console.log('       node scripts/enum/secrets.js --run-dir <dir> --regions <r1,r2,...>');
-      console.log('');
-      console.log('Options:');
-      console.log('  --run-dir  Path to the run output directory (required)');
-      console.log('  --region   AWS region to enumerate (required, or use --regions)');
-      console.log('  --regions  Comma-separated list of regions to enumerate');
-      console.log('  --help     Show this help message');
-      process.exit(0);
-    }
-  }
-  return args;
-}
+const { withRetry, paginate, createLogger } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
+const { extractPolicyPrincipals } = require('../lib/policy-parser');
 
 // --- Helpers ---
-
-function parsePolicyPrincipals(policyJson) {
-  if (!policyJson) return [];
-  try {
-    const doc = JSON.parse(policyJson);
-    const statements = Array.isArray(doc.Statement) ? doc.Statement : [];
-    const principals = [];
-    for (const stmt of statements) {
-      if (stmt.Effect !== 'Allow') continue;
-      const p = stmt.Principal;
-      if (!p) continue;
-      if (typeof p === 'string') {
-        principals.push(p);
-      } else if (typeof p === 'object') {
-        for (const key of ['AWS', 'Service', 'Federated']) {
-          const val = p[key];
-          if (!val) continue;
-          if (typeof val === 'string') principals.push(val);
-          else if (Array.isArray(val)) principals.push(...val);
-        }
-      }
-    }
-    return [...new Set(principals)];
-  } catch {
-    return [];
-  }
-}
 
 function generateFindings(secret) {
   const findings = [];
@@ -105,23 +53,12 @@ function generateFindings(secret) {
 async function run(opts = {}) {
   const runDir = opts.runDir;
   const region = opts.region;
+  const accountId = opts.accountId;
 
   const client = opts.clients?.secrets ?? new SecretsManagerClient({ region });
-  const stsClient = opts.clients?.sts ?? new STSClient({});
 
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'secrets');
   logger.log('info', 'Secrets_Enumeration_Start', { region });
-
-  // Get account ID
-  let accountId;
-  try {
-    const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
-    accountId = identity.Account;
-  } catch (err) {
-    logger.log('error', 'GetCallerIdentity', { error: err.message });
-    await logger.flush();
-    throw new Error(`GetCallerIdentity failed: ${err.message}`);
-  }
 
   const findings = [];
   let status = 'complete';
@@ -134,14 +71,6 @@ async function run(opts = {}) {
     allSecrets = await paginate(client, ListSecretsCommand, 'SecretList', {});
   } catch (err) {
     logger.log('error', 'ListSecrets', { error: err.message });
-    const envelope = createEnvelope({
-      module: 'secrets',
-      account_id: accountId,
-      region,
-      status: 'error',
-      findings: [],
-    });
-    writeEnvelope(runDir, envelope);
     await logger.flush();
     throw new Error(`ListSecrets failed: ${err.message}`);
   }
@@ -171,7 +100,7 @@ async function run(opts = {}) {
         client.send(new GetResourcePolicyCommand({ SecretId: secretArn }))
       );
       if (policyResp.ResourcePolicy) {
-        secretFinding.resource_policy_principals = parsePolicyPrincipals(policyResp.ResourcePolicy);
+        secretFinding.resource_policy_principals = extractPolicyPrincipals(policyResp.ResourcePolicy);
       }
     } catch (err) {
       const code = err.name || err.Code || '';
@@ -190,65 +119,12 @@ async function run(opts = {}) {
 
   if (errors.length > 0) status = 'partial';
 
-  if (opts.returnOnly) {
-    await logger.flush();
-    return findings;
-  }
-
-  const envelope = createEnvelope({
-    module: 'secrets',
-    account_id: accountId,
-    region,
-    status,
-    findings,
-  });
-
-  const outPath = writeEnvelope(runDir, envelope);
-  logger.log('info', 'Secrets_Enumeration_Complete', {
-    status,
-    secrets: findings.length,
-    errors: errors.length,
-    output: outPath,
-  });
-
   await logger.flush();
-  console.log(`Secrets enumeration complete: ${outPath} (${findings.length} secrets, status: ${status})`);
-}
-
-// --- Main (CLI entry point) ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir || (!args.region && !args.regions)) {
-    console.error('Error: --run-dir and --region (or --regions) are required');
-    console.error('Usage: node scripts/enum/secrets.js --run-dir <dir> --region <region>');
-    console.error('       node scripts/enum/secrets.js --run-dir <dir> --regions <r1,r2,...>');
-    process.exit(1);
-  }
-
-  const regionList = args.regions ? args.regions.split(',') : [args.region];
-
-  try {
-    if (regionList.length === 1) {
-      await run({ runDir: args.runDir, region: regionList[0].trim() });
-    } else {
-      const allFindings = [];
-      for (const region of regionList) {
-        const findings = await run({ runDir: args.runDir, region: region.trim(), returnOnly: true });
-        allFindings.push(...findings);
-      }
-      const envelope = createEnvelope({ module: 'secrets', account_id: null, region: 'multi', status: 'complete', findings: allFindings });
-      writeEnvelope(args.runDir, envelope);
-    }
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main();
+  baseEnum({ module: 'secrets', run });
 }
 
 module.exports = { run };

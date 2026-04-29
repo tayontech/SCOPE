@@ -9,27 +9,8 @@ const {
   ListTargetsForPolicyCommand,
 } = require('@aws-sdk/client-organizations');
 
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
-
-// --- Argument parsing ---
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    }
-  }
-  return args;
-}
-
-function usage() {
-  console.error('Usage: node scripts/enum/sts.js --run-dir <directory>');
-  console.error('');
-  console.error('Options:');
-  console.error('  --run-dir  Path to the run output directory (required)');
-  process.exit(1);
-}
+const { withRetry, paginate, createLogger } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
 
 // --- Principal type detection ---
 
@@ -50,7 +31,7 @@ async function run(opts = {}) {
   const stsClient = opts.clients && opts.clients.sts ? opts.clients.sts : new STSClient({});
   const orgsClient = opts.clients && opts.clients.organizations ? opts.clients.organizations : new OrganizationsClient({});
 
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'sts');
   const findings = [];
   let status = 'complete';
 
@@ -180,42 +161,13 @@ async function run(opts = {}) {
     }
   }
 
-  // --- Step 4: Build envelope and write ---
-  const envelope = createEnvelope({
-    module: 'sts',
-    account_id: accountId,
-    region: 'global',
-    status,
-    findings,
-  });
-
-  const outPath = writeEnvelope(runDir, envelope);
-  logger.log('info', 'Envelope written', { path: outPath, findings_count: findings.length, status });
+  logger.log('info', 'STS_Enumeration_Complete', { findings_count: findings.length, status });
   await logger.flush();
 
-  console.log(`STS enumeration complete: ${outPath} (${findings.length} findings, status: ${status})`);
-}
-
-// --- Main (CLI entrypoint) ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir) {
-    usage();
-  }
-  try {
-    await run({ runDir: args.runDir });
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main().catch((err) => {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  });
+  baseEnum({ module: 'sts', run, global: true });
 }
 module.exports = { run };

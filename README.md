@@ -19,15 +19,15 @@ SCOPE runs as a set of AI agents inside [Claude Code](https://docs.anthropic.com
 /scope:audit --all
 ```
 
-The orchestrator dispatches parallel enumeration agents across AWS services, feeds findings into an attack path reasoning engine, auto-chains defensive control generation, and renders everything into an interactive dashboard. No manual handoffs.
+The orchestrator dispatches parallel SDK enum scripts across 16 AWS services, feeds findings into an attack path reasoning engine, auto-chains defensive control generation, and renders everything into an interactive dashboard. No manual handoffs.
 
 | Phase | What Happens |
 |-------|-------------|
-| **Audit** | 12 parallel agents enumerate IAM, S3, Lambda, EC2, KMS, Secrets Manager, STS, RDS, API Gateway, SNS, SQS, CodeBuild |
+| **Audit** | 16 SDK scripts enumerate IAM, STS, S3, KMS, Secrets Manager, Lambda, EC2, RDS, API Gateway, SNS, SQS, CodeBuild, Bedrock, Cognito, DynamoDB, SSM |
 | **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
 | **Defend** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
 | **Exploit** | Produces stealth-ordered playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
-| **Hunt** | Guides SOC analysts through CloudTrail-based alert triage in Splunk |
+| **Hunt** | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing — three modes: investigation, hunt (from audit data), and intel (from URLs/descriptions) |
 
 ## Quick Start
 
@@ -64,10 +64,12 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 
 ```
 agents/               Core agents: audit orchestrator, defend, exploit, hunt
-agents/subagents/     12 enumeration agents, attack path reasoning, verification, data pipeline
+agents/subagents/     Attack path reasoning, defend subagents, hunt intake, research, synthesizer, verification, data pipeline
+scripts/enum/         16 SDK enum scripts (Node.js) — deterministic AWS enumeration
+scripts/lib/          Shared utilities: base-enum, policy-parser, retry, envelope, logger
 dashboard/            React + D3 interactive dashboard (self-contained HTML output)
 config/               Runtime reference data, lifecycle hooks, schemas, settings templates
-bin/                  Tooling: installer, report generator
+bin/                  Tooling: installer, report generator, graph extractor
 ```
 
 ### Exploit Intelligence
@@ -122,14 +124,17 @@ SCOPE has two types of agents:
 
 **Skills** — run in your session, inherit your model:
 - `scope-audit` — orchestrator, dispatches subagents
+- `scope-defend` — defensive controls orchestrator, dispatches 5 subagents
 - `scope-exploit` — standalone red team playbook generator
 - `scope-hunt` — standalone SOC investigation assistant
 
 **Subagents** — dispatched with their own pinned model:
-- 12 enum agents — lightweight enumeration
+- 16 SDK enum scripts — deterministic Node.js (no AI model)
 - `scope-attack-paths` — security reasoning over combined findings
-- `scope-defend` — defensive controls generation
+- `scope-defend-guardrails`, `scope-defend-splunk`, `scope-defend-policy`, `scope-defend-remediation`, `scope-defend-validate` — defend subagents
 - `scope-hunt-investigate`, `scope-hunt-intel`, `scope-hunt-audit` — hunt mode intake and hypothesis generation
+- `scope-research` — real-world technique research integration
+- `scope-synthesizer` — engagement synthesis and narrative generation
 
 When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
@@ -139,16 +144,15 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
-| Enum subagents (12) | claude-haiku-4-5 | gemini-3.1-flash-lite-preview | gpt-5.4-mini |
-| Reasoning (attack-paths, defend, hunt intake) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack-paths, defend + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
-Skills (audit, exploit) are not in this table — they inherit your session model. Hunt dispatches reasoning-tier subagents for intake, then runs on the session model for Splunk execution.
+Enum scripts (`scripts/enum/*.js`) are deterministic Node.js — no AI model. Skills (audit, exploit, hunt) inherit your session model.
 
 ## Documentation
 
 | | |
 |---|---|
-| [CLAUDE.md](https://github.com/tayontech/SCOPE/blob/main/CLAUDE.md) | Full technical reference: agents, hooks, data layer, error handling |
+| [PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/PROJECT.md) | Behavioral guidance: reasoning philosophy, operator pace, environmental learning |
 | [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
 | [Hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hook reference |
 | [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, defend, exploit output |

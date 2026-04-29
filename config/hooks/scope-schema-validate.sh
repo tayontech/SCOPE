@@ -191,10 +191,10 @@ case "$SOURCE" in
     check_field "principals" "array of IAM principals"
     check_field "trust_relationships" "array of trust relationships"
 
-    # summary.risk_score is required
+    # summary.severity is required
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      if [ "$(jq '.summary | has("risk_score")' "$FILE_PATH")" != "true" ]; then
-        ERRORS+=("Missing required field: 'summary.risk_score' (critical|high|medium|low)")
+      if [ "$(jq '.summary | has("severity")' "$FILE_PATH")" != "true" ]; then
+        ERRORS+=("Missing required field: 'summary.severity' (critical|high|medium|low)")
       fi
     fi
 
@@ -256,7 +256,7 @@ case "$SOURCE" in
 
     # summary required subfields
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      for subfield in guardrails detections policy_replacements remediation_items validation_status risk_score; do
+      for subfield in guardrails detections policy_replacements remediation_items validation_status severity; do
         if [ "$(jq ".summary | has(\"$subfield\")" "$FILE_PATH")" != "true" ]; then
           ERRORS+=("Missing required field: 'summary.$subfield'")
         fi
@@ -341,6 +341,13 @@ case "$SOURCE" in
 
     # paths items must have name, steps
     check_array_item_fields "paths" "name,steps" "path entries"
+
+    # summary.severity is required
+    if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
+      if [ "$(jq '.summary | has("severity")' "$FILE_PATH")" != "true" ]; then
+        ERRORS+=("Missing required field: 'summary.severity' (critical|high|medium|low)")
+      fi
+    fi
     ;;
 
   *)

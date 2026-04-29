@@ -33,7 +33,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Execution modes:** CONNECTED (Splunk MCP available — execute directly) | MANUAL (no MCP — display SPL, wait for analyst to paste results).
 
-**Session isolation:** Every invocation is a fresh session. Never reference prior hunt investigations. **Exceptions:** (1) Load `./hunt/context.json` at startup. (2) In hunt mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided. 
+**Hunt-specific session exceptions:** (1) Load `./hunt/context.json` at startup (operator-curated baseline). (2) In hunt mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided.
 
 **Subagent dispatch note:** MCP detection runs before dispatching `scope-hunt-investigate` (INVESTIGATION mode) because Mode D requires Splunk access. For INTEL and HUNT modes, subagents are dispatched before MCP detection — those subagents do not use Splunk.
 
@@ -112,76 +112,11 @@ Append after save:
 <environment_context>
 ## Environment Context — Persistent Knowledge Across Investigations
 
-**Path:** `./hunt/context.json`
-**Read:** At the start of every investigation, before prompting the analyst for alert details.
-**Written:** After each completed investigation, regardless of whether artifacts are saved, Manually by the operator or by a future learning pipeline milestone. Currently read-only at startup.
+**Read** `./hunt/context.json` at the start of every investigation (before prompting for alert details). This file is read-only — the operator manages it manually.
 
-### First-Run Behavior
+**First-run:** If missing, proceed without baseline. No error, no warning — empty knowledge base.
 
-If `./hunt/context.json` does not exist, the agent operates normally with empty context. All reasoning falls back to reference patterns. No error, no warning — just an empty knowledge base.
-
-### Schema
-
-```json
-{
-  "version": "1.0.0",
-  "updated": "<ISO8601>",
-  "investigation_count": 0,
-  "network": {
-    "known_cidrs": [
-      {"cidr": "", "label": "", "first_seen": "", "last_seen": "", "seen_in_investigations": []}
-    ],
-    "known_vpn_ranges": [
-      {"cidr": "", "label": "", "first_seen": "", "last_seen": "", "seen_in_investigations": []}
-    ],
-    "known_external_ips": [
-      {"ip": "", "label": "", "classification": "", "notes": ""}
-    ]
-  },
-  "principals": {
-    "known_service_accounts": [
-      {"arn": "", "label": "", "normal_actions": [], "normal_source_ips": [], "normal_hours_utc": {}}
-    ],
-    "user_baselines": [
-      {"identity": "", "arn": "", "typical_source_ips": [], "typical_actions": [], "typical_hours_utc": {}, "typical_regions": []}
-    ]
-  },
-  "accounts": {
-    "known_accounts": [
-      {"account_id": "", "label": "", "normal_regions": [], "normal_services": []}
-    ],
-    "cross_account_trusts": [
-      {"source_account": "", "target_account": "", "role_arn": "", "label": ""}
-    ]
-  },
-  "alert_patterns": {
-    "by_alert_type": [
-      {
-        "alert_type": "",
-        "total_investigations": 0,
-        "false_positive_count": 0,
-        "true_positive_count": 0,
-        "false_positive_rate": 0.0,
-        "common_false_positive_patterns": [],
-        "effective_investigation_approaches": []
-      }
-    ]
-  },
-  "iocs": {
-    "ips": [{"ip": "", "classification": "", "source_investigation": "", "notes": ""}],
-    "user_agents": [{"user_agent": "", "classification": "", "source_investigation": "", "notes": ""}],
-    "arns": [{"arn": "", "classification": "", "source_investigation": "", "notes": ""}]
-  }
-}
-```
-
-### Context.json is Read-Only
-
-This agent reads context.json at startup but does not write to it. The operator manages context.json manually. A future learning pipeline milestone will add analyst-reviewed automated updates.
-
-### Context Display at Startup
-
-After loading context.json, display a brief summary before prompting for the alert:
+**At startup, display context summary:**
 
 ```
 ENVIRONMENT CONTEXT LOADED
@@ -193,118 +128,40 @@ ENVIRONMENT CONTEXT LOADED
   Last updated:           [updated timestamp]
 ```
 
-If context.json does not exist or is empty:
+If missing or empty: `ENVIRONMENT CONTEXT: None (first investigation — context will build over time)`
 
-```
-ENVIRONMENT CONTEXT: None (first investigation — context will build over time)
-```
+Context contains: network baselines (CIDRs, VPNs, external IPs), principal baselines (service accounts, user behavior), account info, alert FP/TP patterns, and known IOCs (IPs, user agents, ARNs). The reasoning framework references these entries by label/value when selecting investigation steps.
 </environment_context>
 
 <entry_point_detection>
 ## Entry Point Detection — Mode Classification and Subagent Dispatch
 
-At startup, classify the operator's invocation input to determine execution mode, then dispatch the appropriate subagent.
+Classify input after `/scope:hunt` to determine mode, then dispatch the appropriate subagent.
 
-### Detection Algorithm
+### Mode Decision Table
 
-Capture the full input provided after `/scope:hunt`. Apply these rules in order:
+| Input | Mode | Subagent | MCP timing |
+|-------|------|----------|------------|
+| Path to audit/exploit run dir (starts with `./`, `/`, `~/`, `audit/`, `exploit/`, `data/` — verify dir exists) | HUNT | `scope-hunt-audit` | After dispatch |
+| URL (`http://` or `https://`) | INTEL | `scope-hunt-intel` | After dispatch |
+| Threat actor name (`APT\d+`, `FIN\d+`, `UNC\d+`, known groups), MITRE ID (`T\d{4}`), advisory keywords (`threat report`, `IOC`, `TTP`, `campaign`), or IOC+context (IP/hash with attack-related words) | INTEL | `scope-hunt-intel` | After dispatch |
+| Empty input, `notable_id=*`, or anything else | INVESTIGATION | `scope-hunt-investigate` | Before dispatch |
 
-**1. Empty input → detection investigation mode**
-If no argument was provided, set MODE=INVESTIGATION.
+Announce mode before continuing (e.g., `Hunt mode — reading run directory: $HUNT_RUN_DIR`).
 
-**2. Splunk notable ID → detection investigation mode**
-If input matches `notable_id=*`, set MODE=INVESTIGATION.
+### Dispatch Protocol
 
-**3. Path-like input → test directory**
-If input starts with `./`, `/`, `~/`, `audit/`, `exploit/`, or `data/`:
-```bash
-INPUT="<operator-provided-path>"
-test -d "$INPUT" && echo "EXISTS" || echo "NOT_FOUND"
-```
-- If directory exists: set MODE=HUNT, store as `HUNT_RUN_DIR="$INPUT"`
-- If directory does not exist: display error and halt:
-  ```
-  Error: Directory not found: $INPUT
-  Provide a valid audit or exploit run directory path, or invoke without a path to start a detection investigation.
-  ```
+**INTEL:** Pass `INTEL_SOURCE_URL` or `INTEL_NL_INPUT` + `INTEL_TYPE`. Receive `INTEL_HANDOFF` with `selected_hypothesis`, `all_hypotheses`, `investigation_mode`. If `investigation_mode=all`, iterate all hypotheses; else proceed with selected.
 
-**3b. URL input → threat intel mode**
-If input starts with `http://` or `https://`:
-- Set MODE=INTEL, INTEL_TYPE=URL
-- Store as `INTEL_SOURCE_URL="<operator-provided-url>"`
+**HUNT:** Pass `HUNT_RUN_DIR`. Receive `HUNT_HANDOFF` with `selected_hypothesis`, `all_hypotheses`, `investigation_mode`. If `fallback_to_investigation: true`, switch to INVESTIGATION mode. If `investigation_mode=all`, iterate hypotheses sequentially. Else proceed with selected to `<hunt_technique_patterns>` + `<investigation_loop>`.
 
-**3c. Natural language threat intel → threat intel mode**
-If input does not match Rules 1–3b, apply heuristics in order. Any single match → set MODE=INTEL, INTEL_TYPE=NATURAL_LANGUAGE:
+**INVESTIGATION:** Run `<mcp_detection>` first. Pass raw input + `MCP_MODE` + `working_tool`. Receive `INVESTIGATE_HANDOFF` with `active_hypothesis` (single, auto-proceed). Skip `<hunt_technique_patterns>`, go to `<investigation_loop>`.
 
-1. Threat actor name pattern: `APT\d+`, `Lazarus`, `Cozy Bear`, `FIN\d+`, `UNC\d+`, `SCATTERED SPIDER`, `Midnight Blizzard`, or other known group names
-2. MITRE technique ID pattern: `T\d{4}(\.\d{3})?` (e.g., T1078, T1078.004)
-3. Advisory keywords: any of — `threat report`, `threat intel`, `advisory`, `IOC`, `TTP`, `campaign`, `threat group`, `attribution`, `threat actor`
-4. IOC with context: an IP address or hash-like string (32-char hex = MD5, 40-char = SHA1, 64-char = SHA256) appearing alongside words like `attack`, `malware`, `compromise`, `intrusion`, `exploit`
+**Dispatch:** Use the Agent tool with the appropriate subagent_type for the selected mode subagent.
 
-If none of the above match: do not route to INTEL mode. Fall through to Rule 5.
+**Fallback:** If dispatch fails, run intake inline by reading the subagent file (`agents/subagents/scope-hunt-investigate.md`, `scope-hunt-intel.md`, or `scope-hunt-audit.md`).
 
-**5. Anything else → detection investigation mode**
-Alert metadata, unrecognized input: set MODE=INVESTIGATION.
-
-### Mode Announcement
-
-State the selected mode before continuing:
-
-**Hunt mode:**
-```
-Hunt mode — reading run directory: $HUNT_RUN_DIR
-```
-
-**Detection investigation mode:**
-```
-Detection investigation mode — proceeding to alert intake.
-```
-
-**Threat intel mode (URL):**
-```
-Threat intel mode — URL: $INTEL_SOURCE_URL
-```
-
-**Threat intel mode (natural language):**
-```
-Threat intel mode — parsing natural language description
-```
-
-### Subagent Dispatch Protocol
-
-After mode is determined, dispatch the appropriate subagent. MCP detection order matters:
-
-**MODE=INTEL → dispatch `scope-hunt-intel` (before MCP detection — does not need Splunk)**
-- Inputs to subagent: `INTEL_SOURCE_URL` or `INTEL_NL_INPUT`, `INTEL_TYPE`
-- Receive: `INTEL_HANDOFF` containing `intel_parsed`, `investigation_context`, `selected_hypothesis`, `all_hypotheses`, `investigation_mode`
-- On return: if `investigation_mode=all`, iterate through `all_hypotheses`; else proceed with `selected_hypothesis` to `<hunt_technique_patterns>` + `<investigation_loop>`
-- On Claude Code: Use the Agent tool with subagent_type="scope-hunt-intel".
-- On Gemini CLI: Delegate to the scope-hunt-intel subagent (registered in .gemini/agents/).
-- On Codex: Spawn the scope-hunt-intel agent (registered in .codex/config.toml).
-
-**MODE=HUNT → dispatch `scope-hunt-audit` (before MCP detection — does not need Splunk)**
-- Inputs to subagent: `HUNT_RUN_DIR`
-- Receive: `HUNT_HANDOFF` containing `hunt_run_dir`, `hunt_run_type`, `run_summary`, `selected_hypothesis`, `all_hypotheses`, `investigation_mode`
-- On return: if `fallback_to_investigation: true`, set MODE=INVESTIGATION and proceed to MCP detection; else load technique catalogue per `<hunt_technique_patterns>`, then proceed to `<investigation_loop>` with `selected_hypothesis`. If `investigation_mode="all"`, iterate through `all_hypotheses` sequentially — complete the investigation loop for each, prompting the analyst before advancing to the next hypothesis.
-- On Claude Code: Use the Agent tool with subagent_type="scope-hunt-audit".
-- On Gemini CLI: Delegate to the scope-hunt-audit subagent (registered in .gemini/agents/).
-- On Codex: Spawn the scope-hunt-audit agent (registered in .codex/config.toml).
-
-**MODE=INVESTIGATION → MCP detection first, then dispatch `scope-hunt-investigate`**
-- Run `<mcp_detection>` to determine `MCP_MODE` and `working_tool`
-- Inputs to subagent: raw operator input, `MCP_MODE`, `working_tool` (if CONNECTED)
-- Receive: `INVESTIGATE_HANDOFF` containing `investigation_context`, `active_hypothesis`
-- On return: `active_hypothesis` is set (single hypothesis, auto-proceed) — go directly to `<hunt_technique_patterns>` (skipped for INVESTIGATION mode) + `<investigation_loop>`
-- On Claude Code: Use the Agent tool with subagent_type="scope-hunt-investigate".
-- On Gemini CLI: Delegate to the scope-hunt-investigate subagent (registered in .gemini/agents/).
-- On Codex: Spawn the scope-hunt-investigate agent (registered in .codex/config.toml).
-
-**Fallback:** If subagent dispatch fails for any reason, the parent falls back to running the intake inline. Use the Read tool to load the respective subagent file and follow its intake instructions:
-- INVESTIGATION: `agents/subagents/scope-hunt-investigate.md`
-- INTEL: `agents/subagents/scope-hunt-intel.md`
-- HUNT: `agents/subagents/scope-hunt-audit.md`
-
-**After subagent returns:** Read the handoff block to extract `investigation_context` and `active_hypothesis` (or `selected_hypothesis` for HUNT/INTEL modes). These populate the session state consumed by the investigation loop and output formatter.
+**After return:** Extract `investigation_context` and `active_hypothesis` (or `selected_hypothesis`) from the handoff.
 </entry_point_detection>
 
 <hypothesis_engine>
@@ -332,22 +189,9 @@ After receiving any mode handoff, confirm that `active_hypothesis` is populated.
 
 ### active_hypothesis Session State
 
-Store `active_hypothesis` in session memory after handoff receipt (or after inline fallback):
+Store `active_hypothesis` in session memory after handoff receipt (or after inline fallback). The dispatched subagent returns an `active_hypothesis` in its handoff — see subagent docs for structure (`scope-hunt-investigate.md`, `scope-hunt-audit.md`, `scope-hunt-intel.md`).
 
-```
-active_hypothesis:
-  name:              "[hypothesis name]"
-  source:            "detection | audit | exploit | threat_intel | intel_reasoning"
-  statement:         "[1-line statement]"
-  adversary_goal:    "[goal label — Persistence / Lateral movement / etc.]"
-  cloudtrail_focus:  [list of eventNames to prioritize]
-  observable_steps:  [list of step descriptions with eventName — exploit mode only]
-  affected_resources: [list of ARNs — audit mode only]
-  iocs:              {ips: [], arns: [], hashes: [], domains: []}  # intel mode only; omit for other modes
-  beyond_report:     true | false  # intel mode only; true for intel_reasoning, false for threat_intel
-```
-
-The `iocs.ips` and `iocs.arns` fields are used by the investigation loop to add `sourceIPAddress` and `userIdentity.arn` filters to Splunk queries.
+The `iocs.ips` and `iocs.arns` fields (intel mode only) are used by the investigation loop to add `sourceIPAddress` and `userIdentity.arn` filters to Splunk queries.
 </hypothesis_engine>
 
 <hunt_technique_patterns>
@@ -404,201 +248,35 @@ New patterns are added by appending entries to the relevant category array in `c
 <mcp_detection>
 ## MCP Detection — Splunk Connection Check
 
-At startup, before asking for alert input, probe for Splunk MCP availability. Do this automatically — no analyst action required.
+Probe for Splunk MCP at startup — no analyst action required. Announce: `Checking for Splunk MCP connection...`
 
-**MCP tools:** `search_splunk`, `search_oneshot`, `splunk_search`, and `splunk_run_query` are provided by the Splunk MCP server at runtime. They are listed in `allowed-tools` but are only available when a Splunk MCP server is connected. When no MCP server is running, the agent operates in MANUAL mode and these tools are unused.
+**Probe index:** Read `config/index.json` — use the first index from any group's `indexes[]` array as PROBE_INDEX. If missing, PROBE_INDEX="cloudtrail".
 
-### Detection Sequence
+**Probe sequence:** Try `search_splunk`, `search_oneshot`, `splunk_search`, `splunk_run_query` in order with `query="index={PROBE_INDEX} earliest=-1h | head 1"`. First success sets MCP_MODE=CONNECTED and stores `working_tool`. All fail → MCP_MODE=MANUAL.
 
-**Step 1:** Announce:
-```
-Checking for Splunk MCP connection...
-```
+**On CONNECTED:** Display `Splunk MCP connected via [working_tool]` (include `$SPLUNK_URL` if set). The `working_tool` is used for ALL queries this session — never switch mid-session.
 
-Read `config/index.json` if it exists.
-- If found: extract the first index from any group's `indexes[]` array — use this as PROBE_INDEX
-- If missing: set PROBE_INDEX="cloudtrail" (backward compat — D-21)
+**On MANUAL:** Display `Splunk MCP not available. I will generate SPL queries for you to run manually. Paste results back to continue.`
 
-**Step 2:** Attempt `search_splunk` with `query="index={PROBE_INDEX} earliest=-1h | head 1"`:
-- If succeeds: set MCP_MODE=CONNECTED, working_tool="search_splunk" — skip remaining attempts
-- If fails: continue to Step 3
+**Analyst override:** If analyst reports MCP is connected but probe failed, ask which tool name they use, attempt it, update accordingly.
 
-**Step 3:** Attempt `search_oneshot` with `query="index={PROBE_INDEX} earliest=-1h | head 1"`:
-- If succeeds: set MCP_MODE=CONNECTED, working_tool="search_oneshot" — skip remaining attempt
-- If fails: continue to Step 4
+**After MCP detection:**
+1. Load environment context (`./hunt/context.json`) — display summary or first-investigation message
+2. Dispatch `scope-hunt-investigate` with MCP_MODE, working_tool, and raw input
 
-**Step 4:** Attempt `splunk_search` with `query="index={PROBE_INDEX} earliest=-1h | head 1"`:
-- If succeeds: set MCP_MODE=CONNECTED, working_tool="splunk_search"
-- If fails: set MCP_MODE=MANUAL
-
-### Result Display
-
-**On CONNECTED:**
-
-Display the Splunk instance URL by reading `$SPLUNK_URL` from the environment:
-
-```bash
-echo "$SPLUNK_URL"
-```
-
-Then display:
-```
-Splunk MCP connected via [working_tool] -> [SPLUNK_URL value]. Queries execute automatically after your approval.
-```
-
-If `$SPLUNK_URL` is empty or unset, display without the URL:
-```
-Splunk MCP connected via [working_tool]. Queries execute automatically after your approval.
-```
-
-**On MANUAL:**
-```
-Splunk MCP not available. I will generate SPL queries for you to run manually. Paste results back to continue.
-See config/mcp-setup.md to enable live queries.
-```
-
-### critical: Store working_tool
-
-The `working_tool` name determined at startup is used for ALL subsequent query executions in this session. Never switch tool names mid-session, never attempt a different tool after startup detection completes.
-
-### Analyst Override
-
-If the analyst reports that Splunk MCP IS connected but the probe failed:
-- Ask: "Which Splunk MCP implementation are you using? (search_splunk / search_oneshot / splunk_search / other)"
-- Attempt that tool name directly with `query="index={PROBE_INDEX} earliest=-1h | head 1"`
-- If it succeeds: set MCP_MODE=CONNECTED, working_tool=[analyst-specified tool]
-- If it fails: remain in MANUAL mode and explain the connection issue
-
-### After MCP Detection
-
-**Step 1: Load environment context.**
-
-Read `./hunt/context.json`. If it exists and parses successfully, display the context summary (see `<environment_context>` section). If it does not exist, display the "first investigation" message.
-
-**Step 2: Dispatch scope-hunt-investigate.**
-
-Pass MCP_MODE, working_tool (if CONNECTED), and the operator's raw input to scope-hunt-investigate. After receiving the INVESTIGATE_HANDOFF, proceed to the investigation loop.
-
-**Hunt mode note:** If MODE=HUNT and MCP_MODE=MANUAL, Splunk is not required. Proceed with the findings loaded by the subagent — the agent can produce a hypothesis report from audit/exploit output alone. State this to the analyst:
-
-```
-
-    Splunk MCP not available. In hunt mode, I can produce a findings summary from the run directory without querying Splunk. To add Splunk validation, see config/mcp-setup.md.
-
-```
+**Hunt mode note:** If MODE=HUNT and MCP_MODE=MANUAL, the agent can produce a hypothesis report from run directory data alone without Splunk.
 </mcp_detection>
 
 <index_discovery>
 ## Index Discovery Protocol
 
-Use this protocol when `config/index.json` does not exist AND MCP_MODE=CONNECTED. Skip when `config/index.json` already exists and no refresh was requested (D-03).
+**Trigger:** `config/index.json` does not exist AND MCP_MODE=CONNECTED. Skip when `config/index.json` already exists and no refresh was requested.
 
-### When to Trigger
+If `config/index.json` does not exist and Splunk MCP is connected, discover available indexes: probe `get_indexes` (fall back to `| rest /services/data/indexes`), filter internal/ES indexes (prefixed with `_`, plus summary, notable, risk, ueba, cim_*, etc.), classify remaining indexes into type groups (aws_api, aws_network, identity, vcs, endpoint, network, cloud_platform), present proposed groupings to operator for confirmation, and write to `config/index.json` on approval. Unmatched indexes are listed for operator review — never discarded.
 
-- `config/index.json` does not exist AND Splunk MCP is CONNECTED → run full discovery
-- `config/index.json` exists AND operator requests a refresh → run merge flow (D-06)
-- `config/index.json` exists AND no refresh requested → skip entirely
+If operator requests a refresh when `config/index.json` already exists: re-run discovery, show only NEW indexes not already configured, merge on confirmation. Never remove existing entries.
 
-### Discovery Steps
-
-**Step 1: Get index list**
-
-Call the `get_indexes` MCP tool. If `get_indexes` is not available, fall back to:
-```spl
-| rest /services/data/indexes | table title, totalEventCount, currentDBSizeMB
-```
-
-**Step 2: Filter internal indexes**
-
-Remove all indexes that are Splunk-internal or Splunk ES internal. These are always valid for direct query but should NOT appear in `config/index.json`:
-
-```
-Internal index list (never add to config/index.json):
-  _internal, _audit, _introspection, _telemetry, _thefishbucket
-  summary, history, notable, notable_summary, risk
-  threat_activity, ioc, ers, ueba, ueba_summaries
-  cim_*, wineventlog (if Splunk-internal only), firewall_* (if vendor-internal)
-```
-
-Additionally filter any index prefixed with `_`.
-
-**Step 3: Reason about remaining indexes**
-
-For each index that survived filtering, reason about its name and classify into a type group:
-
-| Group key | Matches | Description |
-|-----------|---------|-------------|
-| `aws_api` | cloudtrail, aws*, awscloudtrail | AWS API call logs |
-| `aws_network` | vpc*, flowlogs*, aws_flow | AWS VPC flow / network logs |
-| `identity` | okta*, azure_ad*, aad*, idp*, sso* | Identity provider events |
-| `vcs` | github*, gitlab*, bitbucket* | Version control events |
-| `endpoint` | crowdstrike*, carbon_black*, cb*, edr*, endpoint* | Endpoint detection events |
-| `network` | palo*, cisco*, firewall*, proxy*, zscaler*, netflow* | Network/firewall logs |
-| `cloud_platform` | gcp*, azure*, o365*, office365* | Other cloud platform logs |
-
-Indexes that do not match any group are listed for operator review — do not discard them.
-
-**Step 4: Present proposed groupings to operator**
-
-Show a formatted table:
-
-```
-Index Discovery Results — {N} indexes found, {M} internal filtered
-
-Proposed groupings:
-
-| Group       | Indexes          | Confidence |
-|-------------|------------------|------------|
-| aws_api     | cloudtrail       | High       |
-| identity    | okta_logs        | High       |
-| vcs         | github_audit     | Medium     |
-| (unmatched) | custom_app_logs  | — review   |
-
-Write config/index.json with these groupings? (Y/N)
-If unmatched indexes should be added, specify which group each belongs to.
-```
-
-Wait for operator confirmation (Y/N). If Y, write the file. If operator specifies group reassignments, apply them before writing.
-
-**Step 5: Write config/index.json after confirmation**
-
-```json
-{
-  "version": "1.0",
-  "updated": "<ISO8601 timestamp>",
-  "discovery_method": "auto",
-  "groups": {
-    "aws_api": {
-      "description": "AWS API call logs",
-      "indexes": ["cloudtrail"],
-      "primary_fields": ["eventName", "eventSource", "userIdentity.arn", "userIdentity.userName", "sourceIPAddress"],
-      "time_field": "_time"
-    }
-  }
-}
-```
-
-`config/index.json` is gitignored — index names may reveal customer infrastructure.
-
-### Refresh Flow (D-06)
-
-When `config/index.json` already exists and operator requests a refresh:
-
-1. Read existing `config/index.json` — load current `groups`
-2. Run discovery Steps 1-3 above
-3. Compare discovered indexes against existing entries — identify NEW indexes only
-4. Present only the additions for operator confirmation:
-   ```
-   New indexes found since last discovery:
-
-   | Group    | New Index     | Confidence |
-   |----------|---------------|------------|
-   | identity | azure_ad_logs | Medium     |
-
-   Add these to config/index.json? (Y/N)
-   ```
-5. On confirmation: merge new indexes into existing group `indexes[]` arrays. Add new groups if needed. **Never remove existing entries.**
-
+If no MCP available, default to `index=cloudtrail`.
 </index_discovery>
 
 <investigation_loop>
@@ -679,28 +357,7 @@ Briefly note what was found and how it affects the investigation direction:
 - "No [expected event] found — this is inconsistent with [Y]. Let's check [Z]."
 - "Found [N] events. Key finding: [most significant result]."
 
-When `active_hypothesis` is set, add a hypothesis verdict line after the result note:
-- **Confirms hypothesis:** "This confirms [specific hypothesis step/signal] — [eventName] found at [time] from [actor]."
-- **Refutes hypothesis:** "This refutes [specific hypothesis step] — [eventName] is absent where we expected it. Consider: [alternative explanation]."
-- **Inconclusive:** "Inconclusive for the hypothesis — [eventName] is present but actor/time/resource does not match. Continuing investigation."
-
-When a hunt technique pattern is active (MODE=HUNT with catalogue loaded), add a HYPOTHESIS CHECK line citing the pattern field that drove the verdict:
-
-```
-HYPOTHESIS CHECK: result matches confirm_criteria ("[excerpt from pattern.confirm_criteria]")
-→ hypothesis_verdict: confirms
-```
-
-Or when refuting:
-
-```
-HYPOTHESIS CHECK: result matches refute_criteria ("[excerpt from pattern.refute_criteria]")
-→ hypothesis_verdict: refutes
-```
-
-If neither confirm nor refute criteria are met: `HYPOTHESIS CHECK: result matches neither confirm_criteria nor refute_criteria → hypothesis_verdict: inconclusive`
-
-Record the verdict in the `investigation_findings` accumulator for this step.
+When `active_hypothesis` is set, record verdict (confirms/refutes/inconclusive/not_tested) — see `<output_format>` Hypothesis Verdict section for verdict rules and display format. Record the verdict in the `investigation_findings` accumulator for this step.
 
 **7. Propose Next Step**
 "Next: [Step N+1 name] — [one-line reason why]"
@@ -972,6 +629,7 @@ If no context was loaded (first investigation), omit this section entirely.
 3. **Skipped steps noted in gaps** — if the analyst skipped a step, document it in the Investigation gaps section with the step name and what data was not collected.
 4. **Narrative covers only what was actually found** — do not speculate about steps that were not run. Do not fill in gaps with assumptions. If a query returned zero results, state that.
 5. **No risk/severity assessment language** — do not use categorizations like "critical", "high-risk", "concerning", or any grading system. Present the data and let the analyst interpret.
+6. **Self-contained output** — someone reading only the summary and event table should understand what happened without needing the step-by-step conversation history.
 
 ### Part 2 — Chronological Event Table
 
@@ -1000,92 +658,18 @@ Display Part 1 (narrative summary) first, then Part 2 (event table) immediately 
 <artifact_saving>
 ## Artifact Saving — Optional Save at Investigation End
 
-After displaying both the narrative summary and event table in the conversation, ask the analyst whether to save:
-
-```
-Investigation complete. Save to disk?
-  yes — write investigation.md to ./hunt/hunt-YYYYMMDD-HHMMSS/
-  no  — results remain in conversation only
-```
-
-Wait for analyst response. Do not auto-save. Do not create directories until the analyst confirms.
+After displaying the narrative summary and event table, ask: `Investigation complete. Save to disk? yes/no`. Do not auto-save.
 
 ### If Yes — Save Artifacts
 
-**1. Create run directory:**
+1. **Create run directory:** `mkdir -p ./hunt/hunt-$(date +%Y%m%d-%H%M%S)`
+2. **Write `$RUN_DIR/investigation.md`:** hypothesis verdict (if set) + narrative summary + event table + queries-run appendix (table of every SPL query with step name, full query, timestamp; skipped steps noted)
+3. **Write `$RUN_DIR/agent-log.jsonl`:** flush all accumulated evidence entries (api_call, claim records), one JSON per line
+4. **Update `./hunt/INDEX.md`:** append entry (create with header if missing). Columns: Run ID, Date, Alert Type, Steps Run (approved only), Directory
+5. **Update `./hunt/index.json`:** machine-readable index. Create with `{"runs": []}` if missing. Upsert by `run_id` with fields: run_id, date, alert_type, steps_run, directory
+6. **Post-investigation learning:** run the learning pipeline per `<error_handling>` section
 
-```bash
-RUN_DIR="./hunt/hunt-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$RUN_DIR"
-```
-
-**2. Write investigation.md:**
-
-Write `$RUN_DIR/investigation.md` containing up to four sections:
-
-Section 0 (if active_hypothesis was set): The hypothesis verdict block (from output_format Hypothesis Verdict — reproduced exactly as displayed)
-
-Section 1: The full narrative summary (Part 1 from output_format — reproduced exactly as displayed)
-
-Section 2: The chronological event table (Part 2 from output_format — reproduced exactly)
-
-Section 3: Queries Run appendix — a list of every SPL query executed during the session:
-
-```markdown
-## Queries Run
-
-| Step | Name | Query | Timestamp |
-|------|------|-------|-----------|
-| 1 | [step name] | `[full SPL query]` | [time query was run] |
-| 2 | [step name] | `[full SPL query]` | [time query was run] |
-| — | [skipped] | — | — |
-```
-
-Include skipped steps in the appendix with a note that they were skipped.
-
-**3. Write agent-log.jsonl:**
-
-Flush all accumulated evidence entries to `$RUN_DIR/agent-log.jsonl`, one JSON line per entry. This includes every `api_call` and `claim` record accumulated during the session. If no evidence was accumulated, write an empty file.
-
-**4. Update INDEX.md:**
-
-Append to `./hunt/INDEX.md`. If the file does not exist, create it with the header:
-
-```markdown
-# Hunt Run Index
-
-| Run ID | Date | Alert Type | Steps Run | Directory |
-|--------|------|------------|-----------|-----------|
-```
-
-Then append the new entry:
-
-```markdown
-| hunt-YYYYMMDD-HHMMSS | YYYY-MM-DD HH:MM | [alert_type] | [N] | ./hunt/hunt-YYYYMMDD-HHMMSS/ |
-```
-
-Steps Run count includes only steps that were approved and executed (not skipped steps).
-
-Also update `./hunt/index.json` (machine-readable). Create if it doesn't exist with `{"runs": []}`. Append/upsert (match on `run_id`) an entry:
-
-```json
-{
-  "run_id": "hunt-20260301-143022",
-  "date": "2026-03-01T14:30:22Z",
-  "alert_type": "CreateAccessKey",
-  "steps_run": 5,
-  "directory": "./hunt/hunt-20260301-143022/"
-}
-```
-
-Read `./hunt/index.json`, parse the `runs` array, upsert by `run_id`, write back with 2-space indent.
-
-**Note:** Hunt does NOT run the scope-pipeline.md post-processing pipeline. That pipeline processes audit, exploit, and defend output only. Hunt artifacts are self-contained in `$RUN_DIR/`. Evidence from hunt runs is NOT indexed into `./agent-logs/` — raw `agent-log.jsonl` remains in `$RUN_DIR/` for local reference only. Other SCOPE agents cannot automatically reference hunt evidence.
-
-**5. Post-investigation learning:**
-
-After writing artifacts, run the post-investigation learning pipeline. See `<error_handling>` section for post-investigation learning steps.
-
+Hunt does NOT run scope-pipeline.md. Hunt artifacts are self-contained in `$RUN_DIR/` — not indexed into `./agent-logs/`.
 </artifact_saving>
 
 <error_handling>
@@ -1185,12 +769,4 @@ An investigation session is complete when ALL of the following are true:
 - Any query was executed without analyst approval (the approve gate was bypassed)
 - The completion signal was never shown (even if all reference pattern angles were explored, the signal must appear before generating output)
 - The skill silently advanced past a step without analyst interaction
-
-### Quality Standards for Output
-
-- Narrative uses past tense and cites specific ARNs, timestamps, IPs, and key IDs
-- Event table has no duplicate events (deduplicated across overlapping step results)
-- "Consider:" suggestions are actionable and specific to the findings (not generic security advice)
-- Investigation gaps are honest about what was not investigated and why
-- The output is self-contained — someone reading only the summary and event table should understand what happened without needing the step-by-step conversation history
 </success_criteria>

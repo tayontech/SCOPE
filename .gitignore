@@ -53,3 +53,4 @@ config/accounts.json
 config/index.json
 config/scps/*.json
 !config/scps/_example.json
+config/observations.md

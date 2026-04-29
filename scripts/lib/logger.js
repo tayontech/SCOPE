@@ -7,9 +7,10 @@ const path = require('path');
  * Creates a structured JSONL logger that writes to $RUN_DIR/agent-log.jsonl.
  *
  * @param {string} runDir - Path to the run directory
+ * @param {string} [moduleName] - Optional module name for log records
  * @returns {Object} Logger instance with log() and flush() methods
  */
-function createLogger(runDir) {
+function createLogger(runDir, moduleName) {
   if (!runDir || typeof runDir !== 'string') {
     throw new Error('runDir is required for logger');
   }
@@ -36,7 +37,7 @@ function createLogger(runDir) {
     const record = {
       timestamp: new Date().toISOString(),
       type,
-      module: null,
+      module: moduleName || null,
       action,
       details,
     };

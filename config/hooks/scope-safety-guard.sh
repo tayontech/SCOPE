@@ -78,7 +78,7 @@ fi
 # AWS FAST-PATH — if no 'aws' in command, skip destructive pattern checks
 # =============================================================================
 
-if ! echo "$COMMAND" | grep -qi 'aws '; then
+if ! echo "$COMMAND" | grep -qiE 'aws[[:space:]]'; then
   exit 0
 fi
 

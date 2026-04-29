@@ -40,10 +40,9 @@ async function runTests() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-test-sts-'));
     const mockSts = makeMockClient(apiResponses);
     const mockOrg = makeMockClient(apiResponses);
-    await run({ runDir: tmpDir, clients: { sts: mockSts, organizations: mockOrg } });
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'sts.json'), 'utf-8'));
-    delete actual.timestamp;
-    assert.deepStrictEqual(actual, expected);
+    const result = await run({ runDir: tmpDir, clients: { sts: mockSts, organizations: mockOrg } });
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: sts identity with org access denied');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

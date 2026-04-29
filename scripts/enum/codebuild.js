@@ -6,39 +6,12 @@ const {
   BatchGetProjectsCommand,
 } = require('@aws-sdk/client-codebuild');
 
-const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
-
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
+const { withRetry, paginate, createLogger } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
 
 // --- Constants ---
 
 const SECRET_PATTERNS = /password|secret|token|key|credential|api.?key|auth/i;
-
-// --- CLI ---
-
-function parseArgs(argv) {
-  const args = { runDir: null, region: null, regions: null };
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    } else if (argv[i] === '--region' && argv[i + 1]) {
-      args.region = argv[++i];
-    } else if (argv[i] === '--regions' && argv[i + 1]) {
-      args.regions = argv[++i];
-    } else if (argv[i] === '--help' || argv[i] === '-h') {
-      console.log('Usage: node scripts/enum/codebuild.js --run-dir <dir> --region <region>');
-      console.log('       node scripts/enum/codebuild.js --run-dir <dir> --regions <r1,r2,...>');
-      console.log('');
-      console.log('Options:');
-      console.log('  --run-dir  Path to the run output directory (required)');
-      console.log('  --region   AWS region to enumerate (required, or use --regions)');
-      console.log('  --regions  Comma-separated list of regions to enumerate');
-      console.log('  --help     Show this help message');
-      process.exit(0);
-    }
-  }
-  return args;
-}
 
 // --- Helpers ---
 
@@ -57,27 +30,16 @@ function chunk(arr, size) {
 
 async function run(opts = {}) {
   const { runDir, region } = opts;
+  const accountId = opts.accountId;
 
   if (!runDir || !region) {
     throw new Error('runDir and region are required');
   }
 
-  const stsClient = opts.clients?.sts ?? new STSClient({ region });
   const codebuild = opts.clients?.codebuild ?? new CodeBuildClient({ region });
 
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'codebuild');
   logger.log('info', 'CodeBuild_Enumeration_Start', { region });
-
-  // Get account ID via STS
-  let accountId;
-  try {
-    const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
-    accountId = identity.Account;
-  } catch (err) {
-    logger.log('error', 'GetCallerIdentity', { error: err.message });
-    await logger.flush();
-    throw new Error(`GetCallerIdentity failed: ${err.message}`);
-  }
 
   // List all project names (paginated)
   logger.log('api_call', 'ListProjects', { service: 'codebuild' });
@@ -89,35 +51,13 @@ async function run(opts = {}) {
     });
   } catch (err) {
     logger.log('error', 'ListProjects', { error: err.message });
-    const envelope = createEnvelope({
-      module: 'codebuild',
-      account_id: accountId,
-      region,
-      status: 'error',
-      findings: [],
-    });
-    writeEnvelope(runDir, envelope);
     await logger.flush();
     throw new Error(`ListProjects failed: ${err.message}`);
   }
 
   if (!projectNames || projectNames.length === 0) {
-    const envelope = createEnvelope({
-      module: 'codebuild',
-      account_id: accountId,
-      region,
-      status: 'complete',
-      findings: [],
-    });
-    const outPath = writeEnvelope(runDir, envelope);
-    logger.log('info', 'CodeBuild_Enumeration_Complete', {
-      status: 'complete',
-      projects: 0,
-      output: outPath,
-    });
     await logger.flush();
-    console.log(`CodeBuild enumeration complete: ${outPath} (0 projects, status: complete)`);
-    return;
+    return { findings: [], status: 'complete' };
   }
 
   // BatchGetProjects — up to 100 per call
@@ -207,67 +147,12 @@ async function run(opts = {}) {
   let status = 'complete';
   if (errors.length > 0) status = 'partial';
 
-  if (opts.returnOnly) {
-    await logger.flush();
-    return findings;
-  }
-
-  const envelope = createEnvelope({
-    module: 'codebuild',
-    account_id: accountId,
-    region,
-    status,
-    findings,
-  });
-
-  const outPath = writeEnvelope(runDir, envelope);
-
-  logger.log('info', 'CodeBuild_Enumeration_Complete', {
-    status,
-    projects: findings.length,
-    errors: errors.length,
-    output: outPath,
-  });
-
   await logger.flush();
-  console.log(`CodeBuild enumeration complete: ${outPath} (${findings.length} projects, status: ${status})`);
-}
-
-// --- CLI entry point ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-
-  if (!args.runDir || (!args.region && !args.regions)) {
-    console.error('Error: --run-dir and --region (or --regions) are required');
-    console.error('Usage: node scripts/enum/codebuild.js --run-dir <dir> --region <region>');
-    console.error('       node scripts/enum/codebuild.js --run-dir <dir> --regions <r1,r2,...>');
-    process.exit(1);
-  }
-
-  const regionList = args.regions ? args.regions.split(',') : [args.region];
-
-  try {
-    if (regionList.length === 1) {
-      await run({ runDir: args.runDir, region: regionList[0].trim() });
-    } else {
-      const allFindings = [];
-      for (const region of regionList) {
-        const findings = await run({ runDir: args.runDir, region: region.trim(), returnOnly: true });
-        allFindings.push(...findings);
-      }
-      const envelope = createEnvelope({ module: 'codebuild', account_id: null, region: 'multi', status: 'complete', findings: allFindings });
-      writeEnvelope(args.runDir, envelope);
-    }
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main();
+  baseEnum({ module: 'codebuild', run });
 }
 
 module.exports = { run };

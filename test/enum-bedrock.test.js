@@ -52,16 +52,15 @@ async function runTests() {
       GetKnowledgeBaseCommand: apiResponses['GetKnowledgeBaseCommand'],
     });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
+      accountId: 'unknown',
       clients: { bedrock: mockBedrock, bedrockAgent: mockBedrockAgent },
     });
 
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'bedrock.json'), 'utf-8'));
-    delete actual.timestamp;
-
-    assert.deepStrictEqual(actual, expected);
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: bedrock basic scenario');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

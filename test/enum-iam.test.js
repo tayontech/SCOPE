@@ -33,10 +33,9 @@ async function runTests() {
   try {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-test-iam-'));
     const mockIam = makeMockClient(apiResponses);
-    await run({ runDir: tmpDir, accountId: '123456789012', clients: { iam: mockIam } });
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'iam.json'), 'utf-8'));
-    delete actual.timestamp;
-    assert.deepStrictEqual(actual, expected);
+    const result = await run({ runDir: tmpDir, accountId: '123456789012', clients: { iam: mockIam } });
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: iam basic scenario');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

@@ -16,35 +16,8 @@ const {
   GetIntegrationsCommand,
 } = require('@aws-sdk/client-apigatewayv2');
 
-const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
-
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
-
-// --- CLI ---
-
-function parseArgs(argv) {
-  const args = { runDir: null, region: null, regions: null };
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    } else if (argv[i] === '--region' && argv[i + 1]) {
-      args.region = argv[++i];
-    } else if (argv[i] === '--regions' && argv[i + 1]) {
-      args.regions = argv[++i];
-    } else if (argv[i] === '--help' || argv[i] === '-h') {
-      console.log('Usage: node scripts/enum/apigateway.js --run-dir <dir> --region <region>');
-      console.log('       node scripts/enum/apigateway.js --run-dir <dir> --regions <r1,r2,...>');
-      console.log('');
-      console.log('Options:');
-      console.log('  --run-dir  Path to the run output directory (required)');
-      console.log('  --region   AWS region to enumerate (required, or use --regions)');
-      console.log('  --regions  Comma-separated list of regions to enumerate');
-      console.log('  --help     Show this help message');
-      process.exit(0);
-    }
-  }
-  return args;
-}
+const { withRetry, paginate, createLogger } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
 
 // --- Helpers ---
 
@@ -290,21 +263,10 @@ async function enumerateV2Apis(client, region, logger) {
 async function run(opts = {}) {
   const runDir = opts.runDir;
   const region = opts.region;
+  const accountId = opts.accountId;
 
-  const logger = opts.logger || createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'apigateway');
   logger.log('info', 'APIGateway_Enumeration_Start', { region });
-
-  // Get account ID via STS
-  const stsClient = opts.clients?.sts ?? new STSClient({ region });
-  let accountId;
-  try {
-    const identity = await withRetry(() => stsClient.send(new GetCallerIdentityCommand({})));
-    accountId = identity.Account;
-  } catch (err) {
-    logger.log('error', 'GetCallerIdentity', { error: err.message });
-    await logger.flush();
-    throw new Error(`GetCallerIdentity failed: ${err.message}`);
-  }
 
   // Enumerate REST APIs (APIGatewayClient)
   const restClient = opts.clients?.apigateway ?? new APIGatewayClient({ region });
@@ -319,67 +281,12 @@ async function run(opts = {}) {
   const allErrors = [...restResult.errors, ...v2Result.errors];
   const status = allErrors.length > 0 ? 'partial' : 'complete';
 
-  if (opts.returnOnly) {
-    await logger.flush();
-    return findings;
-  }
-
-  const envelope = createEnvelope({
-    module: 'apigateway',
-    account_id: accountId,
-    region,
-    status,
-    findings,
-  });
-
-  const outPath = writeEnvelope(runDir, envelope);
-  logger.log('info', 'APIGateway_Enumeration_Complete', {
-    status,
-    rest_apis: restResult.findings.length,
-    v2_apis: v2Result.findings.length,
-    errors: allErrors.length,
-    output: outPath,
-  });
-
   await logger.flush();
-  console.log(`API Gateway enumeration complete: ${outPath} (${restResult.findings.length} REST + ${v2Result.findings.length} HTTP/WS APIs, status: ${status})`);
-}
-
-// --- CLI entry point ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-
-  if (!args.runDir || (!args.region && !args.regions)) {
-    console.error('Error: --run-dir and --region (or --regions) are required');
-    console.error('Usage: node scripts/enum/apigateway.js --run-dir <dir> --region <region>');
-    console.error('       node scripts/enum/apigateway.js --run-dir <dir> --regions <r1,r2,...>');
-    process.exit(1);
-  }
-
-  const regionList = args.regions ? args.regions.split(',') : [args.region];
-
-  try {
-    if (regionList.length === 1) {
-      await run({ runDir: args.runDir, region: regionList[0].trim() });
-    } else {
-      const allFindings = [];
-      for (const region of regionList) {
-        const findings = await run({ runDir: args.runDir, region: region.trim(), returnOnly: true });
-        allFindings.push(...findings);
-      }
-      const envelope = createEnvelope({ module: 'apigateway', account_id: null, region: 'multi', status: 'complete', findings: allFindings });
-      writeEnvelope(args.runDir, envelope);
-    }
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main();
+  baseEnum({ module: 'apigateway', run });
 }
 
 module.exports = { run };

@@ -34,20 +34,17 @@ async function runTests() {
 
   try {
     const mockRds = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({ GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { rds: mockRds, sts: mockSts },
+      accountId: '123456789012',
+      clients: { rds: mockRds },
     });
 
-    const outFile = path.join(tmpDir, 'rds.json');
-    const actual = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
-    delete actual.timestamp;
-
     try {
-      assert.deepStrictEqual(actual, expected);
+      assert.strictEqual(result.status, expected.status);
+      assert.deepStrictEqual(result.findings, expected.findings);
       console.log('  PASS: rds enum output matches expected');
       passed++;
     } catch (err) {

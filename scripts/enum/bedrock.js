@@ -17,33 +17,8 @@ const {
   GetKnowledgeBaseCommand,
 } = require('@aws-sdk/client-bedrock-agent');
 
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
-
-// --- CLI ---
-
-function parseArgs(argv) {
-  const args = { runDir: null, region: null, regions: null };
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    } else if (argv[i] === '--region' && argv[i + 1]) {
-      args.region = argv[++i];
-    } else if (argv[i] === '--regions' && argv[i + 1]) {
-      args.regions = argv[++i];
-    } else if (argv[i] === '--help' || argv[i] === '-h') {
-      console.log('Usage: node scripts/enum/bedrock.js --run-dir <dir> --region <region>');
-      console.log('       node scripts/enum/bedrock.js --run-dir <dir> --regions <r1,r2,...>');
-      console.log('');
-      console.log('Options:');
-      console.log('  --run-dir   Path to the run output directory (required)');
-      console.log('  --region    AWS region to enumerate (required, or use --regions)');
-      console.log('  --regions   Comma-separated list of regions to enumerate');
-      console.log('  --help      Show this help message');
-      process.exit(0);
-    }
-  }
-  return args;
-}
+const { withRetry, paginate, createLogger } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
 
 // --- Region availability check ---
 
@@ -96,7 +71,7 @@ async function enumerateCustomModels(client, region, logger) {
     model_arn: m.modelArn || null,
     base_model_arn: m.baseModelArn || null,
     creation_time: m.creationTime || null,
-    findings: ['Custom model — training data exposure risk'],
+    findings: [{ type: 'training_data_exposure', severity: 'medium', detail: 'Custom model — training data exposure risk' }],
   }));
 }
 
@@ -126,7 +101,7 @@ async function enumerateAgents(agentClient, region, logger) {
         created_at: detail.createdAt || null,
         updated_at: detail.updatedAt || null,
         findings: detail.agentResourceRoleArn
-          ? ['Agent execution role — IAM attack surface (often overpermissive)']
+          ? [{ type: 'overpermissive_role', severity: 'high', detail: 'Agent execution role — IAM attack surface (often overpermissive)' }]
           : [],
       });
     } catch (err) {
@@ -174,7 +149,7 @@ async function enumerateKnowledgeBases(agentClient, region, logger) {
         description: detail.description || null,
         created_at: detail.createdAt || null,
         updated_at: detail.updatedAt || null,
-        findings: ['Knowledge base data source — data access mapping'],
+        findings: [{ type: 'data_access_mapping', severity: 'medium', detail: 'Knowledge base data source — data access mapping' }],
       });
     } catch (err) {
       logger.log('warning', 'GetKnowledgeBase', { knowledgeBaseId: kb.knowledgeBaseId, error: err.message });
@@ -260,8 +235,9 @@ async function enumerateProvisionedThroughput(client, logger) {
 async function run(opts = {}) {
   const runDir = opts.runDir;
   const region = opts.region;
+  const accountId = opts.accountId;
 
-  const logger = opts.logger || createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'bedrock');
   logger.log('info', 'Bedrock_Enumeration_Start', { region });
 
   const bedrockClient = opts.clients?.bedrock ?? new BedrockClient({ region });
@@ -279,16 +255,8 @@ async function run(opts = {}) {
     } catch (err) {
       if (isRegionNotAvailableError(err)) {
         logger.log('info', 'Bedrock_NotAvailable', { region, error: err.message });
-        const envelope = createEnvelope({
-          module: 'bedrock',
-          account_id: 'unknown',
-          region,
-          status: 'complete',
-          findings: [],
-        });
-        writeEnvelope(runDir, envelope);
         await logger.flush();
-        return;
+        return { findings: [], status: 'complete' };
       }
       throw err;
     }
@@ -340,7 +308,7 @@ async function run(opts = {}) {
           region,
           logging_enabled: loggingResult.logging_enabled,
           logging_config: loggingResult.logging_config,
-          findings: [loggingResult.finding],
+          findings: [{ type: 'logging_disabled', severity: 'high', detail: loggingResult.finding }],
         });
       }
     } catch (err) {
@@ -355,6 +323,8 @@ async function run(opts = {}) {
         findings.push({
           resource_type: 'bedrock_provisioned_throughput',
           resource_id: 'provisioned_throughputs',
+          arn: `arn:aws:bedrock:${region}:${accountId || 'unknown'}:provisioned-throughput/summary`,
+          region,
           provisioned_model_arn: null,
           throughputs,
           findings: [],
@@ -368,16 +338,8 @@ async function run(opts = {}) {
   } catch (err) {
     if (isRegionNotAvailableError(err)) {
       logger.log('info', 'Bedrock_NotAvailable', { region, error: err.message });
-      const envelope = createEnvelope({
-        module: 'bedrock',
-        account_id: 'unknown',
-        region,
-        status: 'complete',
-        findings: [],
-      });
-      writeEnvelope(runDir, envelope);
       await logger.flush();
-      return;
+      return { findings: [], status: 'complete' };
     }
     logger.log('error', 'Bedrock_Fatal', { error: err.message });
     status = 'error';
@@ -387,65 +349,12 @@ async function run(opts = {}) {
     status = 'partial';
   }
 
-  if (opts.returnOnly) {
-    await logger.flush();
-    return findings;
-  }
-
-  const envelope = createEnvelope({
-    module: 'bedrock',
-    account_id: 'unknown',
-    region,
-    status,
-    findings,
-  });
-
-  const outputPath = writeEnvelope(runDir, envelope);
-  logger.log('info', 'Bedrock_Enumeration_Complete', {
-    status,
-    findings_count: findings.length,
-    errors: partialErrors.length,
-    output: outputPath,
-  });
-
   await logger.flush();
-}
-
-// --- CLI entry point ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-
-  if (!args.runDir || (!args.region && !args.regions)) {
-    console.error('Error: --run-dir and --region (or --regions) are required');
-    console.error('Usage: node scripts/enum/bedrock.js --run-dir <dir> --region <region>');
-    console.error('       node scripts/enum/bedrock.js --run-dir <dir> --regions <r1,r2,...>');
-    process.exit(1);
-  }
-
-  const regionList = args.regions ? args.regions.split(',') : [args.region];
-
-  try {
-    if (regionList.length === 1) {
-      await run({ runDir: args.runDir, region: regionList[0].trim() });
-    } else {
-      const allFindings = [];
-      for (const region of regionList) {
-        const findings = await run({ runDir: args.runDir, region: region.trim(), returnOnly: true });
-        if (Array.isArray(findings)) allFindings.push(...findings);
-      }
-      const envelope = createEnvelope({ module: 'bedrock', account_id: null, region: 'multi', status: 'complete', findings: allFindings });
-      writeEnvelope(args.runDir, envelope);
-    }
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main();
+  baseEnum({ module: 'bedrock', run });
 }
 
 module.exports = { run };

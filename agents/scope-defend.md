@@ -18,11 +18,7 @@ Your responsibilities:
 
 **Credentials:** This agent does NOT make AWS API calls — it reads audit output and coordinates subagents. No credential checks needed.
 
-**Session isolation:** Every defend invocation is a fresh session. Create a unique run directory.
-
 **Error handling:** Stop and report on errors. If any Wave 1 subagent fails (returns STATUS: error), do NOT proceed to Wave 2. Report the failure to the operator/parent orchestrator. Pipeline dispatch is non-blocking — log a warning and continue if pipeline fails.
-
-**No memory:** Do NOT write to MEMORY.md. All resource identifiers are session-scoped.
 
 **Invocation modes:**
 - Auto-dispatched by audit orchestrator (receives AUDIT_RUN_DIR + ACCOUNT_ID in initial message)
@@ -90,10 +86,10 @@ Extract audit run ID for provenance tracking:
 AUDIT_RUN_ID=$(jq -r '.run_id // empty' "$AUDIT_RUN_DIR/results.json" 2>/dev/null || basename "$AUDIT_RUN_DIR")
 ```
 
-Extract risk_score from audit results.json for use in results.json assembly:
+Extract severity from audit results.json for use in results.json assembly:
 
 ```bash
-AUDIT_RISK_SCORE=$(jq -r '.summary.risk_score // "medium"' "$AUDIT_RUN_DIR/results.json")
+AUDIT_SEVERITY=$(jq -r '.summary.severity // "medium"' "$AUDIT_RUN_DIR/results.json")
 ```
 
 ### Step 3: Create DEFEND_RUN_DIR
@@ -146,9 +142,7 @@ Dispatch scope-defend-guardrails as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend-guardrails".
-On Gemini CLI: Delegate to the scope-defend-guardrails subagent (registered in .gemini/agents/).
-On Codex: Spawn the scope-defend-guardrails agent (registered in .codex/config.toml).
+Use the Agent tool with subagent_type="scope-defend-guardrails".
 
 Wait for subagent to return its summary.
 Expected return:
@@ -166,9 +160,7 @@ Dispatch scope-defend-splunk as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend-splunk".
-On Gemini CLI: Delegate to the scope-defend-splunk subagent (registered in .gemini/agents/).
-On Codex: Spawn the scope-defend-splunk agent (registered in .codex/config.toml).
+Use the Agent tool with subagent_type="scope-defend-splunk".
 
 Wait for subagent to return its summary.
 Expected return:
@@ -186,9 +178,7 @@ Dispatch scope-defend-policy as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend-policy".
-On Gemini CLI: Delegate to the scope-defend-policy subagent (registered in .gemini/agents/).
-On Codex: Spawn the scope-defend-policy agent (registered in .codex/config.toml).
+Use the Agent tool with subagent_type="scope-defend-policy".
 
 Wait for subagent to return its summary.
 Expected return:
@@ -206,9 +196,7 @@ Dispatch scope-defend-remediation as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend-remediation".
-On Gemini CLI: Delegate to the scope-defend-remediation subagent (registered in .gemini/agents/).
-On Codex: Spawn the scope-defend-remediation agent (registered in .codex/config.toml).
+Use the Agent tool with subagent_type="scope-defend-remediation".
 
 Wait for subagent to return its summary.
 Expected return:
@@ -279,9 +267,7 @@ Dispatch scope-defend-validate as a subagent with this initial message:
   ACCOUNT_ID: {account_id}
   FIX_REQUIRED:
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend-validate".
-On Gemini CLI: Delegate to the scope-defend-validate subagent (registered in .gemini/agents/).
-On Codex: Spawn the scope-defend-validate agent (registered in .codex/config.toml).
+Use the Agent tool with subagent_type="scope-defend-validate".
 
 Wait for subagent to return its summary.
 Expected return:
@@ -338,9 +324,7 @@ Dispatch scope-defend-validate as a FRESH subagent with this initial message:
   ACCOUNT_ID: {account_id}
   FIX_REQUIRED: {block findings from Round 1 that should now be fixed}
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend-validate".
-On Gemini CLI: Delegate to the scope-defend-validate subagent (registered in .gemini/agents/).
-On Codex: Spawn the scope-defend-validate agent (registered in .codex/config.toml).
+Use the Agent tool with subagent_type="scope-defend-validate".
 
 Wait for subagent to return its summary.
 Expected return:
@@ -500,14 +484,14 @@ SUMMARY_JSON=$(jq -n \
   --argjson policy_replacements "$POLICY_REPLACEMENTS_COUNT" \
   --argjson remediation_items "$REMEDIATION_ITEMS_COUNT" \
   --arg validation_status "$VALIDATION_STATUS" \
-  --arg risk_score "$AUDIT_RISK_SCORE" \
+  --arg severity "$AUDIT_SEVERITY" \
   '{
     guardrails: $guardrails,
     detections: $detections,
     policy_replacements: $policy_replacements,
     remediation_items: $remediation_items,
     validation_status: $validation_status,
-    risk_score: $risk_score
+    severity: $severity
   }')
 
 AUDIT_RUNS_ARRAY=$(jq -n --arg run_id "$AUDIT_RUN_ID" '[$run_id]')
@@ -563,24 +547,24 @@ mkdir -p dashboard/public
 cp "$DEFEND_RUN_DIR/results.json" "dashboard/public/$DASHBOARD_RUN_ID.json"
 
 # Update index.json — upsert this run (match on run_id), newest-first
-RISK_SCORE=$(jq -r '.summary.risk_score' "$DEFEND_RUN_DIR/results.json")
+SEVERITY=$(jq -r '.summary.severity' "$DEFEND_RUN_DIR/results.json")
 VALIDATION_STATUS=$(jq -r '.summary.validation_status' "$DEFEND_RUN_DIR/results.json")
 
 if [ -f dashboard/public/index.json ]; then
-  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" RISK_SCORE="$RISK_SCORE" VALIDATION_STATUS="$VALIDATION_STATUS" \
+  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" SEVERITY="$SEVERITY" VALIDATION_STATUS="$VALIDATION_STATUS" \
   node -e "$(cat <<'JS'
-    const {DASHBOARD_RUN_ID, ACCOUNT_ID, RISK_SCORE, VALIDATION_STATUS} = process.env;
+    const {DASHBOARD_RUN_ID, ACCOUNT_ID, SEVERITY, VALIDATION_STATUS} = process.env;
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
     idx.runs = (idx.runs || []).filter(r => r.run_id !== DASHBOARD_RUN_ID);
-    idx.runs.unshift({ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'defend', target: ACCOUNT_ID, risk: RISK_SCORE, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' });
+    idx.runs.unshift({ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'defend', target: ACCOUNT_ID, severity: SEVERITY, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' });
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
 JS
   )"
 else
-  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" RISK_SCORE="$RISK_SCORE" VALIDATION_STATUS="$VALIDATION_STATUS" \
+  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" SEVERITY="$SEVERITY" VALIDATION_STATUS="$VALIDATION_STATUS" \
   node -e "$(cat <<'JS'
-    const {DASHBOARD_RUN_ID, ACCOUNT_ID, RISK_SCORE, VALIDATION_STATUS} = process.env;
-    const idx = { runs: [{ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'defend', target: ACCOUNT_ID, risk: RISK_SCORE, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' }] };
+    const {DASHBOARD_RUN_ID, ACCOUNT_ID, SEVERITY, VALIDATION_STATUS} = process.env;
+    const idx = { runs: [{ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'defend', target: ACCOUNT_ID, severity: SEVERITY, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' }] };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
 JS
   )"

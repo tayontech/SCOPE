@@ -34,7 +34,7 @@
     },
     "summary": {
       "type": "object",
-      "required": ["risk_score"],
+      "required": ["severity"],
       "properties": {
         "total_users": { "type": "integer" },
         "total_roles": { "type": "integer" },
@@ -44,7 +44,7 @@
         "wildcard_trust_policies": { "type": "integer" },
         "cross_account_trusts": { "type": "integer" },
         "users_without_mfa": { "type": "integer" },
-        "risk_score": {
+        "severity": {
           "type": "string",
           "enum": ["critical", "high", "medium", "low"]
         },

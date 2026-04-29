@@ -35,20 +35,16 @@ async function runTests() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-test-codebuild-'));
 
     const mockCodebuild = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({
-      GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand
-    });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { codebuild: mockCodebuild, sts: mockSts }
+      accountId: '123456789012',
+      clients: { codebuild: mockCodebuild }
     });
 
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'codebuild.json'), 'utf-8'));
-    delete actual.timestamp;
-
-    assert.deepStrictEqual(actual, expected);
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: codebuild basic scenario');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

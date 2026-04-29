@@ -35,9 +35,6 @@ async function runTests() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-test-ec2-'));
 
     const mockEc2 = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({
-      GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand
-    });
     // elbv2 and elb both use DescribeLoadBalancersCommand — return empty list
     const mockElbv2 = makeMockClient({
       DescribeLoadBalancersCommand: apiResponses.DescribeLoadBalancersCommand
@@ -46,21 +43,19 @@ async function runTests() {
       DescribeLoadBalancersCommand: apiResponses.DescribeLoadBalancersCommand
     });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
+      accountId: '123456789012',
       clients: {
         ec2: mockEc2,
-        sts: mockSts,
         elbv2: mockElbv2,
         elb: mockElb
       }
     });
 
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'ec2.json'), 'utf-8'));
-    delete actual.timestamp;
-
-    assert.deepStrictEqual(actual, expected);
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: ec2 basic scenario');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

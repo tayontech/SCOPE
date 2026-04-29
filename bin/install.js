@@ -1169,15 +1169,16 @@ function runInstall(editors, scope) {
 }
 
 /**
- * Copy platform-specific project instruction files from config/project-docs/ to repo root.
- * Source files in config/project-docs/ are committed. Root copies are gitignored.
+ * Copy unified project instruction file from config/project-docs/PROJECT.md to repo root.
+ * Single source file, copied to platform-specific filename.
+ * Source file in config/project-docs/ is committed. Root copies are gitignored.
  * Claude → CLAUDE.md, Gemini → GEMINI.md, Codex → AGENTS.md
  */
 function installProjectDocs(editors, scope) {
   const projectRoot = scope === 'local' ? process.cwd() : os.homedir();
-  const docsDir = path.join(__dirname, '..', 'config', 'project-docs');
+  const src = path.join(__dirname, '..', 'config', 'project-docs', 'PROJECT.md');
 
-  if (!fs.existsSync(docsDir)) return;
+  if (!fs.existsSync(src)) return;
 
   const docMap = {
     claude: 'CLAUDE.md',
@@ -1188,12 +1189,9 @@ function installProjectDocs(editors, scope) {
   for (const editor of editors) {
     const filename = docMap[editor];
     if (!filename) continue;
-    const src = path.join(docsDir, filename);
     const dest = path.join(projectRoot, filename);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-      console.log(`  → ${filename} (project docs for ${editor})`);
-    }
+    fs.copyFileSync(src, dest);
+    console.log(`  → ${filename} (project docs from PROJECT.md)`);
   }
 }
 

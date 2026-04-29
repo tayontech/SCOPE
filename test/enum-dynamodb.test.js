@@ -43,20 +43,15 @@ async function runTests() {
       GetResourcePolicyCommand: apiResponses['GetResourcePolicyCommand'],
     });
 
-    const mockSts = makeMockClient({
-      GetCallerIdentityCommand: apiResponses['GetCallerIdentityCommand'],
-    });
-
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { dynamodb: mockDynamo, sts: mockSts },
+      accountId: '123456789012',
+      clients: { dynamodb: mockDynamo },
     });
 
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'dynamodb.json'), 'utf-8'));
-    delete actual.timestamp;
-
-    assert.deepStrictEqual(actual, expected);
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: dynamodb basic scenario');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

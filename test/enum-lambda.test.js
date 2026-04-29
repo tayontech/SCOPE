@@ -34,20 +34,17 @@ async function runTests() {
 
   try {
     const mockLambda = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({ GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { lambda: mockLambda, sts: mockSts },
+      accountId: '123456789012',
+      clients: { lambda: mockLambda },
     });
 
-    const outFile = path.join(tmpDir, 'lambda.json');
-    const actual = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
-    delete actual.timestamp;
-
     try {
-      assert.deepStrictEqual(actual, expected);
+      assert.strictEqual(result.status, expected.status);
+      assert.deepStrictEqual(result.findings, expected.findings);
       console.log('  PASS: lambda enum output matches expected');
       passed++;
     } catch (err) {

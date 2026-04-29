@@ -27,7 +27,7 @@
       "model_arn": "arn:aws:bedrock:us-east-1:123456789012:custom-model/my-custom-model",
       "base_model_arn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-text-express-v1",
       "creation_time": "2024-01-15T00:00:00Z",
-      "findings": ["Custom model — training data exposure risk"]
+      "findings": [{ "type": "training_data_exposure", "severity": "medium", "detail": "Custom model — training data exposure risk" }]
     },
     {
       "resource_type": "bedrock_agent",
@@ -42,7 +42,7 @@
       "description": "Test agent",
       "created_at": "2024-01-01T00:00:00Z",
       "updated_at": "2024-01-15T00:00:00Z",
-      "findings": ["Agent execution role — IAM attack surface (often overpermissive)"]
+      "findings": [{ "type": "overpermissive_role", "severity": "high", "detail": "Agent execution role — IAM attack surface (often overpermissive)" }]
     },
     {
       "resource_type": "bedrock_knowledge_base",
@@ -60,7 +60,7 @@
       "description": "Test knowledge base",
       "created_at": "2024-01-01T00:00:00Z",
       "updated_at": "2024-01-15T00:00:00Z",
-      "findings": ["Knowledge base data source — data access mapping"]
+      "findings": [{ "type": "data_access_mapping", "severity": "medium", "detail": "Knowledge base data source — data access mapping" }]
     },
     {
       "resource_type": "bedrock_logging",
@@ -69,7 +69,7 @@
       "region": "us-east-1",
       "logging_enabled": false,
       "logging_config": null,
-      "findings": ["Bedrock model invocation logging DISABLED — defense evasion vector (no evidence of queries)"]
+      "findings": [{ "type": "logging_disabled", "severity": "high", "detail": "Bedrock model invocation logging DISABLED — defense evasion vector (no evidence of queries)" }]
     }
   ]
 }

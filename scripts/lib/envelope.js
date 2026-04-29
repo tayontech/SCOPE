@@ -66,4 +66,16 @@ function writeEnvelope(runDir, envelope) {
   return filePath;
 }
 
-module.exports = { createEnvelope, writeEnvelope };
+/**
+ * Safely converts a Date to ISO string. Returns null if the date is invalid or missing.
+ * Protects against Invalid Date objects that throw on toISOString().
+ */
+function safeISOString(d) {
+  try {
+    return d?.toISOString() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { createEnvelope, writeEnvelope, safeISOString };

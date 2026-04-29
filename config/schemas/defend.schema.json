@@ -37,14 +37,14 @@
     },
     "summary": {
       "type": "object",
-      "required": ["guardrails", "detections", "policy_replacements", "remediation_items", "validation_status", "risk_score"],
+      "required": ["guardrails", "detections", "policy_replacements", "remediation_items", "validation_status", "severity"],
       "properties": {
         "guardrails": { "type": "integer", "description": "Count of SCP + RCP policies generated" },
         "detections": { "type": "integer", "description": "Count of SPL detections generated" },
         "policy_replacements": { "type": "integer", "description": "Count of IAM replacement policies generated" },
         "remediation_items": { "type": "integer", "description": "Count of prioritized remediation items" },
         "validation_status": { "type": "string", "enum": ["pass", "partial", "fail"] },
-        "risk_score": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
+        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
       }
     },
     "guardrails": {

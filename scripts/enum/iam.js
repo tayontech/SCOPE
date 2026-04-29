@@ -6,7 +6,6 @@ const {
   ListUsersCommand,
   ListRolesCommand,
   ListGroupsCommand,
-  ListPoliciesCommand,
   ListUserPoliciesCommand,
   GetUserPolicyCommand,
   ListAttachedUserPoliciesCommand,
@@ -33,7 +32,19 @@ const {
   GetOpenIDConnectProviderCommand,
 } = require('@aws-sdk/client-iam');
 
-const { withRetry, paginate, createEnvelope, writeEnvelope, createLogger } = require('../lib');
+const { withRetry, paginate, createLogger, safeISOString } = require('../lib');
+const { baseEnum } = require('../lib/base-enum');
+
+// --- Inline Policy Decoder ---
+
+function decodePolicy(doc) {
+  if (!doc) return null;
+  try {
+    return typeof doc === 'string' ? JSON.parse(decodeURIComponent(doc)) : doc;
+  } catch {
+    return doc;
+  }
+}
 
 // --- Trust Classification ---
 
@@ -142,28 +153,6 @@ function computeStaleness(lastActivityDate) {
   return { last_activity: lastActivityDate, is_stale: days >= 90, stale_days: days };
 }
 
-// --- CLI ---
-
-function parseArgs(argv) {
-  const args = { runDir: null, accountId: null };
-  for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--run-dir' && argv[i + 1]) {
-      args.runDir = argv[++i];
-    } else if (argv[i] === '--account-id' && argv[i + 1]) {
-      args.accountId = argv[++i];
-    } else if (argv[i] === '--help' || argv[i] === '-h') {
-      console.log('Usage: node scripts/enum/iam.js --run-dir <dir> --account-id <id>');
-      console.log('');
-      console.log('Options:');
-      console.log('  --run-dir     Path to the run output directory (required)');
-      console.log('  --account-id  AWS account ID for trust classification (required)');
-      console.log('  --help        Show this help message');
-      process.exit(0);
-    }
-  }
-  return args;
-}
-
 // --- GAAD Path ---
 
 async function enumerateViaGAAD(client, accountId, logger) {
@@ -239,7 +228,7 @@ async function enumerateViaGAAD(client, accountId, logger) {
     })),
     inline_policies: (u.UserPolicyList || []).map((p) => ({
       name: p.PolicyName,
-      document: p.PolicyDocument || null,
+      document: decodePolicy(p.PolicyDocument),
     })),
     has_console_access: false, // enriched later
     mfa_enabled: false, // enriched later
@@ -272,11 +261,11 @@ async function enumerateViaGAAD(client, accountId, logger) {
       })),
       inline_policies: (r.RolePolicyList || []).map((p) => ({
         name: p.PolicyName,
-        document: p.PolicyDocument || null,
+        document: decodePolicy(p.PolicyDocument),
       })),
       has_boundary: !!r.PermissionsBoundary,
       permission_boundary_arn: r.PermissionsBoundary?.PermissionsBoundaryArn || null,
-      last_activity: r.RoleLastUsed?.LastUsedDate?.toISOString() || null,
+      last_activity: safeISOString(r.RoleLastUsed?.LastUsedDate),
       is_stale: true,
       stale_days: null,
       service_last_accessed: null,
@@ -303,7 +292,7 @@ async function enumerateViaGAAD(client, accountId, logger) {
     })),
     inline_policies: (g.GroupPolicyList || []).map((p) => ({
       name: p.PolicyName,
-      document: p.PolicyDocument || null,
+      document: decodePolicy(p.PolicyDocument),
     })),
     findings: [],
   }));
@@ -377,11 +366,18 @@ async function enumerateViaFallback(client, accountId, logger) {
         region: 'global',
         groups: userGroups.map((g) => g.GroupName),
         attached_policies: attachedPolicies.map((p) => p.PolicyArn), // placeholder; replaced after doc fetch
-        inline_policies: inlinePolicyNames.map((name) => ({ name, document: null })),
+        inline_policies: await Promise.all(inlinePolicyNames.map(async (name) => {
+          try {
+            const resp = await withRetry(() => client.send(new GetUserPolicyCommand({ UserName: u.UserName, PolicyName: name })));
+            return { name, document: decodePolicy(resp.PolicyDocument) };
+          } catch {
+            return { name, document: null };
+          }
+        })),
         has_console_access: false,
         mfa_enabled: false,
         access_keys: [],
-        password_last_used: u.PasswordLastUsed?.toISOString() || null,
+        password_last_used: safeISOString(u.PasswordLastUsed),
         has_boundary: !!u.PermissionsBoundary,
         permission_boundary_arn: u.PermissionsBoundary?.PermissionsBoundaryArn || null,
         last_activity: null,
@@ -424,7 +420,7 @@ async function enumerateViaFallback(client, accountId, logger) {
       const trustDoc = roleDetail.AssumeRolePolicyDocument;
       const trustRelationships = parseTrustPolicy(trustDoc, accountId);
       const isServiceLinked = (roleDetail.Path || '').startsWith('/aws-service-role/');
-      const lastUsed = roleDetail.RoleLastUsed?.LastUsedDate?.toISOString() || null;
+      const lastUsed = safeISOString(roleDetail.RoleLastUsed?.LastUsedDate);
       const staleness = computeStaleness(lastUsed);
 
       roleFindings.push({
@@ -435,7 +431,14 @@ async function enumerateViaFallback(client, accountId, logger) {
         is_service_linked: isServiceLinked,
         trust_relationships: trustRelationships,
         attached_policies: attachedPolicies.map((p) => p.PolicyArn), // placeholder; replaced after doc fetch
-        inline_policies: inlinePolicyNames.map((name) => ({ name, document: null })),
+        inline_policies: await Promise.all(inlinePolicyNames.map(async (name) => {
+          try {
+            const resp = await withRetry(() => client.send(new GetRolePolicyCommand({ RoleName: r.RoleName, PolicyName: name })));
+            return { name, document: decodePolicy(resp.PolicyDocument) };
+          } catch {
+            return { name, document: null };
+          }
+        })),
         has_boundary: !!roleDetail.PermissionsBoundary,
         permission_boundary_arn: roleDetail.PermissionsBoundary?.PermissionsBoundaryArn || null,
         ...staleness,
@@ -480,7 +483,14 @@ async function enumerateViaFallback(client, accountId, logger) {
         region: 'global',
         members: (groupResp.Users || []).map((u) => u.UserName),
         attached_policies: attachedPolicies.map((p) => p.PolicyArn), // placeholder; replaced after doc fetch
-        inline_policies: inlinePolicyNames.map((name) => ({ name, document: null })),
+        inline_policies: await Promise.all(inlinePolicyNames.map(async (name) => {
+          try {
+            const resp = await withRetry(() => client.send(new GetGroupPolicyCommand({ GroupName: g.GroupName, PolicyName: name })));
+            return { name, document: decodePolicy(resp.PolicyDocument) };
+          } catch {
+            return { name, document: null };
+          }
+        })),
         findings: [],
       });
     } catch (err) {
@@ -591,7 +601,7 @@ async function enrichStaleness(client, userFindings, roleFindings, logger) {
           const lastUsedResp = await withRetry(() =>
             client.send(new GetAccessKeyLastUsedCommand({ AccessKeyId: key.AccessKeyId }))
           );
-          const lastUsed = lastUsedResp.AccessKeyLastUsed?.LastUsedDate?.toISOString() || null;
+          const lastUsed = safeISOString(lastUsedResp.AccessKeyLastUsed?.LastUsedDate);
           accessKeys.push({
             key_id: key.AccessKeyId,
             status: key.Status,
@@ -682,7 +692,7 @@ async function enrichStaleness(client, userFindings, roleFindings, logger) {
           serviceData = (statusResp.ServicesLastAccessed || []).map((s) => ({
             service_name: s.ServiceName,
             service_namespace: s.ServiceNamespace,
-            last_authenticated: s.LastAuthenticated?.toISOString() || null,
+            last_authenticated: safeISOString(s.LastAuthenticated),
             total_entities: s.TotalAuthenticatedEntities || 0,
           }));
           break;
@@ -810,7 +820,7 @@ async function run(opts = {}) {
   const { runDir, accountId } = opts;
   const client = opts.clients && opts.clients.iam ? opts.clients.iam : new IAMClient({});
 
-  const logger = createLogger(runDir);
+  const logger = opts.logger || createLogger(runDir, 'iam');
   logger.log('info', 'IAM_Enumeration_Start', { accountId });
 
   let userFindings = [];
@@ -843,32 +853,14 @@ async function run(opts = {}) {
         }
       } catch (fallbackErr) {
         logger.log('error', 'FallbackFailed', { error: fallbackErr.message });
-        status = 'error';
-        const envelope = createEnvelope({
-          module: 'iam',
-          account_id: accountId,
-          region: 'global',
-          status: 'error',
-          findings: [],
-        });
-        writeEnvelope(runDir, envelope);
         await logger.flush();
-        return;
+        return { findings: [], status: 'error' };
       }
     } else {
       // Unexpected error
       logger.log('error', 'GAAD_UnexpectedError', { error: err.message });
-      status = 'error';
-      const envelope = createEnvelope({
-        module: 'iam',
-        account_id: accountId,
-        region: 'global',
-        status: 'error',
-        findings: [],
-      });
-      writeEnvelope(runDir, envelope);
       await logger.flush();
-      return;
+      return { findings: [], status: 'error' };
     }
   }
 
@@ -898,17 +890,8 @@ async function run(opts = {}) {
     status = 'partial';
   }
 
-  // Build and write envelope
   const findings = [...userFindings, ...roleFindings, ...groupFindings, ...oidcFindings];
-  const envelope = createEnvelope({
-    module: 'iam',
-    account_id: accountId,
-    region: 'global',
-    status,
-    findings,
-  });
 
-  const outputPath = writeEnvelope(runDir, envelope);
   logger.log('info', 'IAM_Enumeration_Complete', {
     status,
     users: userFindings.length,
@@ -916,31 +899,13 @@ async function run(opts = {}) {
     groups: groupFindings.length,
     oidc: oidcFindings.length,
     errors: partialErrors.length,
-    output: outputPath,
   });
 
   await logger.flush();
-}
-
-// --- Main (CLI entrypoint) ---
-
-async function main() {
-  const args = parseArgs(process.argv);
-  if (!args.runDir || !args.accountId) {
-    console.error('Error: --run-dir and --account-id are required');
-    console.error('Usage: node scripts/enum/iam.js --run-dir <dir> --account-id <id>');
-    process.exit(1);
-  }
-  try {
-    await run({ runDir: args.runDir, accountId: args.accountId });
-    process.exit(0);
-  } catch (err) {
-    console.error(`Fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  return { findings, status };
 }
 
 if (require.main === module) {
-  main();
+  baseEnum({ module: 'iam', run, global: true });
 }
 module.exports = { run };

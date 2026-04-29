@@ -35,20 +35,16 @@ async function runTests() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-test-sqs-'));
 
     const mockSqs = makeMockClient(apiResponses);
-    const mockSts = makeMockClient({
-      GetCallerIdentityCommand: apiResponses.GetCallerIdentityCommand
-    });
 
-    await run({
+    const result = await run({
       runDir: tmpDir,
       region: 'us-east-1',
-      clients: { sqs: mockSqs, sts: mockSts }
+      accountId: '123456789012',
+      clients: { sqs: mockSqs }
     });
 
-    const actual = JSON.parse(fs.readFileSync(path.join(tmpDir, 'sqs.json'), 'utf-8'));
-    delete actual.timestamp;
-
-    assert.deepStrictEqual(actual, expected);
+    assert.strictEqual(result.status, expected.status);
+    assert.deepStrictEqual(result.findings, expected.findings);
     console.log('  PASS: sqs basic scenario');
     passed++;
     fs.rmSync(tmpDir, { recursive: true });

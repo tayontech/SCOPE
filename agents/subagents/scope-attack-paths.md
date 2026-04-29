@@ -88,7 +88,7 @@ IAM user and role findings in iam.json carry full policy documents:
 - `inline_policies`: array of `{"name": "<policy-name>", "document": {"Statement": [...]}}`
 - `attached_policies`: array of `{"arn": "<policy-arn>", "document": {"Statement": [...]}}`
 
-Use these directly during Stage 2 reasoning to determine what actions a principal can perform. Read the Statement arrays and evaluate Effect/Action/Resource/Condition per the 7-step policy evaluation in Part 1.
+Use these directly during Stage 2 reasoning to determine what actions a principal can perform. Read the Statement arrays and evaluate Effect/Action/Resource/Condition per the policy document guidance in Part 1.
 
 Key dangerous action patterns to flag:
 - `iam:PassRole`, `iam:CreateUser`, `iam:CreateAccessKey`, `iam:AttachUserPolicy`, `iam:PutUserPolicy`
@@ -105,20 +105,11 @@ Do not rely on an external resolution script — reason about the Statement arra
 
 ## Config: Reference Catalogues
 
-Read config files after Phase A completes. These files contain known technique patterns, persistence methods, and post-exploitation vectors. Use them as references during reasoning — not as a checklist to iterate.
+Read `config/techniques.json` after Phase A completes. This file consolidates known escalation methods, persistence techniques, and post-exploitation vectors. It is an optional starting point — creative reasoning from actual permissions is primary.
 
 ```bash
-ESCALATION_CATALOGUE=$(cat "$(git rev-parse --show-toplevel 2>/dev/null || echo '.')/config/escalation-catalogue.json" 2>/dev/null) \
-  || ESCALATION_CATALOGUE='{}'
-[ "$ESCALATION_CATALOGUE" = '{}' ] && echo "[WARN] config/escalation-catalogue.json not found — reasoning without escalation catalogue"
-
-PERSISTENCE_CATALOGUE=$(cat "$(git rev-parse --show-toplevel 2>/dev/null || echo '.')/config/persistence-techniques.json" 2>/dev/null) \
-  || PERSISTENCE_CATALOGUE='{}'
-[ "$PERSISTENCE_CATALOGUE" = '{}' ] && echo "[WARN] config/persistence-techniques.json not found — reasoning without persistence catalogue"
-
-POSTEX_CATALOGUE=$(cat "$(git rev-parse --show-toplevel 2>/dev/null || echo '.')/config/postex-vectors.json" 2>/dev/null) \
-  || POSTEX_CATALOGUE='{}'
-[ "$POSTEX_CATALOGUE" = '{}' ] && echo "[WARN] config/postex-vectors.json not found — reasoning without post-exploitation catalogue"
+TECHNIQUES=$(cat "$(git rev-parse --show-toplevel 2>/dev/null || echo '.')/config/techniques.json" 2>/dev/null) \
+  || TECHNIQUES='{}'
 ```
 
 ## Output Contract
@@ -559,54 +550,11 @@ Scale your analysis depth to the account complexity: a 5-role account needs less
 
 ---
 
-### Part 1: AWS Policy Evaluation Logic (7 Steps)
+### Part 1: Policy Document Usage
 
-Before determining if any escalation path is viable, reason through the full AWS policy evaluation chain for each required permission. Follow these 7 steps IN ORDER:
+Use policy documents in iam.json to determine what permissions are available. If SCP or permission boundary data is present, note restrictions in the path description. Do not halt path discovery on incomplete policy data — reason from what is available.
 
-**Step 1 -- Explicit Deny Check:**
-Any explicit `Deny` in ANY policy (identity, resource, SCP, RCP, boundary, session) terminates evaluation immediately with Deny. Check ALL policy types before concluding allow. An explicit deny always wins.
-
-**Step 2 -- Resource Control Policies (RCPs):**
-If the account is in AWS Organizations (detected by STS module org enumeration), check if RCPs restrict what resources allow. If no Allow in applicable RCPs, result is Deny. Query: `aws organizations list-policies --filter RESOURCE_CONTROL_POLICY`. RCPs are a 2024 AWS feature -- many organizations have not deployed them yet. If org access was denied during STS enumeration, flag as "RCP status unknown -- confidence reduced."
-
-**Step 3 -- Service Control Policies (SCPs):**
-If in Organizations, check if SCPs restrict what principals can do. If no Allow in applicable SCPs, result is Deny. Query: `aws organizations list-policies --filter SERVICE_CONTROL_POLICY`. SCPs do NOT affect the management account -- if the target is in the management account, SCPs do not apply.
-
-SCP data quality tiers:
-- **Live SCPs** (`_source: "live"` or `"config+live"`): Strongest basis — data is current from the Organizations API.
-- **Config-only SCPs** (`_source: "config"`): Note in the path description that SCP data comes from config files and may be stale.
-- **No SCP data available** (neither live nor config): Flag as "SCP status unknown" in the path description.
-
-**Step 4 -- Resource-Based Policies:**
-For most services, a resource-based policy provides UNION with identity policy (either can independently allow access). EXCEPTIONS that require explicit allow in the resource-based policy:
-- **IAM role trust policies (AssumeRole):** The trust policy on the role MUST explicitly allow the caller. Identity policy alone is not sufficient.
-- **KMS key policies (when kms:ViaService condition applies):** The key policy is the primary authority. Identity policy can supplement but the key policy must not deny.
-- **S3 bucket policies with explicit deny:** An explicit deny in a bucket policy blocks access even if identity policy allows.
-
-**Step 5 -- Identity-Based Policies:**
-User/role policies + inherited group policies. All attached managed policies and inline policies are evaluated together. If no Allow from either identity or resource policy, result is Deny.
-
-**Step 6 -- Permission Boundaries:**
-INTERSECTION with identity policy. Both must allow. The boundary acts as a maximum permissions cap -- it does not grant permissions, only restricts them. Check: `User.PermissionsBoundary` or `Role.PermissionsBoundary` from IAM module data. If a boundary is set, even if the identity policy allows an action, the boundary must also allow it.
-
-**Step 7 -- Session Policies:**
-For role sessions only (sts:AssumeRole with Policy parameter, or federation with policy). The session policy is the final restriction -- the effective permissions are the intersection of the role's identity policy and the session policy. Most role assumptions do NOT include session policies, but check for their presence.
-
-**Quick Reasoning Template -- use this for every permission check:**
-```
-For permission X on resource Y:
-1. Any explicit Deny anywhere? -> DENIED (stop)
-2. In Organizations? -> SCPs + RCPs must allow
-3. Resource has resource-based policy? -> Check for allow there
-4. Identity policy allows? -> Need to check
-5. Permission boundary set? -> Must also allow X
-6. Using role session? -> Session policy must allow X
-If all checks pass -> ALlowED
-```
-
-Apply this evaluation template when checking whether any permission is actually effective during Stage 2 reasoning. Do not skip steps. If any step cannot be verified (e.g., SCP data unavailable), note the gap in the path description.
-
-**Blocked edge annotation:** When the 7-step policy evaluation determines that an SCP, RCP, or permission boundary blocks a permission that would otherwise be allowed by identity/resource policy, the graph edge is still created but annotated as blocked:
+**Blocked edge annotation:** When an SCP, RCP, or permission boundary blocks a permission that would otherwise be allowed by identity/resource policy, the graph edge is still created but annotated as blocked:
 
 ```json
 {"source": "user:alice", "target": "esc:iam:CreatePolicyVersion",
@@ -614,7 +562,7 @@ Apply this evaluation template when checking whether any permission is actually 
  "blocked": true, "blocked_by": "SCP: DenyIAMPolicyModification"}
 ```
 
-This preserves the edge in the graph for visibility (the permission was granted but is currently neutralized) while preventing reachability traversal from following it. The `blocked_by` value identifies the specific control: `"SCP: <policy-name>"`, `"RCP: <policy-name>"`, or `"Boundary: <boundary-policy-name>"`. If multiple controls block the same edge, use the first one encountered in the 7-step evaluation order.
+This preserves the edge in the graph for visibility (the permission was granted but is currently neutralized) while preventing reachability traversal from following it.
 
 ---
 
@@ -646,14 +594,11 @@ Think in chains, not in isolation:
 - "This user has no MFA but has console access and is in the Developers group, which has s3:* on the terraform state bucket — if phished, the attacker reaches..."
 - "This cross-account trust has no ExternalId and the trusting account is not in owned_accounts — any principal in account 999999999999 can assume this role and..."
 
-Use the 7-step policy evaluation from Part 1 to validate whether each permission is actually effective (SCPs, boundaries, resource policies).
+Use the policy documents from Part 1 to validate whether each permission is actually effective. If SCP or permission boundary data is present, note restrictions.
 
-Apply the config catalogues loaded after Phase A:
-- `$ESCALATION_CATALOGUE`: known escalation methods with required permissions — reference when a permission pattern matches a known technique
-- `$PERSISTENCE_CATALOGUE`: persistence capabilities to flag when principals have them
-- `$POSTEX_CATALOGUE`: post-exploitation capabilities to quantify impact
+Reference `$TECHNIQUES` (loaded from `config/techniques.json` above) for known escalation methods, persistence capabilities, and post-exploitation vectors when a permission pattern matches a known technique.
 
-Config files are starting points. If you observe a permission combination that creates an escalation path not in the catalogue, reason about it and include it. The catalogue does not define the ceiling.
+`config/techniques.json` is an optional starting point. If you observe a permission combination that creates an escalation path not in the file, reason about it and include it. Creative reasoning from actual permissions is primary — the techniques file does not define the ceiling.
 
 Describe each finding as an environment-specific story: name the real resources, explain why this specific combination matters in THIS account. Use real ARNs from enumeration data, not placeholders.
 
@@ -663,15 +608,15 @@ Generate findings for all noteworthy patterns using the category framework from 
 
 ### Part 2: Escalation Method Reference
 
-The full escalation catalogue (60 methods across 4 categories plus 7 cross-service chains) is in `config/escalation-catalogue.json` (loaded into `$ESCALATION_CATALOGUE` above). Reference it during Stage 2 reasoning when you observe permission patterns that match known techniques.
+Known escalation methods (across 4 categories plus cross-service chains) are in `config/techniques.json` (loaded into `$TECHNIQUES` above). Reference during Stage 2 reasoning when you observe permission patterns that match known techniques.
 
-The catalogue is a starting point. If you observe a permission combination that creates an escalation path not in the catalogue, reason about it and include it.
+`config/techniques.json` is an optional starting point — creative reasoning from actual permissions is primary. If you observe a permission combination that creates an escalation path not in the file, reason about it and include it.
 
 ---
 
 ### Part 3: Cross-Service Attack Chains
 
-Known cross-service chains (Lambda code injection, PassRole chains, cross-account pivots, SSM/secrets chains, EBS snapshot exfiltration, KMS grant bypass) are in `config/escalation-catalogue.json` under the `chains` key. Reference during Stage 2 reasoning.
+Known cross-service chains (Lambda code injection, PassRole chains, cross-account pivots, SSM/secrets chains, EBS snapshot exfiltration, KMS grant bypass) are in `config/techniques.json`. Reference during Stage 2 reasoning.
 
 After checking known chains, reason about NOVEL combinations in the enumeration data — unusual permission groupings, write access to resources consumed by higher-privilege automated processes, service integrations with implicit trust, stale configurations. This creative reasoning is the differentiator from static tools.
 
@@ -829,7 +774,6 @@ Convert enumeration findings from all modules into categorized attack path entri
 | Privilege escalation (Parts 1-5 above) | `privilege_escalation` |
 | Trust misconfigurations | `trust_misconfiguration` |
 | Data exposure | `data_exposure` |
-| Credential risks | `credential_risk` |
 | Excessive permissions | `excessive_permission` |
 | Network exposure | `network_exposure` |
 
@@ -864,17 +808,7 @@ For each finding from S3, Secrets Manager, EC2/EBS enumeration:
 
 MITRE: T1530 (Data from Cloud Storage), T1537 (Transfer Data to Cloud Account) for snapshots.
 
-#### 6C: Credential Risks (`credential_risk`)
-
-For each finding from IAM enumeration:
-- **User with console access but no MFA, with admin-equivalent policies** → critical. Name: "Admin User Without MFA: {user}". Steps: show password spray / phishing scenario leading to full admin.
-- **User with console access but no MFA, non-admin** → high. Name: "User Without MFA: {user}". Steps: show credential compromise leading to their permission set.
-- **Access keys older than 90 days** → medium. Name: "Stale Access Key: {user} (key age: {days}d)". Steps: show key reuse from leaked credentials.
-- **Unused access keys still active (no usage in 90+ days)** → medium. Name: "Unused Active Access Key: {user}".
-
-MITRE: T1078.004 (Valid Accounts: Cloud Accounts), T1098.001 (Additional Cloud Credentials).
-
-#### 6D: Excessive Permissions (`excessive_permission`)
+#### 6C: Excessive Permissions (`excessive_permission`)
 
 For each finding from IAM policy analysis:
 - **Non-admin user/role with `Action: "*", Resource: "*"`** → critical. Name: "Wildcard Permissions on {principal}". Steps: show the principal can perform any action.
@@ -883,7 +817,7 @@ For each finding from IAM policy analysis:
 
 MITRE: T1548 (Abuse Elevation Control Mechanism), T1078.004.
 
-#### 6E: Network Exposure (`network_exposure`)
+#### 6D: Network Exposure (`network_exposure`)
 
 For each finding from EC2/VPC enumeration:
 - **Internet-facing EC2 instance with admin or high-privilege IAM role** → critical. Name: "Internet-Facing EC2 with Admin Role: {instance}". Steps: show SSRF/RCE → IMDS → admin credentials.
@@ -933,11 +867,6 @@ Role: <name>
 
 **trust_misconfiguration** — Generate a SEPARATE attack path for EVERY cross-account trust to **external** (non-owned) accounts without `sts:ExternalId` condition. Skip ExternalId findings for accounts listed in config/accounts.json — confused deputy is not a risk when you control both sides. Each path should name the specific role, the trusted principal, and the confused deputy risk.
 
-**credential_risk** — Generate a SEPARATE attack path for EACH of:
-- Every user with stale access keys (>90 days old) — one path per user
-- Every user with console access but no MFA — one path per user
-- Every user with BOTH console access AND programmatic access keys but no MFA — one path per user (this is distinct from the no-MFA finding because the dual access surface is larger)
-
 **excessive_permission** — Generate attack paths for:
 - Every role with admin-equivalent names (e.g., containing "Admin", "Master", "FullAccess", "PowerUser") — enumerate their attached policies and flag if they grant broad permissions
 - Every role or user with `Action: "*", Resource: "*"` that is not an intended admin role
@@ -949,10 +878,7 @@ Role: <name>
 - Name the specific source principal, destination account, destination role, and what permissions the destination role grants
 - For internal accounts (in owned-accounts set), note the account name and flag for potential multi-hop analysis
 
-**persistence** — Generate attack paths for roles that ENABLE persistence, even if no principal currently exercises these permissions:
-- Roles with `iam:CreateUser`, `iam:CreateAccessKey`, `iam:AttachUserPolicy` — flag as persistence enablers
-- Roles with `iam:UpdateAssumeRolePolicy` — flag as trust policy backdoor enablers
-- Roles with `lambda:AddPermission` — flag as cross-account invoke enablers
+**persistence** — Identify principals with persistence-enabling permissions (`iam:CreateUser`, `iam:CreateAccessKey`, `iam:AttachUserPolicy`, `iam:UpdateAssumeRolePolicy`, `lambda:AddPermission`) as findings. Scope-defend designs persistence controls from these.
 
 **data_exposure** — Generate attack paths for every read/write path to sensitive data:
 - Roles with read access to Secrets Manager, SSM Parameter Store, or KMS
@@ -973,8 +899,6 @@ Self-check counts:
 - Total roles analyzed: [R]
 - Total trust relationships: [T]
 - Cross-account trusts without ExternalId: [E]
-- Users without MFA: [M]
-- Stale access keys: [K]
 - Roles with write access to IAM/STS: [W]
 - Roles with read access to secrets/data: [D]
 - Attack paths generated: [N]
@@ -1006,7 +930,7 @@ For each category below, confirm you have addressed it or state explicitly why i
 
 **Cross-Account Pivots** — all cross-account trust edges, lateral movement to owned accounts, trust edges to external accounts
 
-**New 2025/2026 Techniques** (from `$ESCALATION_CATALOGUE` novel_patterns) — IAM Identity Center permission set escalation, Bedrock Agent code execution, Verified Access policy injection, IAM Roles Anywhere credential injection, Service Catalog portfolio escalation, Organizations delegated administrator abuse
+**New 2025/2026 Techniques** (from `$TECHNIQUES` novel_patterns) — IAM Identity Center permission set escalation, Bedrock Agent code execution, Verified Access policy injection, IAM Roles Anywhere credential injection, Service Catalog portfolio escalation, Organizations delegated administrator abuse
 
 For any category where you have no findings: state "Not applicable — [reason from enumeration data]."
 For any category where you generated findings: confirm the path count.
@@ -1071,17 +995,9 @@ Even when assumption fails, build attack paths from the trust relationship data:
 
 ---
 
-### Part 7: Persistence Path Analysis
+### Part 7: Persistence Enabler Identification
 
-After identifying escalation and misconfiguration paths, analyze each principal's permissions for **persistence establishment capabilities**. These are attack paths where a compromised principal can establish durable, hard-to-detect access that survives credential rotation, incident response, or partial remediation.
-
-**Reasoning approach:** For each principal with interesting permissions, ask: "If this principal were compromised, what persistence mechanisms could an attacker establish?" Reference `$PERSISTENCE_CATALOGUE` (loaded above) for known persistence methods across IAM, STS, EC2, Lambda, S3/KMS/Secrets Manager. Apply the 7-step policy evaluation from Part 1 to validate each capability.
-**Emit as attack paths:** For each principal that has the required permissions for a persistence method, emit an attack path with `"category": "persistence"`. Include:
-- **name**: "Persistence: {method} via {principal}"
-- **severity**: critical for methods that survive credential rotation (backdoor trust, federation, eternal grants); high for durable access (long-lived tokens, cron triggers, ACLs); medium for methods requiring additional steps
-- **steps**: Concrete AWS CLI commands using real ARNs from enumeration data
-- **detection_opportunities**: CloudTrail events + SPL queries
-- **remediation**: Specific policy changes to block the persistence vector
+Identify persistence enablers as findings — principals with `iam:CreateUser`, `iam:CreateAccessKey`, `iam:AttachUserPolicy`, or similar that enable durable access without rotation constraints. Include as findings in results. Scope-defend will design persistence controls from these findings.
 
 ---
 
@@ -1089,7 +1005,7 @@ After identifying escalation and misconfiguration paths, analyze each principal'
 
 After analyzing persistence capabilities, evaluate what **post-exploitation actions** each principal can perform. These represent the impact of a compromise — what an attacker can actually do with the access they have.
 
-**Reasoning approach:** For each principal, ask: "With these permissions, what data can be exfiltrated? What services can be disrupted? Where can the attacker move laterally?" Reference `$POSTEX_CATALOGUE` (loaded above) for known data exfiltration, lateral movement, and destructive action patterns.
+**Reasoning approach:** For each principal, ask: "With these permissions, what data can be exfiltrated? What services can be disrupted? Where can the attacker move laterally?" Reference `$TECHNIQUES` (loaded above) for known data exfiltration, lateral movement, and destructive action patterns.
 **Emit as attack paths:** For each actionable finding:
 - Data exfiltration and destructive actions → `"category": "post_exploitation"`, severity by data sensitivity and blast radius
 - Lateral movement paths → `"category": "lateral_movement"`, severity by target value and hop count

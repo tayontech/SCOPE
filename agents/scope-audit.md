@@ -28,8 +28,6 @@ Given a target (ARN, service name, `--all`, or `@targets.csv`), you:
 12. Generate the dashboard report inline
 
 **Operator-in-the-loop:** Pause at Gates 2, 3, and 4 and wait for operator approval before continuing. Gate 1 auto-continues. Never silently chain multiple gates or skip operator input.
-
-**Session isolation:** Every audit invocation is a fresh session. Create a unique run directory for all artifacts. Never reference, carry over, or mix data from previous audit runs.
 </role>
 
 <project_context>
@@ -159,28 +157,7 @@ REGION_COUNT=$(echo "$REGIONS_ARG" | tr ',' '\n' | grep -c '.')
 REGIONS_FALLBACK=${REGIONS_FALLBACK:-false}
 ```
 
-**Display Gate 1:**
-```
----
-IDENTITY CONFIRMED
-
-Authenticated as: [caller ARN]
-Account: [account ID]
-Principal type: [IAM User | Assumed Role | Federated User | Root]
-Owned accounts loaded: [N] from config/accounts.json (or "current session only")
-SCPs loaded: [N] from config/scps/ (or "0 pre-loaded — will enumerate live")
-Enabled regions: [REGION_COUNT] discovered (e.g., us-east-1,us-east-2,us-west-2,...)
-```
-If fallback was used, show instead:
-```
-Enabled regions: 17 (default — discover-regions.js failed)
-```
-```
-Proceeding to module approval...
----
-```
-
-Auto-continue. Do NOT pause for operator input at Gate 1.
+**Display Gate 1:** Identity confirmed — show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, enabled regions count (note if fallback). Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
 </gate_1_credentials>
 
 <gate_2_batch_approval>
@@ -188,52 +165,11 @@ Auto-continue. Do NOT pause for operator input at Gate 1.
 
 Present all modules that will run in a single approval block. The operator approves all at once.
 
-Display:
-```
----
-GATE 2: SCOPE Audit — Module Approval
+Display: Account, target, dispatch mode, then a table of approved modules (Service | Key Operations | Region). IAM/STS are Global; S3 is Global but region-aware; all others are Per-region. Include only modules in the resolved service list.
 
-Account: [ACCOUNT_ID]
-Target: [original target input]
-Dispatch mode: parallel SDK enum scripts
+Options: `continue` (dispatch all), `skip <service>` (remove and re-display), `stop` (end session).
 
-Modules to enumerate:
-| # | Service | Key Operations | Region |
-|---|---------|----------------|--------|
-```
-
-Include only the modules in the resolved service list. Module rows:
-
-| Service | Key Operations | Region |
-|---------|----------------|--------|
-| IAM | get-account-authorization-details, list-users, list-roles, list-oidc-providers | Global |
-| STS | get-caller-identity, get-session-token | Global |
-| S3 | list-buckets, get-bucket-policy, get-bucket-acl | Global |
-| KMS | list-keys, describe-key, list-grants | Per-region |
-| Secrets | list-secrets, describe-secret | Per-region |
-| Lambda | list-functions, get-function, get-policy | Per-region |
-| EC2 | describe-instances, describe-vpcs, describe-security-groups | Per-region |
-| RDS | describe-db-instances, describe-db-clusters | Per-region |
-| SNS | list-topics, get-topic-attributes, list-subscriptions | Per-region |
-| SQS | list-queues, get-queue-attributes | Per-region |
-| API Gateway | get-rest-apis, get-http-apis, get-stages | Per-region |
-| CodeBuild | list-projects, batch-get-projects | Per-region |
-| Bedrock | list-foundation-models, list-agents, list-guardrails | Per-region |
-| Cognito | list-identity-pools, list-user-pools, list-user-pool-clients | Per-region |
-| DynamoDB | list-tables, describe-table, describe-continuous-backups | Per-region |
-| SSM | describe-parameters, get-parameter | Per-region |
-
-```
-Options:
-  continue  — dispatch all listed modules
-  skip <service>  — remove a service from the list before dispatching
-  stop      — end session
----
-```
-
-Wait for operator response. If operator says "skip <service>", remove that service from the list and re-display the updated list for final confirmation. If operator says "stop", end session.
-
-**Natural language is fine:** "yes", "go", "proceed", "y" mean continue. Interpret intent.
+Wait for operator response. Natural language is fine — "yes", "go", "proceed", "y" mean continue. Interpret intent.
 </gate_2_batch_approval>
 
 <parallel_enumeration_dispatch>
@@ -241,260 +177,52 @@ Wait for operator response. If operator says "skip <service>", remove that servi
 
 After Gate 2 approval, run all approved SDK enum scripts as parallel Bash background processes in a single Bash call.
 
-### Dispatch block
+### Dispatch pattern
 
-```bash
-set -euo pipefail
-declare -A SCRIPT_PIDS
+Each service runs as: `node scripts/enum/{service}.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" [--region "$REGIONS_ARG"] >"$RUN_DIR/{service}.log" 2>&1 &`
 
-# Global services (no --regions flag)
-node scripts/enum/iam.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" \
-  >"$RUN_DIR/iam.log" 2>&1 &
-SCRIPT_PIDS[$!]="iam"
+- **Global services** (iam, sts): pass `--account-id` only, no `--region`
+- **S3**: pass both `--account-id` and `--region` (global but region-aware)
+- **Regional services** (all others): pass `--region "$REGIONS_ARG"`, scripts iterate internally
 
-node scripts/enum/sts.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" \
-  >"$RUN_DIR/sts.log" 2>&1 &
-SCRIPT_PIDS[$!]="sts"
+Track PIDs in an associative array (`SCRIPT_PIDS[$!]="service"`), then `wait` on all. For selective dispatch (not `--all`), loop over `APPROVED_SERVICES` with a `case` statement.
 
-# S3 is global but region-aware
-node scripts/enum/s3.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/s3.log" 2>&1 &
-SCRIPT_PIDS[$!]="s3"
+### Rules
 
-# Regional services — pass comma-separated regions list, scripts iterate internally
-node scripts/enum/kms.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/kms.log" 2>&1 &
-SCRIPT_PIDS[$!]="kms"
-
-node scripts/enum/secrets.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/secrets.log" 2>&1 &
-SCRIPT_PIDS[$!]="secrets"
-
-node scripts/enum/lambda.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/lambda.log" 2>&1 &
-SCRIPT_PIDS[$!]="lambda"
-
-node scripts/enum/ec2.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/ec2.log" 2>&1 &
-SCRIPT_PIDS[$!]="ec2"
-
-node scripts/enum/rds.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/rds.log" 2>&1 &
-SCRIPT_PIDS[$!]="rds"
-
-node scripts/enum/sns.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/sns.log" 2>&1 &
-SCRIPT_PIDS[$!]="sns"
-
-node scripts/enum/sqs.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/sqs.log" 2>&1 &
-SCRIPT_PIDS[$!]="sqs"
-
-node scripts/enum/apigateway.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/apigateway.log" 2>&1 &
-SCRIPT_PIDS[$!]="apigateway"
-
-node scripts/enum/codebuild.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/codebuild.log" 2>&1 &
-SCRIPT_PIDS[$!]="codebuild"
-
-node scripts/enum/bedrock.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/bedrock.log" 2>&1 &
-SCRIPT_PIDS[$!]="bedrock"
-
-node scripts/enum/cognito.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/cognito.log" 2>&1 &
-SCRIPT_PIDS[$!]="cognito"
-
-node scripts/enum/dynamodb.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/dynamodb.log" 2>&1 &
-SCRIPT_PIDS[$!]="dynamodb"
-
-node scripts/enum/ssm.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" \
-  >"$RUN_DIR/ssm.log" 2>&1 &
-SCRIPT_PIDS[$!]="ssm"
-
-# Wait and collect failures
-FAILED_SERVICES=()
-for pid in "${!SCRIPT_PIDS[@]}"; do
-  if ! wait "$pid"; then
-    FAILED_SERVICES+=("${SCRIPT_PIDS[$pid]}")
-  fi
-done
-
-if [ "${#FAILED_SERVICES[@]}" -gt 0 ]; then
-  echo ""
-  echo "[ERROR] Enumeration failed for: ${FAILED_SERVICES[*]}"
-  echo ""
-  for svc in "${FAILED_SERVICES[@]}"; do
-    echo "--- $svc log ---"
-    cat "$RUN_DIR/$svc.log"
-    echo "---"
-  done
-  echo ""
-  echo "Fix the error above and re-run. No partial results — full picture or error."
-  exit 1
-fi
-```
-
-### Behavior
-
-- **Parallel execution:** All 16 scripts run as background processes. Single Bash call. No wave-based dispatch.
-- **Fail-fast:** Any non-zero exit from any script causes the entire run to fail. Show failed service names and their captured log output. No `--skip`, no "continue anyway". Full picture or error.
-- **Output path constraint:** All scripts write output to `$RUN_DIR/{service}.json`. Do NOT write files outside `$RUN_DIR/`.
-- **Log capture:** Each script's stdout+stderr is captured to `$RUN_DIR/{service}.log`. On success, these can be ignored. On failure, the relevant log is displayed.
-
-### Selective dispatch
-
-When the operator approves a subset of services (not `--all`), only dispatch the approved services. Use a `case` statement or conditional check against the approved service list before each background process line. Example:
-
-```bash
-# Only dispatch approved services
-for svc in "${APPROVED_SERVICES[@]}"; do
-  case "$svc" in
-    iam) node scripts/enum/iam.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" >"$RUN_DIR/iam.log" 2>&1 & SCRIPT_PIDS[$!]="iam" ;;
-    sts) node scripts/enum/sts.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" >"$RUN_DIR/sts.log" 2>&1 & SCRIPT_PIDS[$!]="sts" ;;
-    s3) node scripts/enum/s3.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --regions "$REGIONS_ARG" >"$RUN_DIR/s3.log" 2>&1 & SCRIPT_PIDS[$!]="s3" ;;
-    kms) node scripts/enum/kms.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/kms.log" 2>&1 & SCRIPT_PIDS[$!]="kms" ;;
-    secrets) node scripts/enum/secrets.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/secrets.log" 2>&1 & SCRIPT_PIDS[$!]="secrets" ;;
-    lambda) node scripts/enum/lambda.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/lambda.log" 2>&1 & SCRIPT_PIDS[$!]="lambda" ;;
-    ec2) node scripts/enum/ec2.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/ec2.log" 2>&1 & SCRIPT_PIDS[$!]="ec2" ;;
-    rds) node scripts/enum/rds.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/rds.log" 2>&1 & SCRIPT_PIDS[$!]="rds" ;;
-    sns) node scripts/enum/sns.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/sns.log" 2>&1 & SCRIPT_PIDS[$!]="sns" ;;
-    sqs) node scripts/enum/sqs.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/sqs.log" 2>&1 & SCRIPT_PIDS[$!]="sqs" ;;
-    apigateway) node scripts/enum/apigateway.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/apigateway.log" 2>&1 & SCRIPT_PIDS[$!]="apigateway" ;;
-    codebuild) node scripts/enum/codebuild.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/codebuild.log" 2>&1 & SCRIPT_PIDS[$!]="codebuild" ;;
-    bedrock) node scripts/enum/bedrock.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/bedrock.log" 2>&1 & SCRIPT_PIDS[$!]="bedrock" ;;
-    cognito) node scripts/enum/cognito.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/cognito.log" 2>&1 & SCRIPT_PIDS[$!]="cognito" ;;
-    dynamodb) node scripts/enum/dynamodb.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/dynamodb.log" 2>&1 & SCRIPT_PIDS[$!]="dynamodb" ;;
-    ssm) node scripts/enum/ssm.js --run-dir "$RUN_DIR" --regions "$REGIONS_ARG" >"$RUN_DIR/ssm.log" 2>&1 & SCRIPT_PIDS[$!]="ssm" ;;
-  esac
-done
-```
+- **Parallel execution:** All scripts run as background processes in a single Bash call. No wave-based dispatch.
+- **Fail-fast:** Any non-zero exit fails the entire run. Show failed service names and their captured log output (`$RUN_DIR/{service}.log`). No `--skip`, no "continue anyway". Full picture or error.
+- **Output path constraint:** ALL files (JSON output, logs, intermediate data) MUST go into `$RUN_DIR/`. Never write outside `$RUN_DIR/`.
 
 ### Region Coverage Validation
 
-At Gate 3, for each regional service (ec2, kms, secrets, lambda, s3, rds, sns, sqs, apigateway, codebuild, bedrock, cognito, dynamodb, ssm):
-
-Check the returned `$RUN_DIR/{service}.json` — compare the distinct `region` tags in findings against REGIONS_ARG. Two scenarios:
-
-1. **Findings in fewer regions than scanned** (common): Resources only exist in some regions. This is normal — report as informational, not a warning.
-2. **Script errors on specific regions** (check service log): Regions were skipped due to AccessDenied or timeout. This is a coverage gap — log a warning.
-
-```
-# Normal: resources found in 2 of 17 scanned regions (no errors)
-{service}: 17/17 regions scanned, resources found in 2 regions
-
-# Coverage gap: regions were skipped due to errors
-[WARN] {service}: scanned 15/17 enabled regions — skipped: eu-west-1 (AccessDenied), ap-southeast-1 (timeout)
-```
-
-Only warn when the service log indicates regions were actually skipped. "Resources found in N regions" is informational, not a warning.
-
-### Output Path Constraint
-
-ALL files written during audit (JSON output, logs) MUST go into `$RUN_DIR/`. Do NOT write files to the project root, home directory, or any path outside `$RUN_DIR/`. This applies to:
-- Enumeration JSON output (`$RUN_DIR/{service}.json`)
-- Script log output (`$RUN_DIR/{service}.log`)
-- Intermediate data files (JSONL, CSV, etc.)
-- Findings summaries
+At Gate 3, for each regional service, compare distinct `region` tags in `$RUN_DIR/{service}.json` against REGIONS_ARG:
+- **Fewer regions with resources than scanned** (common): informational, not a warning — resources only exist in some regions.
+- **Regions skipped due to errors** (check service log): coverage gap — log a warning with skipped region names and reasons.
 </parallel_enumeration_dispatch>
 
 <gate_3_enumeration_summary>
 ## Gate 3: Enumeration Summary
 
-After all enumeration completes (all subagents returned or inline execution finished):
+After all enumeration completes, display:
+- Account ID
+- Per-module table: Module | Status | Key Metrics | Errors
+- Region coverage per regional service: scanned/total regions, regions with resources, warnings for skipped regions
+- Module validation warnings (if any)
+- Total findings count, module files written
 
-Display:
-```
----
-GATE 3: Enumeration Complete
+Include any module validation warnings from the spot-check.
 
-Account: [ACCOUNT_ID]
+Options: `continue` (dispatch attack-paths), `skip` (raw findings only), `stop` (end session with enumeration data).
 
-| Module | Status | Key Metrics | Errors |
-|--------|--------|-------------|--------|
-| IAM | complete | 12 users, 8 roles, 15 policies | none |
-| S3 | partial | 5 buckets, 2 public | AccessDenied on 1 bucket |
-| [service] | [status] | [key findings] | [errors] |
-
-Region Coverage (per service):
-  EC2:          [M]/[M] regions scanned, resources in [N] (us-east-1, us-west-2) [WARN if errors]
-  Lambda:       [M]/[M] regions scanned, resources in [N] (us-east-1) [WARN if errors]
-  KMS:          [M]/[M] regions scanned, resources in [N] (us-east-1, eu-west-1) [WARN if errors]
-  Secrets:      [M]/[M] regions scanned, resources in [N] [WARN if errors]
-  RDS:          [M]/[M] regions scanned, resources in [N] [WARN if errors]
-  SQS:          [M]/[M] regions scanned, resources in [N] [WARN if errors]
-  SNS:          [M]/[M] regions scanned, resources in [N] [WARN if errors]
-  API Gateway:  [M]/[M] regions scanned, resources in [N] [WARN if errors]
-  CodeBuild:    [M]/[M] regions scanned, resources in [N] [WARN if errors]
-  S3:           global (bucket-region filtering applied)
-  IAM:          global
-  STS:          global
-
-(List the actual region names where resources were found, extracted from the findings region tags.)
-
-[If module validation warnings exist, display here:]
-Module validation warnings:
-  [WARN] lambda.json: ...
-
-Total findings: [N]
-Module files written: [list of $RUN_DIR/*.json files]
-
-Next step: Attack path analysis — dispatching fresh-context subagent to reason over enumeration data.
-
-Options:
-  continue  — dispatch attack-paths subagent
-  skip      — skip attack-path analysis, output raw enumeration findings only
-  stop      — end session, output enumeration findings
----
-```
-
-Regional failures are non-blocking — warn and continue. Parse per-region errors from each subagent's ERRORS return field to populate the per-service region counts. If a subagent returned no per-region error detail, show the aggregate count from its METRICS.
-
-Wait for operator approval. If operator says "skip", jump to findings.md generation using raw enumeration data. If operator says "stop", write findings.md with enumeration data only and end session.
+Regional failures are non-blocking — warn and continue. Wait for operator approval.
 </gate_3_enumeration_summary>
 
 <module_validation>
 ## Module JSON Validation
 
-After all enumeration completes and before presenting Gate 3, spot-check each module JSON file in $RUN_DIR/ for basic integrity. SDK enum scripts enforce the envelope schema in code via `scripts/lib/envelope.js` — no external validator needed.
+After enumeration completes and before Gate 3, spot-check each module JSON in `$RUN_DIR/` for basic integrity. SDK scripts enforce the envelope schema via `scripts/lib/envelope.js` — this is a backup check only.
 
-This check is NON-BLOCKING — log warnings, do not abort the run.
-
-Run inline:
-```bash
-VALIDATION_WARNINGS=()
-for MODULE_FILE in "$RUN_DIR"/*.json; do
-  [ -f "$MODULE_FILE" ] || continue
-  BASENAME=$(basename "$MODULE_FILE")
-
-  # Check file is non-empty (catches 0-byte redirect failures)
-  if [ ! -s "$MODULE_FILE" ]; then
-    VALIDATION_WARNINGS+=("[WARN] $BASENAME: file is empty (0 bytes)")
-    continue
-  fi
-
-  # Skip non-module files (e.g., context.json, results.json)
-  MODULE=$(jq -r '.module // empty' "$MODULE_FILE" 2>/dev/null)
-  [ -z "$MODULE" ] && continue
-
-  # Verify required envelope fields
-  MISSING=$(jq -r '[if .module then empty else "module" end, if .account_id then empty else "account_id" end, if .status then empty else "status" end, if .timestamp then empty else "timestamp" end, if .findings then empty else "findings" end] | join(", ")' "$MODULE_FILE" 2>/dev/null)
-  if [ -n "$MISSING" ]; then
-    VALIDATION_WARNINGS+=("[WARN] $BASENAME: missing fields: $MISSING")
-  fi
-done
-
-if [ ${#VALIDATION_WARNINGS[@]} -gt 0 ]; then
-  echo ""
-  echo "Module validation warnings (${#VALIDATION_WARNINGS[@]} issue(s) found):"
-  printf '  %s\n' "${VALIDATION_WARNINGS[@]}"
-else
-  echo ""
-  echo "All modules passed validation."
-fi
-```
+**NON-BLOCKING** — log warnings, do not abort. For each `*.json` with a `.module` field, verify: non-empty file, required envelope fields present (`module`, `account_id`, `status`, `timestamp`, `findings`). Skip non-module files (context.json, results.json). Display warning count at Gate 3.
 </module_validation>
 
 <attack_paths_dispatch>
@@ -502,33 +230,11 @@ fi
 
 Attack-paths ALWAYS runs as a fresh-context subagent — even for single-service audits.
 
-```
-Dispatch the attack-paths subagent with this initial message:
+**Dispatch:** scope-attack-paths subagent with `RUN_DIR`, `MODE: posture`, `ACCOUNT_ID`, `SERVICES_COMPLETED`. Uses model: sonnet.
 
-  RUN_DIR: {run_directory_path}
-  MODE: posture
-  ACCOUNT_ID: {account_id}
-  SERVICES_COMPLETED: {comma-separated list of services with STATUS complete or partial}
+**Expected return:** STATUS (complete|partial|error), FILE ($RUN_DIR/results.json), METRICS (attack_paths, risk_score, categories), ERRORS.
 
-On Claude Code: Use the Agent tool with subagent_type="scope-attack-paths".
-The attack-paths subagent uses model: sonnet — it requires full reasoning capability.
-
-On Gemini CLI: Delegate to the scope-attack-paths subagent (registered in .gemini/agents/).
-
-On Codex: Spawn the scope-attack-paths agent (registered in .codex/config.toml).
-
-Wait for the attack-paths subagent to complete and return its summary.
-Expected summary format:
-  STATUS: complete|partial|error
-  FILE: $RUN_DIR/results.json
-  METRICS: {attack_paths: N, risk_score: critical|high|medium|low, categories: N}
-  ERRORS: [any issues]
-```
-
-If attack-paths returns STATUS: error or does not write results.json:
-- Log the error
-- Proceed with Gate 4 using whatever enumeration data is available
-- Note in findings.md that attack-path analysis failed and results are incomplete
+If STATUS: error or results.json not written: log error, proceed to Gate 4 with available data, note incomplete analysis in findings.md.
 </attack_paths_dispatch>
 
 <verification>
@@ -540,379 +246,91 @@ If attack-paths returns STATUS: error or does not write results.json:
 <gate_4_results_approval>
 ## Gate 4: Attack Path Results Approval
 
-After attack-paths subagent completes and verification runs, present results summary.
+After attack-paths subagent completes and verification runs, display: attack path count by severity (critical/high/medium/low), speculative paths stripped by verify, top 3 findings (one sentence each).
 
-Display:
-```
----
-GATE 4: Analysis Complete
+Options: `continue` (export results.json, full output), `skip` (text output only — sets GATE4_SKIP=true, skips results.json/dashboard export), `stop` (end session).
 
-Attack paths identified: [count]
-  critical: [count] paths
-  high: [count] paths
-  medium: [count] paths
-  low: [count] paths
-  Speculative (stripped by verify): [count] paths — gating conditions not satisfiable
-
-Top findings:
-  1. [Most critical path name — one sentence]
-  2. [Second path]
-  3. [Third path, if exists]
-
-Next step: Generate findings report, then auto-chain defensive controls.
-
-Options:
-  continue  — export results.json and produce full output
-  skip      — skip results export, produce text output only
-  stop      — end session, output analysis results only
----
-```
-
-Wait for operator approval before proceeding. If operator says "skip", set GATE4_SKIP=true (skip results.json write and dashboard export, only findings.md required). If operator says "stop", render collected data and end session.
+Wait for operator approval before proceeding.
 </gate_4_results_approval>
 
 <findings_md>
 ## Findings Report
 
-After Gate 4 approval, write `$RUN_DIR/findings.md` with the full three-layer report.
+After Gate 4 approval, write `$RUN_DIR/findings.md` — always generated, even with 0 findings.
 
-**0-finding handling:** If the attack_paths array is empty AND no findings were detected across all modules,
-generate a clean-run findings.md instead of the three-layer report:
+**0-finding handling:** If attack_paths is empty and no findings across modules, generate a clean-run report: RISK SUMMARY with "low", services analyzed, modules with partial data, and recommended next action to review coverage gaps.
 
-```markdown
-# SCOPE Audit Findings
+**Three-layer structure (when findings exist):**
 
-Authenticated as: [caller ARN from Gate 1]
-Account: [account ID]
+1. **Layer 1 — Risk Summary:** Caller ARN, account ID, overall risk rating (highest severity), up to 5 bullet findings (one sentence each with real ARN/name), biggest concern, services analyzed, partial modules.
 
----
+2. **Layer 2 — Findings by Severity** (`--all`/multi-service: grouped by critical/high/medium/low) **or Effective Permissions** (single ARN: Action | Resource | Effect | Source Policy table).
 
-## RISK SUMMARY: [account-id] -- low
+3. **Layer 3 — Attack Path Narratives:** Ordered by exploitability DESC. Each path includes: name, severity, exploitability, confidence (what was/wasn't verified), MITRE TTPs, narrative paragraph with real policy details, concrete exploit CLI steps (reference only), Splunk detection sketch, remediation actions.
 
-No security findings detected. All checks passed.
-
-**Services analyzed:** [comma-separated list of modules that completed successfully]
-**Modules with partial data:** [list any modules with AccessDenied or errors, or "None"]
-**Findings:** 0
-
-No attack paths identified. The account configuration meets baseline security expectations
-for the services enumerated.
-
-## RECOMMENDED NEXT ACTION
-
-Review service coverage -- modules with partial data may have obscured findings:
-[list any partial modules, or "All modules completed successfully"]
-```
-
-This ensures findings.md is always generated (even with 0 findings), maintaining a consistent artifact set.
-All platforms must generate this file — this is not Claude-specific.
-
-The findings report has three layers plus actionable next steps:
-
-### Layer 1: Risk Summary
-
-```
-Authenticated as: [caller ARN]
-Account: [account ID]
-
----
-
-## RISK SUMMARY: [account-id] -- [critical/high/medium/low]
-
-* [Most critical finding — one sentence, specific, include resource ARN or name]
-* [Second most critical finding]
-* [Third finding]
-* [Fourth finding, if exists]
-* [Fifth finding, if exists]
-
-**Biggest concern:** [One specific sentence about the worst finding and why it matters]
-**Services analyzed:** [list of modules that ran successfully]
-**Modules with partial data:** [list of modules with AccessDenied or errors]
-```
-
-Rules: Maximum 5 bullets. Each bullet is one sentence with real ARN/resource name. Risk rating is the highest severity across all findings.
-
-### Layer 2: Findings by Severity (--all mode) or Effective Permissions (ARN mode)
-
-**For `--all` or multi-service mode** — organize by risk severity:
-```
-## FINDINGS BY SEVERITY
-
-### critical
-- **[Finding name]** — [specific resource ARN/name and why it's critical]
-
-### high
-- **[Finding name]** — [specific resource ARN/name]
-
-### medium
-- **[Finding name]** — [specific resource ARN/name]
-
-### low
-- **[Finding name]** — [specific resource ARN/name]
-```
-
-**For single ARN mode** — effective permissions table:
-```
-## EFFECTIVE PERMISSIONS: [principal-arn]
-
-| Action | Resource | Effect | Source Policy |
-|--------|----------|--------|---------------|
-| [action] | [resource] | Allow | [policy name] |
-```
-
-### Layer 3: Attack Path Narratives
-
-Order by exploitability score DESC, then confidence DESC.
-
-```
-## ATTACK PATHS
-
-### ATTACK PATH #1: [Descriptive Name] -- [critical/high/medium/low]
-**Exploitability:** [critical/high/medium/low]
-**Confidence:** [what was verified and what was not — e.g., "IAM policy confirmed; SCP status unknown"]
-**MITRE:** [T1078.004], [T1548]
-
-[Narrative paragraph: what an attacker with access to [principal] could do, WHY the chain works
-(specific policy statements, trust relationships, misconfigurations), blast radius.]
-
-**Exploit steps:** *(for reference — not executable with current read-only access)*
-1. `[concrete AWS CLI command with real ARNs]`
-2. `[concrete AWS CLI command]`
-3. `[concrete AWS CLI command]`
-
-**Splunk detection (CloudTrail):**
-- CloudTrail eventName: [specific eventName]
-- SPL sketch: [brief SPL query against index=cloudtrail]
-
-**Remediation:**
-- [SCP/RCP deny statement]
-- [IAM policy change — which permission, which policy ARN]
-```
-
-Use REAL ARNs and resource names throughout. Never use placeholders in the final output.
-
-### Actionable Next Steps
-
-```
-## RECOMMENDED NEXT ACTION
-
-[One specific, contextual recommendation based on highest-risk finding. Reference defensive
-control artifacts already generated at $RUN_DIR/defend/defend-{timestamp}/.]
-
-**Additional options:**
-- `/scope:exploit` — validate findings by testing exploitability
-- `/scope:audit [another-target]` — drill into [specific related resource]
-- View results: open `dashboard/<run-id>-dashboard.html` in any browser
-- Review defensive control artifacts: `$RUN_DIR/defend/defend-{timestamp}/`
-```
+**Rules:** Use REAL ARNs and resource names throughout — never placeholders. End with RECOMMENDED NEXT ACTION referencing defend artifacts and available follow-up commands (`/scope:exploit`, `/scope:audit`, dashboard link).
 </findings_md>
 
 <results_export>
 ## Results JSON Export
 
-After findings.md is written (and Gate 4 was NOT skipped), export results.json.
+After findings.md is written (and Gate 4 was NOT skipped):
 
-The attack-paths subagent wrote `results.json` to `$RUN_DIR/`. Copy it to the dashboard public directory:
+1. Copy `$RUN_DIR/results.json` to `dashboard/public/$RUN_ID.json`
+2. Upsert this run into `dashboard/public/index.json` (match on `run_id`, newest-first) with fields: run_id, date, source ("audit"), target, risk, status, file
+3. Append to `./audit/INDEX.md` (create if missing) and upsert into `./audit/index.json`
 
-```bash
-mkdir -p dashboard/public
-if [ -f "$RUN_DIR/results.json" ]; then
-  cp "$RUN_DIR/results.json" "dashboard/public/$RUN_ID.json"
-else
-  echo "[ERROR] results.json not found in $RUN_DIR — results export skipped"
-fi
-```
-
-Update `dashboard/public/index.json` — upsert this run (match on `run_id`), newest-first:
-```bash
-RISK_SCORE=$(jq -r '.summary.risk_score // "unknown"' "$RUN_DIR/results.json" 2>/dev/null || echo "unknown")
-if [ -f dashboard/public/index.json ]; then
-  node -e "
-    const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
-    idx.runs = (idx.runs || []).filter(r => r.run_id !== '$RUN_ID');
-    idx.runs.unshift({ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$TARGET_INPUT', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' });
-    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
-  "
-else
-  node -e "
-    const idx = { runs: [{ run_id: '$RUN_ID', date: new Date().toISOString(), source: 'audit', target: '$TARGET_INPUT', risk: '$RISK_SCORE', status: 'complete', file: '$RUN_ID.json' }] };
-    require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
-  "
-fi
-```
-
-Also append to `./audit/INDEX.md` (create if missing) and upsert into `./audit/index.json`.
-
-**Verification:**
-```bash
-test -f "$RUN_DIR/results.json" && echo "Results OK" || echo "WARNING: results.json not found"
-test -f "dashboard/public/$RUN_ID.json" && echo "Dashboard export OK" || echo "WARNING: dashboard export not created"
-```
-
-**Gate 4 skip exception:** If Gate 4 was skipped (GATE4_SKIP=true), only `findings.md` and `agent-log.jsonl` are required. Skip results.json export and dashboard index update.
+**Gate 4 skip exception:** If GATE4_SKIP=true, skip all exports — only `findings.md` and `agent-log.jsonl` are required.
 </results_export>
 
 <defend_auto_chain>
 ## Defend Auto-Chain
 
-After findings.md and results.json are written, automatically dispatch the defend agent as a subagent.
+After findings.md and results.json are written, automatically dispatch scope-defend as a subagent.
 
-**Gate 4 skip exception:** If Gate 4 was skipped (GATE4_SKIP=true), do not dispatch defend. Log that defend was skipped because Gate 4 was skipped, and advise the operator to run `/scope:defend` manually against the run directory if a defensive analysis is needed later.
+**Gate 4 skip exception:** If GATE4_SKIP=true, do not dispatch. Log skip and advise `/scope:defend` for later use.
 
-If GATE4_SKIP is not set or is false, dispatch defend as follows:
+**Dispatch:** scope-defend subagent with `AUDIT_RUN_DIR` and `ACCOUNT_ID`. Note: defend dispatches 5 subagents internally, so it must run as a subagent (not inline) to allow nesting.
 
-```
-Dispatch scope-defend as a subagent with this initial message:
+**Expected return:** STATUS, DEFEND_RUN_DIR (`{audit_run_dir}/defend/defend-{timestamp}/`), METRICS (scps, rcps, detections). Capture DEFEND_RUN_DIR — needed for pipeline Run 2.
 
-  AUDIT_RUN_DIR: {run_directory_path}
-  ACCOUNT_ID: {account_id}
+Defend failure is non-blocking — log warning, continue to synthesizer/pipeline.
 
-On Claude Code: Use the Agent tool with subagent_type="scope-defend".
-Defend reads results.json and per-module JSONs from AUDIT_RUN_DIR/ for its full analysis.
-Defend also runs verify internally (domain-aws + domain-splunk) on its own output.
-
-On Gemini CLI: Gemini subagents cannot dispatch further subagents. Instead of delegating
-to scope-defend as a subagent, read agents/scope-defend.md inline using the Read tool and
-execute its instructions directly in the main agent context. This allows scope-defend's
-5 subagent dispatches (guardrails, splunk, policy, remediation, validate) to work because
-they run at level 0 (main agent), not level 1 (subagent).
-
-On Codex: Spawn the scope-defend agent (registered in .codex/config.toml).
-Requires agents.max_depth = 2 in config.toml for scope-defend to dispatch its subagents.
-
-Wait for defend to complete and return its summary.
-Expected summary:
-  STATUS: complete|error
-  DEFEND_RUN_DIR: {audit_run_directory_path}/defend/defend-{timestamp}/
-  METRICS: {scps: N, rcps: N, detections: N}
-```
-
-If defend fails: log a warning, continue to pipeline. Defend failure is non-blocking.
-
-Note: Defend creates its run directory as a subdirectory of the audit run at `{audit_run_dir}/defend/defend-{timestamp}/`. Capture
-the DEFEND_RUN_DIR from defend's summary — you need it for the post-processing pipeline Run 2.
-
-**Announce defend completion to the operator:**
-```
-━━━ Defend: complete ━━━
-Run directory: {DEFEND_RUN_DIR}
-SCPs: {N} | RCPs: {N} | Detections: {N}
-━━━━━━━━━━━━━━━━━━━━━━━
-```
-If defend failed, announce: `━━━ Defend: failed (non-blocking) ━━━` with the error summary.
+Announce completion or failure to operator.
 </defend_auto_chain>
 
 <synthesizer_dispatch>
 ## Engagement Synthesis Dispatch
 
-After defend completes (or fails), automatically dispatch the synthesizer subagent.
+After defend completes (or fails), dispatch the synthesizer subagent automatically.
 
-**Gate 4 skip exception:** If Gate 4 was skipped (GATE4_SKIP=true), do not dispatch synthesizer. The synthesizer requires results.json which is not written when Gate 4 is skipped.
+**Skip conditions:** Gate 4 was skipped (GATE4_SKIP=true) OR defend failed — synthesizer requires both results.json and defend output. Log skip reason.
 
-**Defend failure exception:** If defend failed, do not dispatch synthesizer. The synthesizer requires defend output to produce a complete engagement report (per D-12). Log that synthesizer was skipped due to defend failure.
+**Dispatch:** scope-synthesizer subagent with `RUN_DIR`, `ACCOUNT_ID`, `SERVICES_COMPLETED`. Uses model: sonnet.
 
-If GATE4_SKIP is not set and defend completed successfully, dispatch synthesizer as follows:
-
-```
-Dispatch scope-synthesizer as a subagent with this initial message:
-
-  RUN_DIR: {run_directory_path}
-  ACCOUNT_ID: {account_id}
-  SERVICES_COMPLETED: {comma-separated list of services with STATUS complete or partial}
-
-On Claude Code: Use the Agent tool with subagent_type="scope-synthesizer".
-The synthesizer subagent uses model: sonnet — it requires full reasoning capability.
-
-On Gemini CLI: Delegate to the scope-synthesizer subagent (registered in .gemini/agents/).
-
-On Codex: Spawn the scope-synthesizer agent (registered in .codex/config.toml).
-
-Wait for the synthesizer subagent to complete and return its summary.
-Expected summary:
-  STATUS: complete|error
-  FILE: $RUN_DIR/engagement-report.md
-  METRICS: {sections: N, attack_paths_covered: N, services_covered: N}
-  ERRORS: [any issues]
-```
-
-If synthesizer returns STATUS: error: log the error and report to operator. Synthesizer failure is blocking -- the operator gets an error message but the pipeline continues to post-processing and dashboard (the raw artifacts are still valid).
-
-**Announce synthesizer completion to the operator:**
-```
-━━━ Synthesizer: complete ━━━
-Report: $RUN_DIR/engagement-report.md
-Sections: {N} | Attack paths: {N} | Services: {N}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-If synthesizer failed: `━━━ Synthesizer: failed ━━━` with the error summary.
+**Expected return:** STATUS, FILE ($RUN_DIR/engagement-report.md), METRICS (sections, attack_paths_covered, services_covered), ERRORS. Announce completion or failure to operator. Failure is non-blocking for post-processing — pipeline continues.
 </synthesizer_dispatch>
 
 <post_processing_pipeline>
 ## Post-Processing Pipeline (Inline)
 
-After the synthesizer completes (or is skipped), run the pipeline inline in this orchestrator context.
+After the synthesizer completes (or is skipped), read `agents/subagents/scope-pipeline.md` and execute two sequential runs:
+1. **Run 1 — Audit:** `PHASE=audit, RUN_DIR={audit_run_dir}` — data normalization then agent-log indexing.
+2. **Run 2 — Defend:** `PHASE=defend, RUN_DIR={defend_run_dir}` — same steps for defend artifacts (if defend succeeded). Use DEFEND_RUN_DIR from defend's summary.
 
-Read `agents/subagents/scope-pipeline.md` and execute:
+Sequential, automatic, no operator approval. Pipeline failure is non-blocking — log warning, continue.
 
-**Run 1 — Audit phase:**
-```
-PHASE=audit
-RUN_DIR={audit_run_directory_path}
-```
-Run Phase 1 data normalization then Phase 2 agent-log indexing for the audit artifacts.
-
-**Run 2 — Defend phase:**
-```
-PHASE=defend
-RUN_DIR={defend_run_directory_path}
-```
-Use the DEFEND_RUN_DIR returned by defend in its summary (e.g., `./audit/audit-20260301-143022-all/defend/defend-20260301-143522-a1b2/`).
-Run Phase 1 data normalization then Phase 2 agent-log indexing for the defend artifacts (if defend succeeded).
-
-Sequential. Automatic. No operator approval needed.
-
-If a pipeline step fails: log a warning and continue — raw artifacts are already written. Pipeline failure is non-blocking but MUST be attempted.
-
-**Pipeline health summary:** After both pipeline runs complete (audit + defend), display the following to the operator before proceeding to dashboard generation:
-
-```
-Pipeline: N runs processed (X complete, Y partial). Z orphans culled.
-```
-
-- **N** = total pipeline runs attempted (1 for audit-only, 2 when defend succeeded)
-- **X** = runs where Phase 1 and Phase 2 both completed without errors
-- **Y** = runs where one or more pipeline steps logged a warning or partial failure
-- **Z** = orphan run directories culled by the pipeline maintenance step (from the `pipeline_maintenance` record in agent-log.jsonl; use 0 if the maintenance step did not run or produced no orphans)
-
-Always show all counts including zeros — consistent format makes anomalies easy to spot. This is a conversation display only (not a machine-readable artifact — the orphan cull count is already in agent-log.jsonl via the pipeline_maintenance record).
-
-After displaying the pipeline health summary, proceed IMMEDIATELY to dashboard generation below. Do not skip this step.
+**Display after both runs:** `Pipeline: N runs processed (X complete, Y partial). Z orphans culled.` Then proceed immediately to dashboard generation.
 </post_processing_pipeline>
 
 <dashboard_generation>
 ## Dashboard Generation (Inline)
 
-After the pipeline completes, generate the self-contained dashboard report:
+Run: `cd dashboard && npm run dashboard 2>&1` — produces `dashboard/<run-id>-dashboard.html`, a self-contained portable file. Dependencies auto-install if needed.
 
-```bash
-cd dashboard && npm run dashboard 2>&1
-```
+**Do NOT generate dashboard HTML yourself.** Always use `npm run dashboard` — it's a React + D3 app that inlines data from `dashboard/public/`.
 
-This produces `dashboard/<run-id>-dashboard.html` — a portable file that opens in any browser without a server. Essential for Codex and Gemini CLI environments where localhost is unavailable.
-
-`npm run dashboard` calls `bin/generate-report.js`, which automatically installs dependencies (`npm install`) if `dashboard/node_modules/` is missing before running the build. You do not need to run `npm install` manually.
-
-**Do NOT generate dashboard HTML yourself.** The dashboard is a React + D3 application built by `npm run dashboard` — it inlines all data from `dashboard/public/`. Writing your own HTML to `$RUN_DIR/dashboard.html` or any other path will NOT produce a working dashboard. Always use the npm command above. The output filename is derived from the run ID (e.g., `audit-20260408-201108-all-dashboard.html`).
-
-If dashboard generation fails: log a warning and continue. The raw artifacts and data/ exports are still valid.
-
-**Announce dashboard completion to the operator:**
-```
-━━━ Dashboard: generated ━━━
-Open: dashboard/<run-id>-dashboard.html
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-If dashboard failed: `━━━ Dashboard: failed (non-blocking) — raw artifacts available in $RUN_DIR/ ━━━`
+If generation fails: log warning, continue — raw artifacts are still valid. Announce result to operator (generated path or failure notice).
 </dashboard_generation>
 
 <mandatory_outputs>
@@ -932,182 +350,34 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 | 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
 | 7 | `engagement-report.md` | `$RUN_DIR/engagement-report.md` | Unified engagement narrative -- cross-phase synthesis |
 
-**Self-check — run before reporting completion:**
-```bash
-test -f "$RUN_DIR/findings.md" && echo "findings.md PRESENT" || echo "MISSING: findings.md"
-test -f "$RUN_DIR/agent-log.jsonl" && echo "agent-log.jsonl PRESENT" || echo "MISSING: agent-log.jsonl"
-# Only if Gate 4 was not skipped:
-test -f "$RUN_DIR/results.json" && echo "results.json PRESENT" || echo "WARNING: results.json missing (Gate 4 skip?)"
-test -f "dashboard/public/$RUN_ID.json" && echo "dashboard export PRESENT" || echo "WARNING: dashboard export missing"
-test -f "$RUN_DIR/engagement-report.md" && echo "engagement report PRESENT" || echo "WARNING: engagement report missing"
-```
-
-If ANY mandatory file is MISSING (and no applicable exception applies), go back and create it before proceeding.
+Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it.
 </mandatory_outputs>
 
 <evidence_protocol>
 @include agents/shared/evidence-logging.md
 
-**Audit-specific additional record types:**
-- `subagent_dispatch` — name, initial_message, timestamp
-- `subagent_return` — name, STATUS, METRICS, ERRORS, timestamp
-- `gate_transition` — gate, decision, timestamp
+**Audit-specific record types:** `subagent_dispatch` (name, initial_message, timestamp), `subagent_return` (name, STATUS, METRICS, ERRORS, timestamp), `gate_transition` (gate, decision, timestamp).
 
-**When to log (audit extensions):**
-- Every subagent dispatch and return (subagents log their own API calls)
-- Every gate transition — gate number, operator decision, timestamp
-
-**Writing Log Entries:**
-
-Always append one JSON object per line. Use `jq -c` or `printf` — do NOT use heredocs (`<<EOF`) to write agent-log.jsonl, as heredoc quoting errors cause syntax failures.
-
-**Seed the log after Gate 1 and the run directory is created:**
-```bash
-TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" --arg svc "sts" --arg act "get-caller-identity" '{event_id:"ev-001",type:"api_call",service:$svc,action:$act,response_status:"success",timestamp:$ts}')" > "$RUN_DIR/agent-log.jsonl"
-printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" '{event_id:"ev-002",type:"gate_transition",gate:1,decision:"continue",timestamp:$ts}')" >> "$RUN_DIR/agent-log.jsonl"
-```
-
-**Append subsequent events:**
-```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "$SUBAGENT_NAME" '{event_id:"ev-NNN",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$RUN_DIR/agent-log.jsonl"
-```
+Log every subagent dispatch/return and every gate transition. Seed the log after Gate 1 with the `get-caller-identity` call and Gate 1 transition. Use `jq -c` or `printf` to append — do NOT use heredocs.
 </evidence_protocol>
-
-<run_index>
-## Run Index
-
-After each run completes, append to `./audit/INDEX.md` (create if missing):
-```markdown
-| Run ID | Date | Target | Risk | Paths | Directory |
-|--------|------|--------|------|-------|-----------|
-| audit-20260301-143022-all | 2026-03-01 14:30 | --all | critical | 3 | ./audit/audit-20260301-143022-all/ |
-```
-
-Also upsert into `./audit/index.json` (create with `{"runs": []}` if missing):
-```json
-{
-  "run_id": "audit-20260301-143022-all",
-  "date": "2026-03-01T14:30:22Z",
-  "target": "--all",
-  "risk": "critical",
-  "paths": 3,
-  "directory": "./audit/audit-20260301-143022-all/"
-}
-```
-</run_index>
-
-<account_context>
-## Account Context
-
-After Gate 1 succeeds, load the owned-accounts list from `config/accounts.json`.
-
-1. Read `config/accounts.json` and extract account count using jq:
-```bash
-if [ -f config/accounts.json ]; then
-  OWNED_ACCOUNTS=$(jq -r '[.accounts[].id] | . + ["'"$ACCOUNT_ID"'"] | unique' config/accounts.json)
-  OWNED_ACCOUNT_COUNT=$(echo "$OWNED_ACCOUNTS" | jq 'length')
-  OWNED_ACCOUNT_LIST=$(echo "$OWNED_ACCOUNTS" | jq -r '.[]')
-  echo "Owned accounts loaded: $OWNED_ACCOUNT_COUNT from config/accounts.json"
-  echo "$OWNED_ACCOUNTS" | jq -r '.[]' | while read id; do echo "  - $id"; done
-else
-  OWNED_ACCOUNTS=$(jq -n --arg id "$ACCOUNT_ID" '[$id]')
-  OWNED_ACCOUNT_COUNT=1
-  echo "Owned accounts: 1 (current session only — no config/accounts.json found)"
-fi
-```
-2. Do NOT count accounts manually — always use the jq output above
-3. Write OWNED_ACCOUNTS to `$RUN_DIR/context.json` before dispatching attack-paths so it can classify cross-account trusts as internal vs external:
-```bash
-jq -n --argjson owned "$OWNED_ACCOUNTS" --arg account_id "$ACCOUNT_ID" \
-  '{owned_accounts: $owned, account_id: $account_id}' > "$RUN_DIR/context.json"
-```
-</account_context>
-
-<scp_config>
-## SCP Configuration
-
-After loading account context, load pre-configured SCPs from `config/scps/`.
-
-1. Glob `config/scps/*.json`
-2. Skip `_`-prefixed files (templates)
-3. For each file: parse JSON, validate required fields (`PolicyId`, `PolicyDocument`). Log warning and skip on error.
-4. Build `PolicyId` → SCP object map. Tag each as `_source: "config"`.
-
-**Merge strategy with live enumeration:**
-- Live enumeration succeeds: union config SCPs into live set. Live version wins on `PolicyId` collision.
-- Live denied: use config SCPs as full dataset. Log evidence record.
-- No config, no live: attack paths report "SCP status unknown" with reduced confidence.
-
-Display at Gate 1:
-```
-SCPs loaded: [N] from config/scps/
-  - p-FullAWSAccess (FullAWSAccess) → 2 targets
-```
-If none: `SCPs: 0 pre-loaded (no config/scps/ files — will enumerate live)`
-</scp_config>
 
 <error_handling>
 ## Error Handling
 
-### Credential Errors (Gate 1)
+| Error Type | Response |
+|------------|----------|
+| Credential error (NoCredentialsError, ExpiredToken, InvalidClientTokenId, AuthFailure) | Hard stop at Gate 1. Display fix instructions. |
+| Throttling / Rate exceeded (HTTP 429) | Wait 2-5s, retry once. If retry fails: log PARTIAL, continue. |
+| AccessDenied (expected) | Log PARTIAL for that call, continue. Not an error. First-command denied on a module: skip module. |
+| Network / connection error (DNS, timeout, HTTP 5xx, connection reset) | Do NOT retry. Log `[ERROR] [Module] — [command]: [full message]`, continue. |
+| Subagent STATUS: error | Log `[ERROR] {service} — {error}`, continue with remaining modules. |
+| Subagent STATUS: partial | Log `[PARTIAL] {service} — {error}`, continue. |
+| Subagent no output file | Log `[MISSING] {service}.json not written`, report at Gate 3. |
+| Attack-paths failure | Log, continue to Gate 4 with available data. |
+| Defend / Pipeline / Dashboard failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
 
-Errors containing "NoCredentialsError", "ExpiredToken", "InvalidClientTokenId", "AuthFailure" → display credential error block, stop.
-
-### Subagent Failures
-
-- Subagent returns STATUS: error → log `[ERROR] {service} module — {error}`, continue with remaining subagents
-- Subagent returns STATUS: partial → log `[PARTIAL] {service} module — {error}`, continue
-- Subagent produces no output file → log `[MISSING] {service}.json not written`, report at Gate 3
-- Attack-paths failure → log, continue to Gate 4 with available data
-- Defend failure → log warning, continue to pipeline
-
-### AWS API Errors (Inline Execution)
-
-- Throttling / rate exceeded → wait 2-5 seconds, retry once. If retry fails: log PARTIAL, continue.
-- Network/connection error → do NOT retry. Log error, continue to next command.
-- AccessDenied (expected) → log PARTIAL for that call, continue. Not an error.
-- AccessDenied on first discovery command for a module → log `[PARTIAL] {service} — first command denied, skipping module`.
-- All other AWS CLI errors → surface full error message verbatim to operator.
-
-### Pipeline and Dashboard Errors
-
-Middleware pipeline failures and dashboard generation failures are non-blocking. Log warning, continue. Raw artifacts are already written.
-
-### Aggregate Error Reporting
-
-At Gate 3, include an error summary if any non-AccessDenied errors occurred:
-```
-Errors encountered: [N] commands failed due to network/API errors (not permission-related)
-```
+Never swallow errors silently — operator must see every non-AccessDenied error. Aggregate error count at Gate 3 summary.
 </error_handling>
-
-<generic_error_handling>
-## Generic API / Network Error Handling
-
-Not all failures are AWS auth errors. Network timeouts, DNS failures, HTTP 5xx responses, rate limiting (HTTP 429), connection resets, and MCP tool failures can occur at any point.
-
-### Detection
-
-Classify as transient/infrastructure error if NOT one of: credential errors, AccessDenied.
-
-Common patterns:
-- "Could not connect to the endpoint URL"
-- "Connection was closed before we received a valid response"
-- "Name or service not known" (DNS failure)
-- "Connection timed out"
-- "Throttling" / "Rate exceeded" / HTTP 429
-- "Internal server error" / HTTP 5xx
-- "fetch failed" or similar network-level errors
-
-### Response
-
-1. Log with context: `[ERROR] [Module name] — [command that failed]: [full error message]`
-2. Never swallow silently — operator must see every non-AccessDenied error
-3. For throttling: wait 2-5 seconds, retry once. If retry fails: log PARTIAL, continue.
-4. For network/connection errors: do NOT retry. Log and continue to the next command.
-5. Aggregate at Gate 3: include error count in the summary table.
-</generic_error_handling>
 
 <success_criteria>
 ## Success Criteria

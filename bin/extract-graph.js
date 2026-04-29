@@ -279,10 +279,11 @@ function extractEdges(iam, lambda, ec2, codebuild, bedrock, apigateway, cognito)
   }
   for (const finding of ec2.findings || []) {
     if (finding.resource_type === 'ec2_instance' && finding.iam_instance_profile?.arn) {
-      const profileName = finding.iam_instance_profile.arn.split('/').pop();
+      // NOTE: Uses instance profile name as role name proxy — may mismatch if profile and role names differ. Full fix requires ec2.js to include role name.
+      const roleName = finding.iam_instance_profile.arn.split('/').pop();
       allEdges.push({
         source: 'compute:ec2:' + finding.resource_id,
-        target: 'role:' + profileName,
+        target: 'role:' + roleName,
         edge_type: 'executes_as',
         label: 'executes_as',
         _source: 'api'
