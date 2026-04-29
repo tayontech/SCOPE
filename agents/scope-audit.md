@@ -186,7 +186,9 @@ ACCOUNT_ID="123456789012"
 REGIONS_ARG="us-east-1,us-west-2,eu-west-1"
 ```
 
-Each service runs as: `node scripts/enum/{service}.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --region "$REGIONS_ARG" >"$RUN_DIR/{service}.log" 2>&1 &`
+Before dispatching, create the logs subdirectory: `mkdir -p "$RUN_DIR/logs"`
+
+Each service runs as: `node scripts/enum/{service}.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID" --region "$REGIONS_ARG" >"$RUN_DIR/logs/{service}.log" 2>&1 &`
 
 - **Global services** (iam, sts): omit `--region` entirely — `node scripts/enum/iam.js --run-dir "$RUN_DIR" --account-id "$ACCOUNT_ID"`
 - **Regional services** (all others including S3): pass `--region "$REGIONS_ARG"` — the comma-separated string is passed as a single quoted argument, scripts split internally
@@ -198,7 +200,7 @@ Track PIDs and their service names in parallel arrays (`PIDS+=($!)` and `NAMES+=
 ### Rules
 
 - **Parallel execution:** All scripts run as background processes in a single Bash call. No wave-based dispatch.
-- **Fail-fast:** Any non-zero exit fails the entire run. Show failed service names and their captured log output (`$RUN_DIR/{service}.log`). No `--skip`, no "continue anyway". Full picture or error.
+- **Fail-fast:** Any non-zero exit fails the entire run. Show failed service names and their captured log output (`$RUN_DIR/logs/{service}.log`). No `--skip`, no "continue anyway". Full picture or error.
 - **Output path constraint:** ALL files (JSON output, logs, intermediate data) MUST go into `$RUN_DIR/`. Never write outside `$RUN_DIR/`.
 
 ### Region Coverage Validation
