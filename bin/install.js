@@ -504,7 +504,11 @@ function installSubagentsGemini(subagents, scope) {
   // Agents NOT in this config lose their tools field entirely (stripped by GEMINI_STRIP_KEYS).
   // Source frontmatter tools: values are comma-separated strings — Gemini needs YAML arrays.
   const GEMINI_AGENT_CONFIG = {
-    'scope-attack-paths':       { max_turns: 80, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-attack-compute':     { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-attack-data':        { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-attack-identity':    { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-attack-network':     { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-attack-synthesizer': { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-defend':             { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-defend-guardrails':  { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-defend-policy':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },

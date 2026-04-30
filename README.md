@@ -130,13 +130,13 @@ SCOPE has two types of agents:
 
 **Subagents** — dispatched with their own pinned model:
 - 16 SDK enum scripts — deterministic Node.js (no AI model)
-- `scope-attack-paths` — security reasoning over combined findings
+- 4 domain sub-agents (`scope-attack-identity`, `scope-attack-compute`, `scope-attack-data`, `scope-attack-network`) + `scope-attack-synthesizer` — parallel attack path analysis with cross-domain chain synthesis
 - `scope-defend-guardrails`, `scope-defend-splunk`, `scope-defend-policy`, `scope-defend-remediation`, `scope-defend-validate` — defend subagents
 - `scope-hunt-investigate`, `scope-hunt-intel`, `scope-hunt-audit` — hunt mode intake and hypothesis generation
 - `scope-research` — real-world technique research integration
 - `scope-synthesizer` — engagement synthesis and narrative generation
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum agents on a fast model, then chains attack-paths and defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, dispatches enum scripts, runs the attack path pipeline (extract-graph.js then 4 domain sub-agents + synthesizer), then chains defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
 ### Model Routing
 
@@ -144,7 +144,7 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
-| Reasoning (attack-paths, defend + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack domain sub-agents, attack synthesizer, defend + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 Enum scripts (`scripts/enum/*.js`) are deterministic Node.js — no AI model. Skills (audit, exploit, hunt) inherit your session model.
 

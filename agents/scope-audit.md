@@ -236,21 +236,52 @@ After enumeration completes and before Gate 3, spot-check each module JSON in `$
 </module_validation>
 
 <attack_paths_dispatch>
-## Attack Path Analysis Dispatch
+## Attack Path Analysis — Parallel Domain Dispatch
 
-Attack-paths ALWAYS runs as a fresh-context subagent — even for single-service audits.
+Attack path analysis runs as a 3-phase pipeline: graph extraction, 4 parallel domain sub-agents, cross-domain synthesis.
 
-**Dispatch:** scope-attack-paths subagent with `RUN_DIR`, `MODE: posture`, `ACCOUNT_ID`, `SERVICES_COMPLETED`. Uses model: sonnet.
+### Phase A: Graph Extraction
 
-**Expected return:** STATUS (complete|partial|error), FILE ($RUN_DIR/results.json), METRICS (attack_paths, risk_score, categories), ERRORS.
+```bash
+node bin/extract-graph.js "$RUN_DIR"
+```
 
-If STATUS: error or results.json not written: log error, proceed to Gate 4 with available data, note incomplete analysis in findings.md.
+Verify `$RUN_DIR/graph.json` was written. If extract-graph.js fails, log error and skip attack path analysis entirely — proceed to Gate 4 with enumeration data only.
+
+### Phase B: Parallel Domain Dispatch
+
+Dispatch 4 domain sub-agents in parallel. Each receives: `RUN_DIR`, `ACCOUNT_ID`, `SERVICES_COMPLETED`, `OWNED_ACCOUNTS`, `DOMAIN`.
+
+| Sub-agent | DOMAIN | Modules |
+|-----------|--------|---------|
+| scope-attack-identity | identity | iam.json, sts.json |
+| scope-attack-compute | compute | lambda.json, ec2.json, codebuild.json |
+| scope-attack-data | data | s3.json, kms.json, secrets.json, rds.json, dynamodb.json, ssm.json |
+| scope-attack-network | network | apigateway.json, sns.json, sqs.json, cognito.json, bedrock.json |
+
+Each sub-agent also reads graph.json and iam.json (except identity, which owns iam.json).
+
+**Partial failure:** If a domain sub-agent fails, continue with available results. Note the failed domain. Do NOT re-dispatch — proceed with what completed.
+
+**Expected return per domain:** STATUS, domain findings JSON written to `$RUN_DIR/attack-{domain}.json`
+
+### Phase C: Synthesis Dispatch
+
+After all 4 domain sub-agents complete (or fail), dispatch scope-attack-synthesizer with:
+- `RUN_DIR`, `ACCOUNT_ID`, `OWNED_ACCOUNTS`
+- `DOMAIN_RESULTS`: list of which domains completed successfully
+
+The synthesizer reads domain output files from `$RUN_DIR/`, discovers cross-domain chains, and writes `$RUN_DIR/results.json`.
+
+**Expected return:** STATUS (complete|partial|error), FILE ($RUN_DIR/results.json), METRICS (total_paths, severity counts, cross_domain_chains).
+
+If synthesizer fails: log error, proceed to Gate 4 with available data.
 </attack_paths_dispatch>
 
 <verification>
 @include agents/shared/verification-protocol.md
 
-**Audit note:** Run verification inline after `scope-attack-paths` completes. Apply domain-core and domain-aws sections. Verify claims in results.json before presenting Gate 4 results.
+**Audit note:** Run verification inline after attack path synthesis completes. Apply domain-core and domain-aws sections. Verify claims in results.json before presenting Gate 4 results.
 </verification>
 
 <gate_4_results_approval>

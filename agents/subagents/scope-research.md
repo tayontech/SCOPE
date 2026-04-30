@@ -47,6 +47,16 @@ Construct initial WebSearch queries targeting known high-quality AWS security re
    - Query: `site:wiz.io AWS {SERVICE} {technique_keywords}`
 5. **AWS Security Digest** (awssecuritydigest.com) — Curated AWS security news and research
    - Query: `site:awssecuritydigest.com {SERVICE} {technique_keywords}`
+6. **Permiso** (permiso.io/blog) — Cloud identity threat research
+   - Query: `site:permiso.io AWS {SERVICE} {technique_keywords}`
+7. **Unit 42** (unit42.paloaltonetworks.com) — Cloud campaign analysis
+   - Query: `site:unit42.paloaltonetworks.com AWS {technique_keywords}`
+8. **Mandiant** (mandiant.com/resources/blog) — Incident response and attack chains
+   - Query: `site:mandiant.com AWS {technique_keywords}`
+9. **AWS Security Bulletins** — Official vulnerability disclosures
+   - Query: `site:aws.amazon.com/security/security-bulletins {SERVICE}`
+10. **GitHub Security Advisories** — CVEs affecting AWS SDKs, runtimes, and dependencies
+    - Query: `site:github.com/advisories {SERVICE} AWS`
 
 **Query construction:** Extract technique keywords from PERMISSION_CONTEXT based on the SERVICE and attack context. Examples across different services:
 - `iam:PassRole + lambda:CreateFunction` → keywords: `PassRole`, `Lambda`, `privilege escalation`

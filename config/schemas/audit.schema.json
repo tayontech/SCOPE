@@ -69,7 +69,7 @@
         },
         "reachability": {
           "type": "object",
-          "description": "Aggregate reachability stats from Part 9 analysis — computed by scope-attack-paths",
+          "description": "Aggregate reachability stats from Part 9 analysis — computed by attack path pipeline (domain sub-agents + synthesizer)",
           "properties": {
             "principals_with_admin_reach": { "type": "integer" },
             "principals_with_data_reach": { "type": "integer" },
@@ -147,7 +147,7 @@
           "arn": { "type": "string" },
           "reachability": {
             "type": "object",
-            "description": "Part 9 reachability analysis — computed by scope-attack-paths",
+            "description": "Part 9 reachability analysis — computed by attack path pipeline (domain sub-agents + synthesizer)",
             "properties": {
               "reachable_roles": { "type": "array", "items": { "type": "string" } },
               "reachable_data": {

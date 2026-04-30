@@ -17,8 +17,10 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 **Enumeration scripts** (invoked directly by scope-audit via Bash, model: none — deterministic Node.js):
 - Enumeration agents removed in v1.14 — replaced by SDK scripts in `scripts/enum/`
 
-**Analysis subagent** (dispatched as fresh-context by scope-audit, model: inherit):
-- `scope-attack-paths` — Reads per-module JSON from disk, performs cross-service attack path analysis
+**Attack path analysis** (3-phase pipeline dispatched by scope-audit):
+- `extract-graph.js` — Deterministic graph extraction from per-module JSON (Node.js, no AI model)
+- 4 parallel domain sub-agents — `scope-attack-identity`, `scope-attack-compute`, `scope-attack-data`, `scope-attack-network` (model: inherit)
+- `scope-attack-synthesizer` — Cross-domain chain synthesis and deduplication (model: inherit)
 
 **Verification agent** (read inline during execution):
 - `scope-verify` — Unified verification: claim ledger, taxonomy, AWS API validation, SPL lints (domain sections dispatched by caller)
@@ -51,8 +53,22 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  └──────────────────────────┘    │
     │                               │       │ writes $RUN_DIR/*.json    │
     │                               │       ▼                           │
-    │                               │  scope-attack-paths (reasoning tier) │
-    │                               │  (fresh-context, reads from disk) │
+    │                               │  Attack Path Analysis:               │
+    │                               │  ┌──────────────────────────────┐    │
+    │                               │  │ extract-graph.js             │    │
+    │                               │  │ (deterministic)              │    │
+    │                               │  └──────────┬───────────────────┘    │
+    │                               │             ▼                         │
+    │                               │  ┌──────────────────────────────┐    │
+    │                               │  │ 4 parallel domain sub-agents │    │
+    │                               │  │ identity, compute,           │    │
+    │                               │  │ data, network                │    │
+    │                               │  └──────────┬───────────────────┘    │
+    │                               │             ▼                         │
+    │                               │  ┌──────────────────────────────┐    │
+    │                               │  │ scope-attack-synthesizer     │    │
+    │                               │  │ (cross-domain chains)        │    │
+    │                               │  └──────────────────────────────┘    │
     │                               │       │                           │
     │                               │  Gate 3: results                  │
     │                               │  Gate 4: scope-defend approval    │
@@ -219,7 +235,7 @@ Verification results are in-memory — scope-verify returns corrections to the c
                    ┌───────────────────────────────────┐
                    │           scope-audit              │
                    │  (orchestrator — runs SDK scripts  │
-                   │   + dispatches attack-paths)        │
+                   │   + runs attack path pipeline)      │
                    └──────────┬────────────────────────┘
                               │ writes ./audit/
                               │
@@ -287,7 +303,7 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | runs SDK enum scripts + dispatches attack-paths + defend + synthesizer |
+| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | runs SDK enum scripts + attack path pipeline (extract-graph.js → 4 domain sub-agents → synthesizer) + defend + synthesizer |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
 | **hunt** | `/scope:hunt [input]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json`. Intel mode: WebFetch (URL) or NL parse, `./hunt/context.json`, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in any mode) |
