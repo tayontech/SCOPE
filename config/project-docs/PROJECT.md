@@ -38,6 +38,14 @@ After a run completes:
 - Keep entries concise — observations and patterns, not full findings (those live in results.json)
 - Cross-account patterns go under "Recurring Gaps" — these build institutional knowledge over time
 
+## Error Visibility
+
+- Surface errors immediately — never silently continue past a failure. The operator must know something went wrong within seconds, not after waiting 10 minutes and canceling
+- If a subagent fails, a script exits non-zero, or an API call returns an unexpected error: stop, display the error clearly, then decide whether to continue or abort
+- Do not retry silently in a loop — if a retry is needed, say so: "X failed, retrying once"
+- If an error is recoverable (AccessDenied on one module, partial enum data), fix it and explain what happened before moving on
+- If an error is fatal (credential failure, script crash), stop immediately and show the error. Do not continue dispatching work that depends on the failed step
+
 ## Verification
 
 - Artifacts must exist on disk before claiming they were written
