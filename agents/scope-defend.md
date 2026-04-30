@@ -534,6 +534,32 @@ Verify the file was written:
 ```bash
 test -f "$DEFEND_RUN_DIR/results.json" && echo "results.json WRITTEN" || echo "ERROR: results.json not written"
 ```
+
+### Step 6: Generate executive-summary.md
+
+After results.json is assembled, write `$DEFEND_RUN_DIR/executive-summary.md` — a concise narrative for stakeholders. Read results.json and the subagent artifacts to synthesize:
+
+- Account ID and audit run context
+- Overall risk posture (severity from audit results)
+- Key findings count: attack paths analyzed, guardrails generated, detections created, policies replaced, remediation items
+- Top 3-5 most critical attack paths (name + one-sentence impact)
+- Defensive coverage summary: what percentage of attack paths have at least one control (guardrail, detection, or remediation)
+- Validation status and any outstanding warnings
+
+Keep it under 2 pages. Write in past tense. Use real resource names and account IDs from the data.
+
+### Step 7: Generate technical-remediation.md
+
+Write `$DEFEND_RUN_DIR/technical-remediation.md` — a prioritized technical action plan. Read remediation-plan.md, guardrails.md, and policy-replacements.md to synthesize:
+
+- Prioritized fix list (from remediation-plan.md priority tiers)
+- For each fix: what to do, which resources are affected, which attack paths it closes
+- SCP/RCP deployment instructions (reference policy files in policies/ directory)
+- IAM policy replacement instructions (reference files in replacements/ directory)
+- Detection deployment guidance (reference splunk-detections.md)
+- Dependency map: which fixes should be applied first because they unblock others
+
+This is the operator's action checklist. Every item must be specific and actionable — real ARNs, real policy names, real commands.
 </results_assembly>
 
 <dashboard_export>
