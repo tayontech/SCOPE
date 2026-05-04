@@ -92,6 +92,10 @@ SCOPE agents are **read-only**. A lifecycle hook blocks every destructive AWS AP
 | Schema Validate | Enforces structured output on all results |
 | Artifact Check | Verifies mandatory outputs before agent completion |
 
+### SIEM Integration
+
+SCOPE connects to your SIEM via MCP for live query execution during threat hunts. The default configuration targets Splunk Cloud (Splunkbase app 7931), but you can use any SIEM that exposes an MCP server. Replace the `mcpServers` block in your platform's config with your SIEM's MCP server definition and credentials. The hunt agent probes for available search tools at startup and adapts accordingly. See `config/mcp-setup.md` for details.
+
 ## Dashboard
 
 Agents produce structured JSON that feeds into an interactive React + D3 dashboard. One command generates a self-contained HTML file. No server required.
