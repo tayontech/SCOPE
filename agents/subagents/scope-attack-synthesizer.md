@@ -57,6 +57,10 @@ Write `$RUN_DIR/results.json` with the final merged attack paths:
 
 ```json
 {
+  "account_id": "$ACCOUNT_ID",
+  "source": "audit",
+  "region": "$REGIONS (multi-region if >1, otherwise single region)",
+  "timestamp": "ISO 8601 timestamp at synthesis time",
   "summary": {
     "severity": "critical",
     "total_paths": 15,
@@ -71,24 +75,39 @@ Write `$RUN_DIR/results.json` with the final merged attack paths:
   "attack_paths": [
     {
       "name": "...",
+      "description": "...",
       "category": "...",
       "severity": "...",
       "source": "...",
       "target": "...",
       "steps": ["..."],
       "affected_resources": ["..."],
-      "mitre": ["..."],
+      "mitre_techniques": ["..."],
+      "exploitability": "...",
+      "detection_opportunities": ["..."],
+      "remediation": "...",
       "research_context": "...",
       "domains": ["compute", "identity"],
       "is_cross_domain": true
     }
   ],
+  "graph": {
+    "nodes": [],
+    "edges": []
+  },
   "trust_relationships": [],
   "principals": []
 }
 ```
 
 The `domains` field indicates which domain(s) contributed to the finding. `is_cross_domain: true` flags chains discovered by synthesis.
+
+**Top-level metadata:**
+- `account_id`: Use `$ACCOUNT_ID` from orchestrator input. 12-digit string.
+- `source`: Always `"audit"`.
+- `region`: If audit covered one region, use that region string. If multiple, use `"multi-region"`.
+- `timestamp`: ISO 8601 at synthesis time (e.g., `"2026-05-03T14:30:00Z"`).
+- `graph`: Copy `graph.json` content (nodes and edges arrays) into this field.
 
 Populate `trust_relationships` from graph.json trust edges. Populate `principals` from graph.json identity nodes.
 
