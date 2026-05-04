@@ -44,6 +44,23 @@ Examples of cross-domain chains:
 
 Also check `exposed_principals` and `exposed_resources` across domains for quick cross-references.
 
+## Field Merge Rules for Cross-Domain Chains
+
+When combining domain paths into a cross-domain chain:
+- `name`: Describe the full chain end-to-end (e.g., "Unauthenticated API to admin role assumption via Lambda execution role")
+- `description`: Summarize the chain's end-to-end impact in one sentence
+- `category`: Use the terminal path's category (the final impact determines the category)
+- `severity`: Use the terminal path's severity (what the attacker ultimately reaches determines severity)
+- `steps`: Concatenate steps from all constituent paths in order. Insert intermediate steps for graph edge traversals (e.g., "Assume role:X via trust relationship")
+- `affected_resources`: Union of all constituent paths' affected resources
+- `mitre_techniques`: Union of all constituent paths' techniques (deduplicate)
+- `exploitability`: Use the lowest exploitability across constituent paths (chain is only as exploitable as its weakest link: proven > likely > theoretical)
+- `detection_opportunities`: Union of all constituent paths' events (deduplicate). Add events for intermediate edge traversals (e.g., `sts:AssumeRole` for trust edges)
+- `remediation`: Use the terminal path's remediation (breaking the final link breaks the chain)
+- `research_context`: Concatenate non-null research contexts from constituent paths, separated by " | "
+- `domains`: Union of all constituent paths' domains
+- `is_cross_domain`: `true`
+
 ## Deduplication
 
 Multiple domains may report the same finding from different angles. Deduplicate by:
