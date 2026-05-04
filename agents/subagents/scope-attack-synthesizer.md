@@ -47,9 +47,11 @@ Also check `exposed_principals` and `exposed_resources` across domains for quick
 ## Deduplication
 
 Multiple domains may report the same finding from different angles. Deduplicate by:
-1. If two paths share the same `source` AND `target`, merge into one (keep the richer description)
-2. If a cross-domain chain subsumes a single-domain path, keep only the chain
+1. If two paths share the same `source`, `target`, AND `category`, merge into one. Keep the entry with more `steps`. If step count is equal, prefer the entry with non-null `research_context`. If still tied, keep the first encountered.
+2. If a cross-domain chain subsumes a single-domain path (same source, same target, superset of steps), keep only the chain
 3. Preserve unique paths from each domain even if they don't connect cross-domain
+
+The `category` field distinguishes fundamentally different attack vectors. A `privilege_escalation` path and a `data_exposure` path between the same two nodes are distinct findings — both survive dedup.
 
 ## Output
 
