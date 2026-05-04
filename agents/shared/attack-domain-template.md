@@ -60,7 +60,7 @@ Write your domain findings to `$RUN_DIR/attack-{DOMAIN}.json`:
       "target": "node ID of what attacker reaches",
       "steps": ["Step 1: specific CLI or action", "Step 2: ..."],
       "affected_resources": ["arn:aws:..."],
-      "mitre": ["T1078.004"],
+      "mitre_techniques": ["T1078.004"],
       "research_context": "Real-world context from scope-research, or null",
       "cross_domain_refs": ["role:some-role", "arn:aws:s3:::some-bucket"]
     }
