@@ -61,6 +61,38 @@ When combining domain paths into a cross-domain chain:
 - `domains`: Union of all constituent paths' domains
 - `is_cross_domain`: `true`
 
+## Graph-Assisted Chain Discovery
+
+After the cross-domain-ref matching pass, run a second pass using `graph.json` edges to find chains that explicit `cross_domain_refs` missed.
+
+**Algorithm:**
+
+For each domain path whose `target` node is NOT the `source` of any already-connected path:
+
+1. Look up the `target` node in `graph.json` edges (match on `source` field of edges)
+2. Walk outbound edges of these types only: `trust`, `executes_as`, `invokes`, `authenticates_to`
+3. At each reached node, check if it matches the `source` of any unconnected domain path from a DIFFERENT domain
+4. If matched: link the paths into a chain using the Field Merge Rules above
+5. If not matched at hop 1: walk one more hop from the intermediate node (same edge type filter)
+6. Cap at 2 intermediate hops maximum (total chain: original path + up to 2 graph edges + destination path)
+
+**Edge type semantics:**
+
+| Edge Type | Traversal Meaning | Detection Event |
+|-----------|-------------------|-----------------|
+| `trust` | Principal can assume target role | `sts:AssumeRole` |
+| `executes_as` | Compute resource runs as target role | (no distinct event — execution is implicit) |
+| `invokes` | Gateway/trigger invokes compute | `lambda:Invoke` or API Gateway access log |
+| `authenticates_to` | Identity provider authenticates to role | `sts:AssumeRoleWithWebIdentity` |
+
+**Explosion guard:** Maximum 50 cross-domain chains total (from both passes combined). If the graph traversal produces more than 50 chains, keep the 50 highest-severity chains. Within the same severity, prefer chains with fewer hops (more exploitable). This prevents combinatorial blowup in heavily connected environments.
+
+**Do NOT:**
+- Traverse `membership` edges (group membership doesn't create attack chains)
+- Traverse `service` edges (service principals are origin nodes, not traversal targets)
+- Create chains that loop back to the same node
+- Re-discover chains already found by the cross-domain-ref pass
+
 ## Deduplication
 
 Multiple domains may report the same finding from different angles. Deduplicate by:
