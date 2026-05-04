@@ -54,6 +54,7 @@ Write your domain findings to `$RUN_DIR/attack-{DOMAIN}.json`:
   "paths": [
     {
       "name": "Environment-specific description of the attack path",
+      "description": "One-sentence summary of what this path enables an attacker to do",
       "category": "privilege_escalation|trust_misconfiguration|data_exposure|lateral_movement|persistence|post_exploitation|network_exposure|excessive_permission",
       "severity": "critical|high|medium|low",
       "source": "node ID from graph (e.g., role:my-role, lambda:my-func)",
@@ -61,6 +62,9 @@ Write your domain findings to `$RUN_DIR/attack-{DOMAIN}.json`:
       "steps": ["Step 1: specific CLI or action", "Step 2: ..."],
       "affected_resources": ["arn:aws:..."],
       "mitre_techniques": ["T1078.004"],
+      "exploitability": "proven|likely|theoretical",
+      "detection_opportunities": ["iam:PassRole", "lambda:CreateFunction"],
+      "remediation": "One-line fix recommendation",
       "research_context": "Real-world context from scope-research, or null",
       "cross_domain_refs": ["role:some-role", "arn:aws:s3:::some-bucket"]
     }
@@ -77,6 +81,12 @@ Write your domain findings to `$RUN_DIR/attack-{DOMAIN}.json`:
 - `low`: Informational — theoretical path with significant gating conditions
 
 Use real ARNs and resource names from the enumeration data. Never use placeholders like `YOUR_ARN_HERE`. Every finding must explain why THIS account's specific combination matters.
+
+**New field guidance:**
+- `description`: One sentence. State what the attacker gains. "Developer can escalate to admin via PassRole to Lambda." Not a repeat of `name`.
+- `exploitability`: `"proven"` = documented technique with known tooling. `"likely"` = permissions allow it, standard technique. `"theoretical"` = requires specific conditions or undocumented chaining.
+- `detection_opportunities`: CloudTrail event names (service:Action format) that would reveal this path in logs. Include every action in the steps that generates a management event.
+- `remediation`: Single actionable fix. "Add resource condition to restrict iam:PassRole target roles." Not "review permissions" or "follow least privilege."
 
 ## Partial Failure
 
