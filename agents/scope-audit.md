@@ -158,6 +158,8 @@ REGIONS_FALLBACK=${REGIONS_FALLBACK:-false}
 ```
 
 **Display Gate 1:** Identity confirmed — show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, enabled regions count (note if fallback). Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
+
+**Load environment observations:** Read `config/observations.md` if it exists. Note account-specific patterns and org-wide observations for this account. Use these to contextualize findings during the run — flag when new findings match or contradict prior observations. Do not treat observations as ground truth (the environment may have changed since the last run).
 </gate_1_credentials>
 
 <gate_2_batch_approval>
@@ -311,6 +313,10 @@ After Gate 4 approval, write `$RUN_DIR/findings.md` — always generated, even w
 
 **Rules:** Use REAL ARNs and resource names throughout — never placeholders. End with RECOMMENDED NEXT ACTION referencing defend artifacts and available follow-up commands (`/scope:exploit`, `/scope:audit`, dashboard link).
 </findings_md>
+
+**Update environment observations:** Before finishing, append up to 5 concise observations to `config/observations.md`. If the file does not exist, create it using the structure from `config/observations.example.md`. Write to the `## Account: {ACCOUNT_ID}` section (create it if missing, with subsections: Naming & Structure, Recurring Gaps, Known-Good Trusts). Promote a pattern to `## Org-Wide Patterns` only if observed in 2+ accounts across runs. Prefix each entry with today's date (YYYY-MM-DD). Never delete or overwrite existing entries.
+
+Focus on: naming conventions, role structure patterns, service usage patterns, severity trends vs prior observations, new finding categories not previously observed.
 
 <results_export>
 ## Results JSON Export
