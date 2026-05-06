@@ -109,6 +109,8 @@ printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" --arg audit_dir "$AUDIT_RUN_DIR" '
 ```
 </intake_protocol>
 
+**Load environment observations:** Read `config/observations.md` if it exists. Use to understand: what controls are already deployed in this account, what remediation has been attempted before, detection FP rates. Avoid re-recommending controls already noted as deployed.
+
 <wave1_dispatch>
 ## Wave 1: Parallel Dispatch (4 Subagents)
 
@@ -360,6 +362,8 @@ VALIDATION_BLOCKS=${VALIDATION_BLOCKS:-0}
 VALIDATION_WARNS=${VALIDATION_WARNS:-0}
 ```
 </wave2_validate>
+
+**Update environment observations:** Before finishing, append up to 5 concise observations to `config/observations.md` under the appropriate account section and `## Deployed Controls`. If the file does not exist, create it using the structure from `config/observations.example.md`. Focus on: new controls deployed, remediation blockers, detection effectiveness. Prefix each entry with today's date (YYYY-MM-DD). Never delete or overwrite existing entries.
 
 <results_assembly>
 ## Results.JSON Assembly
