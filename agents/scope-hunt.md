@@ -164,6 +164,8 @@ Announce mode before continuing (e.g., `Hunt mode — reading run directory: $HU
 **After return:** Extract `investigation_context` and `active_hypothesis` (or `selected_hypothesis`) from the handoff.
 </entry_point_detection>
 
+**Load environment observations:** Read `config/observations.md` if it exists. Use investigation baselines and account patterns to contextualize the current alert — recognize repeat actors, known-good trusts, and prior false positive patterns. Do not treat observations as ground truth.
+
 <hypothesis_engine>
 ## Hypothesis Engine — Post-Handoff Finalization
 
@@ -769,4 +771,6 @@ An investigation session is complete when ALL of the following are true:
 - Any query was executed without analyst approval (the approve gate was bypassed)
 - The completion signal was never shown (even if all reference pattern angles were explored, the signal must appear before generating output)
 - The skill silently advanced past a step without analyst interaction
+
+**Update environment observations:** Before finishing, append up to 5 concise observations to `config/observations.md` under `## Investigation Baselines` and the appropriate account section. If the file does not exist, create it using the structure from `config/observations.example.md`. Focus on: principal behavior baselines, new IOCs, detection blind spots, false positive patterns. Prefix each entry with today's date (YYYY-MM-DD). Never delete or overwrite existing entries.
 </success_criteria>
