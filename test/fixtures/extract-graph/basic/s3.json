@@ -1,0 +1,23 @@
+{
+  "module": "s3",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "timestamp": "2026-04-19T00:00:00Z",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "s3_bucket",
+      "resource_id": "data-bucket",
+      "arn": "arn:aws:s3:::data-bucket",
+      "region": "us-east-1",
+      "findings": []
+    },
+    {
+      "resource_type": "s3_bucket",
+      "resource_id": "logs-bucket",
+      "arn": "arn:aws:s3:::logs-bucket",
+      "region": "us-east-1",
+      "findings": []
+    }
+  ]
+}

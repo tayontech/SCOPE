@@ -1,0 +1,19 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListTopicsCommand": {
+    "Topics": [
+      { "TopicArn": "arn:aws:sns:us-east-1:123456789012:test-topic" }
+    ]
+  },
+  "GetTopicAttributesCommand": {
+    "Attributes": {
+      "TopicArn": "arn:aws:sns:us-east-1:123456789012:test-topic",
+      "SubscriptionsConfirmed": "2",
+      "KmsMasterKeyId": null
+    }
+  }
+}

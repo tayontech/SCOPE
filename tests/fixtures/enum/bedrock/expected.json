@@ -1,0 +1,75 @@
+{
+  "module": "bedrock",
+  "account_id": "unknown",
+  "region": "us-east-1",
+  "status": "complete",
+  "resources": [
+    {
+      "resource_type": "bedrock_model",
+      "resource_id": "anthropic.claude-3-sonnet-20240229-v1:0",
+      "arn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+      "region": "us-east-1",
+      "model_name": "Claude 3 Sonnet",
+      "provider": "Anthropic",
+      "model_arn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+      "input_modalities": ["TEXT"],
+      "output_modalities": ["TEXT"],
+      "customizations_supported": [],
+      "inference_types": ["ON_DEMAND"],
+      "findings": []
+    },
+    {
+      "resource_type": "bedrock_custom_model",
+      "resource_id": "my-custom-model",
+      "arn": "arn:aws:bedrock:us-east-1:123456789012:custom-model/my-custom-model",
+      "region": "us-east-1",
+      "model_name": "my-custom-model",
+      "model_arn": "arn:aws:bedrock:us-east-1:123456789012:custom-model/my-custom-model",
+      "base_model_arn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-text-express-v1",
+      "creation_time": "2024-01-15T00:00:00Z",
+      "findings": [{ "type": "training_data_exposure", "severity": "medium", "detail": "Custom model — training data exposure risk" }]
+    },
+    {
+      "resource_type": "bedrock_agent",
+      "resource_id": "TestAgent",
+      "arn": "arn:aws:bedrock:us-east-1:123456789012:agent/agent-abc123",
+      "region": "us-east-1",
+      "agent_id": "agent-abc123",
+      "agent_arn": "arn:aws:bedrock:us-east-1:123456789012:agent/agent-abc123",
+      "status": "PREPARED",
+      "execution_role_arn": "arn:aws:iam::123456789012:role/AmazonBedrockExecutionRoleForAgents_test",
+      "foundation_model": "anthropic.claude-3-sonnet-20240229-v1:0",
+      "description": "Test agent",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-15T00:00:00Z",
+      "findings": [{ "type": "overpermissive_role", "severity": "high", "detail": "Agent execution role — IAM attack surface (often overpermissive)" }]
+    },
+    {
+      "resource_type": "bedrock_knowledge_base",
+      "resource_id": "TestKnowledgeBase",
+      "arn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/kb-xyz789",
+      "region": "us-east-1",
+      "knowledge_base_id": "kb-xyz789",
+      "knowledge_base_arn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/kb-xyz789",
+      "status": "ACTIVE",
+      "role_arn": "arn:aws:iam::123456789012:role/AmazonBedrockExecutionRoleForKnowledgeBase_test",
+      "storage_type": "OPENSEARCH_SERVERLESS",
+      "storage_configuration": {
+        "type": "OPENSEARCH_SERVERLESS"
+      },
+      "description": "Test knowledge base",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-15T00:00:00Z",
+      "findings": [{ "type": "data_access_mapping", "severity": "medium", "detail": "Knowledge base data source — data access mapping" }]
+    },
+    {
+      "resource_type": "bedrock_logging",
+      "resource_id": "invocation_logging",
+      "arn": "arn:aws:bedrock:us-east-1:unknown:logging/invocation_logging",
+      "region": "us-east-1",
+      "logging_enabled": false,
+      "logging_config": null,
+      "findings": [{ "type": "logging_disabled", "severity": "high", "detail": "Bedrock model invocation logging DISABLED — defense evasion vector (no evidence of queries)" }]
+    }
+  ]
+}

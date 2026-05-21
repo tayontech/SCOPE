@@ -1,0 +1,19 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListQueuesCommand": {
+    "QueueUrls": [
+      "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue"
+    ]
+  },
+  "GetQueueAttributesCommand": {
+    "Attributes": {
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:test-queue",
+      "VisibilityTimeout": "30",
+      "FifoQueue": "false"
+    }
+  }
+}

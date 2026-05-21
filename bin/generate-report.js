@@ -26,6 +26,31 @@ const dashboardDir = join(__dirname, "..", "dashboard");
 const publicDir = join(dashboardDir, "public");
 const distDir = join(dashboardDir, "dist");
 
+function readAuditModule(auditRunDir, service) {
+  const nestedDir = join(auditRunDir, "modules", service);
+  if (existsSync(nestedDir)) {
+    const resources = [];
+    const files = readdirSync(nestedDir)
+      .filter((file) => file.endsWith(".json"))
+      .sort();
+    for (const file of files) {
+      const payload = JSON.parse(readFileSync(join(nestedDir, file), "utf-8"));
+      resources.push(...resourcesOf(payload));
+    }
+    return { resources };
+  }
+
+  const legacyPath = join(auditRunDir, `${service}.json`);
+  if (!existsSync(legacyPath)) return null;
+  return JSON.parse(readFileSync(legacyPath, "utf-8"));
+}
+
+function resourcesOf(moduleData) {
+  if (Array.isArray(moduleData?.resources)) return moduleData.resources;
+  if (Array.isArray(moduleData?.findings)) return moduleData.findings;
+  return [];
+}
+
 // --- Step 1: Install dependencies if needed, then build the dashboard ---
 const nodeModulesDir = join(dashboardDir, "node_modules");
 if (!existsSync(nodeModulesDir)) {
@@ -101,9 +126,8 @@ if (existsSync(dashboardIndexPath)) {
       const file = run.file || `${run.run_id}.json`;
       const filePath = join(publicDir, file);
       if (!existsSync(filePath)) {
-        // Orphan entry — the data file is gone; skip AND delete any leftover file
+        // Orphan entry — the data file is gone; skip
         orphanCount++;
-        try { unlinkSync(filePath); } catch (_) { /* already gone */ }
         console.log(`[SCOPE] Culled orphan dashboard entry: ${run.run_id}`);
         continue;
       }
@@ -197,57 +221,39 @@ if (existsSync(join(publicDir, "index.json"))) {
               }
             }
           }
-          // 2. Fallback: parse iam.json from the audit run directory for role trust policies
+          // 2. Fallback: parse IAM module data from the audit run directory for role trust policies
           if (edges.length === 0 && run.run_id) {
-            // Build node ID lookup to match edge format to existing node IDs
-            const nodeById = {};
-            for (const n of json.graph.nodes || []) nodeById[n.id] = n;
             // Detect format: ARN-based ("arn:aws:...") or short ("user:name")
             const firstId = json.graph.nodes?.[0]?.id || "";
             const useArns = firstId.startsWith("arn:");
 
-            const auditRunDir = join(dashboardDir, "..", "audit", run.run_id);
-            const iamPath = join(auditRunDir, "iam.json");
-            if (existsSync(iamPath)) {
-              try {
-                const iam = JSON.parse(readFileSync(iamPath, "utf-8"));
-                const roles = iam?.findings?.roles?.Roles || [];
-                const accountId = json.account_id || "";
+            const auditRunDir = run.run_id === currentRunId && runDir
+              ? runDir
+              : join(dashboardDir, "..", "audit", run.run_id);
+            try {
+              const iam = readAuditModule(auditRunDir, "iam");
+              if (iam) {
+                const roles = resourcesOf(iam).filter(f => f.resource_type === 'iam_role');
                 for (const role of roles) {
-                  const trustDoc = role.AssumeRolePolicyDocument;
-                  if (!trustDoc) continue;
-                  const policy = typeof trustDoc === "string" ? JSON.parse(decodeURIComponent(trustDoc)) : trustDoc;
-                  for (const stmt of policy.Statement || []) {
-                    if (stmt.Effect !== "Allow") continue;
-                    const principals = [];
-                    const p = stmt.Principal;
-                    if (typeof p === "string") principals.push(p);
-                    else if (p?.AWS) {
-                      const aws = Array.isArray(p.AWS) ? p.AWS : [p.AWS];
-                      principals.push(...aws);
-                    }
-                    for (const prin of principals) {
-                      // Match the node ID format used in the graph
-                      let srcId, tgtId;
-                      if (useArns) {
-                        srcId = prin === "*" ? "external:*" : prin;
-                        tgtId = role.Arn || `arn:aws:iam::${accountId}:role/${role.RoleName}`;
-                      } else {
-                        srcId = prin.includes(":user/") ? `user:${prin.split("/").pop()}`
-                          : prin.includes(":role/") ? `role:${prin.split("/").pop()}`
-                          : prin === "*" ? "external:*" : prin;
-                        tgtId = `role:${role.RoleName}`;
-                      }
-                      const trustType = prin.includes(accountId) && accountId ? "same-account"
-                        : prin === "*" ? "wildcard" : "cross-account";
-                      edges.push({ source: srcId, target: tgtId, trust_type: trustType, edge_type: "trust", label: "can_assume" });
-                    }
+                  if (!role.trust_relationships) continue;
+                  for (const tr of role.trust_relationships) {
+                    if (!tr.principal) continue;
+                    const isExternal = tr.trust_type === 'cross_account' || tr.trust_type === 'federated' || tr.trust_type === 'wildcard';
+                    const targetId = isExternal
+                      ? `external:${tr.principal}`
+                      : `role:${tr.principal.split('/').pop()}`;
+                    edges.push({
+                      source: `role:${role.resource_id}`,
+                      target: targetId,
+                      type: 'trusts',
+                      label: `${tr.trust_type} trust`,
+                    });
                   }
                 }
-                if (edges.length > 0) console.log(`[SCOPE] Derived ${edges.length} trust edges from iam.json`);
-              } catch (e) {
-                console.warn(`[SCOPE] Edge backfill: failed to parse iam.json:`, e.message);
+                if (edges.length > 0) console.log(`[SCOPE] Derived ${edges.length} trust edges from IAM module data`);
               }
+            } catch (e) {
+              console.warn(`[SCOPE] Edge backfill: failed to parse IAM module data:`, e.message);
             }
           }
           if (edges.length > 0) {
@@ -364,7 +370,7 @@ if (!outputPath) {
   } else {
     // Derive filename from the latest run ID to avoid overwriting prior dashboards.
     // Each run gets its own dashboard file (e.g., audit-20260408-123456-all-dashboard.html).
-    const latestRunId = Object.values(inlineData)[0]?._run_id
+    const latestRunId = null
       || (existsSync(join(publicDir, "index.json"))
         ? (JSON.parse(readFileSync(join(publicDir, "index.json"), "utf-8")).runs?.[0]?.run_id)
         : null);

@@ -1,0 +1,81 @@
+{
+  "ListFoundationModelsCommand": {
+    "modelSummaries": [
+      {
+        "modelId": "anthropic.claude-3-sonnet-20240229-v1:0",
+        "modelName": "Claude 3 Sonnet",
+        "providerName": "Anthropic",
+        "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+        "inputModalities": ["TEXT"],
+        "outputModalities": ["TEXT"],
+        "customizationsSupported": [],
+        "inferenceTypesSupported": ["ON_DEMAND"]
+      }
+    ]
+  },
+  "ListCustomModelsCommand": {
+    "modelSummaries": [
+      {
+        "modelName": "my-custom-model",
+        "modelArn": "arn:aws:bedrock:us-east-1:123456789012:custom-model/my-custom-model",
+        "baseModelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-text-express-v1",
+        "creationTime": "2024-01-15T00:00:00Z"
+      }
+    ]
+  },
+  "ListAgentsCommand": {
+    "agentSummaries": [
+      {
+        "agentId": "agent-abc123",
+        "agentName": "TestAgent",
+        "agentStatus": "PREPARED"
+      }
+    ]
+  },
+  "GetAgentCommand": {
+    "agent": {
+      "agentId": "agent-abc123",
+      "agentName": "TestAgent",
+      "agentArn": "arn:aws:bedrock:us-east-1:123456789012:agent/agent-abc123",
+      "agentStatus": "PREPARED",
+      "agentResourceRoleArn": "arn:aws:iam::123456789012:role/AmazonBedrockExecutionRoleForAgents_test",
+      "foundationModel": "anthropic.claude-3-sonnet-20240229-v1:0",
+      "description": "Test agent",
+      "createdAt": "2024-01-01T00:00:00Z",
+      "updatedAt": "2024-01-15T00:00:00Z"
+    }
+  },
+  "ListKnowledgeBasesCommand": {
+    "knowledgeBaseSummaries": [
+      {
+        "knowledgeBaseId": "kb-xyz789",
+        "name": "TestKnowledgeBase",
+        "status": "ACTIVE"
+      }
+    ]
+  },
+  "GetKnowledgeBaseCommand": {
+    "knowledgeBase": {
+      "knowledgeBaseId": "kb-xyz789",
+      "name": "TestKnowledgeBase",
+      "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/kb-xyz789",
+      "status": "ACTIVE",
+      "roleArn": "arn:aws:iam::123456789012:role/AmazonBedrockExecutionRoleForKnowledgeBase_test",
+      "storageConfiguration": {
+        "type": "OPENSEARCH_SERVERLESS"
+      },
+      "description": "Test knowledge base",
+      "createdAt": "2024-01-01T00:00:00Z",
+      "updatedAt": "2024-01-15T00:00:00Z"
+    }
+  },
+  "ListGuardrailsCommand": {
+    "guardrails": []
+  },
+  "GetModelInvocationLoggingConfigurationCommand": {
+    "loggingConfig": null
+  },
+  "ListProvisionedModelThroughputsCommand": {
+    "provisionedModelSummaries": []
+  }
+}

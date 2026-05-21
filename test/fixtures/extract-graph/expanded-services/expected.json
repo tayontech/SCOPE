@@ -1,0 +1,231 @@
+{
+  "nodes": [
+    {
+      "id": "ai:bedrock:AGENTID001",
+      "label": "AGENTID001",
+      "type": "ai",
+      "_source": "api"
+    },
+    {
+      "id": "compute:codebuild:my-build-project",
+      "label": "my-build-project",
+      "type": "compute",
+      "_source": "api"
+    },
+    {
+      "id": "compute:ec2:i-0abc123def456",
+      "label": "i-0abc123def456",
+      "type": "compute",
+      "_source": "api"
+    },
+    {
+      "id": "compute:lambda:api-handler",
+      "label": "api-handler",
+      "type": "compute",
+      "_source": "api"
+    },
+    {
+      "id": "compute:lambda:my-function",
+      "label": "my-function",
+      "type": "compute",
+      "_source": "api"
+    },
+    {
+      "id": "data:dynamodb:my-table",
+      "label": "my-table",
+      "type": "data",
+      "_source": "api"
+    },
+    {
+      "id": "data:kms:mrk-12345abcdef",
+      "label": "mrk-12345abcdef",
+      "type": "data",
+      "_source": "api"
+    },
+    {
+      "id": "data:rds:my-database",
+      "label": "my-database",
+      "type": "data",
+      "_source": "api"
+    },
+    {
+      "id": "data:s3:my-data-bucket",
+      "label": "my-data-bucket",
+      "type": "data",
+      "_source": "api"
+    },
+    {
+      "id": "data:secrets:prod/myapp/api-key",
+      "label": "prod/myapp/api-key",
+      "type": "data",
+      "_source": "api"
+    },
+    {
+      "id": "data:ssm:/myapp/config/db-password",
+      "label": "/myapp/config/db-password",
+      "type": "data",
+      "_source": "api"
+    },
+    {
+      "id": "gateway:apigw:abc1234567",
+      "label": "abc1234567",
+      "type": "gateway",
+      "_source": "api"
+    },
+    {
+      "id": "idp:cognito:us-east-1:pool-id-001",
+      "label": "us-east-1:pool-id-001",
+      "type": "idp",
+      "_source": "api"
+    },
+    {
+      "id": "messaging:sns:arn:aws:sns:us-east-1:123456789012:my-topic",
+      "label": "arn:aws:sns:us-east-1:123456789012:my-topic",
+      "type": "messaging",
+      "_source": "api"
+    },
+    {
+      "id": "messaging:sqs:https://sqs.us-east-1.amazonaws.com/123456789012/my-queue",
+      "label": "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue",
+      "type": "messaging",
+      "_source": "api"
+    },
+    {
+      "id": "oidc:token.actions.githubusercontent.com",
+      "label": "token.actions.githubusercontent.com",
+      "type": "oidc",
+      "_source": "api"
+    },
+    {
+      "id": "role:bedrock-agent-role",
+      "label": "bedrock-agent-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:codebuild-role",
+      "label": "codebuild-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:cognito-auth-role",
+      "label": "cognito-auth-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:cognito-unauth-role",
+      "label": "cognito-unauth-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:ec2-profile",
+      "label": "ec2-profile",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:github-actions-role",
+      "label": "github-actions-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:lambda-exec-role",
+      "label": "lambda-exec-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "role:test-role",
+      "label": "test-role",
+      "type": "role",
+      "_source": "api"
+    },
+    {
+      "id": "svc:lambda.amazonaws.com",
+      "label": "lambda.amazonaws.com",
+      "type": "external",
+      "_source": "api"
+    },
+    {
+      "id": "user:test-user",
+      "label": "test-user",
+      "type": "user",
+      "_source": "api"
+    }
+  ],
+  "edges": [
+    {
+      "source": "ai:bedrock:AGENTID001",
+      "target": "role:bedrock-agent-role",
+      "edge_type": "executes_as",
+      "label": "executes_as",
+      "_source": "api"
+    },
+    {
+      "source": "compute:codebuild:my-build-project",
+      "target": "role:codebuild-role",
+      "edge_type": "executes_as",
+      "label": "executes_as",
+      "_source": "api"
+    },
+    {
+      "source": "compute:ec2:i-0abc123def456",
+      "target": "role:ec2-profile",
+      "edge_type": "executes_as",
+      "label": "executes_as",
+      "_source": "api"
+    },
+    {
+      "source": "compute:lambda:my-function",
+      "target": "role:lambda-exec-role",
+      "edge_type": "executes_as",
+      "label": "executes_as",
+      "_source": "api"
+    },
+    {
+      "source": "gateway:apigw:abc1234567",
+      "target": "compute:lambda:api-handler",
+      "edge_type": "invokes",
+      "label": "invokes",
+      "_source": "api"
+    },
+    {
+      "source": "idp:cognito:us-east-1:pool-id-001",
+      "target": "role:cognito-auth-role",
+      "edge_type": "authenticates_to",
+      "label": "authenticates_to",
+      "_source": "api"
+    },
+    {
+      "source": "idp:cognito:us-east-1:pool-id-001",
+      "target": "role:cognito-unauth-role",
+      "edge_type": "authenticates_to",
+      "label": "authenticates_to",
+      "_source": "api"
+    },
+    {
+      "source": "oidc:token.actions.githubusercontent.com",
+      "target": "role:github-actions-role",
+      "edge_type": "authenticates_to",
+      "label": "authenticates_to",
+      "conditions": {
+        "trust_type": "federated",
+        "principal": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "_source": "api"
+    },
+    {
+      "source": "svc:lambda.amazonaws.com",
+      "target": "role:test-role",
+      "edge_type": "service",
+      "trust_type": "service",
+      "severity": "low",
+      "label": "can_assume",
+      "_source": "api"
+    }
+  ]
+}

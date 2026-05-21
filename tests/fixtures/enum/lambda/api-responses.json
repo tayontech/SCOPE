@@ -1,0 +1,31 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListFunctionsCommand": {
+    "Functions": [
+      {
+        "FunctionName": "my-test-function",
+        "FunctionArn": "arn:aws:lambda:us-east-1:123456789012:function:my-test-function",
+        "Runtime": "nodejs20.x",
+        "Role": "arn:aws:iam::123456789012:role/lambda-basic-execution",
+        "Handler": "index.handler",
+        "CodeSize": 1024,
+        "Timeout": 30,
+        "MemorySize": 128,
+        "LastModified": "2024-01-15T10:00:00.000+0000",
+        "Layers": [],
+        "Environment": {
+          "Variables": {
+            "LOG_LEVEL": "info",
+            "DB_HOST": "localhost"
+          }
+        }
+      }
+    ]
+  },
+  "GetFunctionUrlConfigCommand": null,
+  "GetPolicyCommand": null
+}

@@ -1,0 +1,75 @@
+{
+  "resources": [
+    {
+      "resource_type": "dynamodb_table",
+      "resource_id": "TestTable",
+      "arn": "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable",
+      "region": "us-east-1",
+      "encryption_type": "KMS",
+      "kms_key_id": "arn:aws:kms:us-east-1:123456789012:key/test-key-id",
+      "stream_enabled": true,
+      "stream_view_type": "NEW_AND_OLD_IMAGES",
+      "is_global_table": false,
+      "replicas": [],
+      "deletion_protection": true,
+      "table_class": "STANDARD",
+      "point_in_time_recovery": true,
+      "continuous_backups_status_value": "ENABLED",
+      "continuous_backups_status": "present",
+      "backup_count": 1,
+      "backups_status": "present",
+      "resource_policy": null,
+      "resource_policy_status": "absent",
+      "findings": []
+    }
+  ],
+  "status": "complete",
+  "coverage": [
+    {
+      "check": "list_tables",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "describe_table",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "continuous_backups",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "list_backups",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "resource_policy",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    }
+  ],
+  "errors": []
+}

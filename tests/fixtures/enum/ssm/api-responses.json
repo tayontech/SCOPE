@@ -1,0 +1,29 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "DescribeParametersCommand": {
+    "Parameters": [
+      {
+        "Name": "/app/secret-key",
+        "Type": "SecureString",
+        "KeyId": "arn:aws:kms:us-east-1:123456789012:key/secure-key-id",
+        "LastModifiedDate": "2024-03-15T00:00:00.000Z",
+        "Version": 3,
+        "Tier": "Standard",
+        "DataType": "text"
+      },
+      {
+        "Name": "/app/config/region",
+        "Type": "String",
+        "LastModifiedDate": "2024-01-01T00:00:00.000Z",
+        "Version": 1,
+        "Tier": "Standard",
+        "DataType": "text"
+      }
+    ]
+  },
+  "GetResourcePoliciesCommand": { "Policies": [] }
+}

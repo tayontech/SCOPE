@@ -20,8 +20,6 @@ You receive from the parent:
 - The operator's alert input (raw text, notable ID, or empty for queue pull)
 
 You return a `INVESTIGATE_HANDOFF` block that the parent reads to set up the investigation session.
-
-**Memory hygiene:** Do NOT write any AWS ARNs, account IDs, role names, user names, KMS key IDs, S3 bucket names, or access key IDs to MEMORY.md or any memory file. All resource identifiers parsed during alert intake are session-scoped only.
 </role>
 
 <alert_intake>

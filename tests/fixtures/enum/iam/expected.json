@@ -1,0 +1,77 @@
+{
+  "module": "iam",
+  "account_id": "123456789012",
+  "region": "global",
+  "status": "complete",
+  "resources": [
+    {
+      "resource_type": "iam_user",
+      "resource_id": "TestUser",
+      "arn": "arn:aws:iam::123456789012:user/TestUser",
+      "region": "global",
+      "groups": [],
+      "attached_policies": [],
+      "inline_policies": [],
+      "has_console_access": false,
+      "mfa_enabled": false,
+      "access_keys": [],
+      "password_last_used": null,
+      "has_boundary": false,
+      "permission_boundary_arn": null,
+      "last_activity": null,
+      "is_stale": true,
+      "stale_days": null,
+      "service_last_accessed": [
+        {
+          "service_name": "Amazon S3",
+          "service_namespace": "s3",
+          "last_authenticated": null,
+          "total_entities": 0
+        }
+      ]
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "TestRole",
+      "arn": "arn:aws:iam::123456789012:role/TestRole",
+      "region": "global",
+      "is_service_linked": false,
+      "trust_relationships": [
+        {
+          "principal": "ec2.amazonaws.com",
+          "trust_type": "service",
+          "is_wildcard": false,
+          "has_external_id": false,
+          "has_mfa_condition": false,
+          "conditions": {}
+        }
+      ],
+      "attached_policies": [],
+      "inline_policies": [],
+      "has_boundary": false,
+      "permission_boundary_arn": null,
+      "last_activity": null,
+      "is_stale": true,
+      "stale_days": null,
+      "service_last_accessed": [
+        {
+          "service_name": "Amazon S3",
+          "service_namespace": "s3",
+          "last_authenticated": null,
+          "total_entities": 0
+        }
+      ]
+    },
+    {
+      "resource_type": "iam_group",
+      "resource_id": "TestGroup",
+      "arn": "arn:aws:iam::123456789012:group/TestGroup",
+      "region": "global",
+      "members": [
+        "TestUser"
+      ],
+      "attached_policies": [],
+      "inline_policies": []
+    }
+  ]
+}

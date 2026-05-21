@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "scope-defend-results",
   "title": "SCOPE Defend Results",
-  "description": "Schema for defend phase results.json — validated by scope-schema-validate hook",
+  "description": "Schema for defend phase results.json — 5-subagent architecture. Validated by scope-schema-validate hook.",
   "type": "object",
-  "required": ["account_id", "source", "region", "timestamp", "summary", "audit_runs_analyzed", "scps", "rcps", "detections", "security_controls", "prioritization"],
+  "required": ["account_id", "source", "region", "timestamp", "summary", "audit_runs_analyzed", "guardrails", "detections", "policy_replacements", "remediation", "validation"],
   "properties": {
     "account_id": {
       "type": "string",
@@ -37,109 +37,25 @@
     },
     "summary": {
       "type": "object",
-      "required": ["scps_generated", "rcps_generated", "detections_generated", "controls_recommended", "risk_score"],
+      "required": ["guardrails", "detections", "policy_replacements", "remediation_items", "validation_status", "severity"],
       "properties": {
-        "scps_generated": { "type": "integer" },
-        "rcps_generated": { "type": "integer" },
-        "detections_generated": { "type": "integer" },
-        "controls_recommended": { "type": "integer" },
-        "quick_wins": { "type": "integer" },
-        "risk_score": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-        "zero_paths": { "type": "boolean" }
+        "guardrails": { "type": "integer", "description": "Count of SCP + RCP policies generated" },
+        "detections": { "type": "integer", "description": "Count of SPL detections generated" },
+        "policy_replacements": { "type": "integer", "description": "Count of IAM replacement policies generated" },
+        "remediation_items": { "type": "integer", "description": "Count of prioritized remediation items" },
+        "validation_status": { "type": "string", "enum": ["pass", "partial", "fail"] },
+        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
       }
     },
-    "executive_summary": {
-      "type": "object",
-      "properties": {
-        "risk_posture": { "type": "string" },
-        "category_breakdown": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["category", "count", "severity"],
-            "properties": {
-              "category": { "type": "string" },
-              "count": { "type": "integer" },
-              "severity": { "type": "string" }
-            }
-          }
-        },
-        "quick_wins": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["rank", "action", "impact"],
-            "properties": {
-              "rank": { "type": "integer" },
-              "action": { "type": "string" },
-              "impact": { "type": "string" }
-            }
-          }
-        },
-        "remediation_timeline": {
-          "type": "object",
-          "properties": {
-            "this_week": { "type": "array", "items": { "type": "string" } },
-            "this_month": { "type": "array", "items": { "type": "string" } },
-            "this_quarter": { "type": "array", "items": { "type": "string" } }
-          }
-        }
-      }
-    },
-    "technical_recommendations": {
-      "type": "object",
-      "properties": {
-        "attack_path_bundles": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["attack_path", "severity", "source_run_ids", "classification"],
-            "properties": {
-              "attack_path": { "type": "string" },
-              "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-              "source_run_ids": { "type": "array", "items": { "type": "string" } },
-              "classification": { "type": "string", "enum": ["systemic", "one-off"] },
-              "scp_names": { "type": "array", "items": { "type": "string" } },
-              "rcp_names": { "type": "array", "items": { "type": "string" } },
-              "detection_names": { "type": "array", "items": { "type": "string" } },
-              "control_names": { "type": "array", "items": { "type": "string" } }
-            }
-          }
-        }
-      }
-    },
-    "scps": {
+    "guardrails": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "file", "policy_json", "source_attack_paths", "source_run_ids", "impact_analysis"],
+        "required": ["name", "type", "file", "policy_json", "source_attack_paths", "source_run_ids", "impact_analysis"],
         "properties": {
           "name": { "type": "string" },
-          "file": { "type": "string", "description": "Relative path to the policy JSON file, e.g. policies/scp-deny-admin.json" },
-          "policy_json": { "type": "object" },
-          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
-          "source_run_ids": { "type": "array", "items": { "type": "string" } },
-          "impact_analysis": {
-            "type": "object",
-            "required": ["prevents", "blast_radius", "affected_services", "break_glass"],
-            "properties": {
-              "prevents": { "type": "array", "items": { "type": "string" } },
-              "blast_radius": { "type": "string", "enum": ["low", "medium", "high"] },
-              "affected_services": { "type": "array", "items": { "type": "string" } },
-              "break_glass": { "type": "string" }
-            }
-          }
-        }
-      }
-    },
-    "rcps": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["name", "file", "policy_json", "source_attack_paths", "source_run_ids", "impact_analysis"],
-        "properties": {
-          "name": { "type": "string" },
-          "file": { "type": "string" },
+          "type": { "type": "string", "enum": ["scp", "rcp"] },
+          "file": { "type": "string", "description": "Relative path e.g. policies/scp-deny-imds-v1.json" },
           "policy_json": { "type": "object" },
           "source_attack_paths": { "type": "array", "items": { "type": "string" } },
           "source_run_ids": { "type": "array", "items": { "type": "string" } },
@@ -172,32 +88,38 @@
         }
       }
     },
-    "security_controls": {
+    "policy_replacements": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["service", "recommendation", "priority", "effort", "source_attack_paths"],
+        "required": ["role_name", "file", "original_policy_arn", "replacement_policy_json", "source_attack_paths", "staleness_reasoning"],
         "properties": {
-          "service": { "type": "string" },
-          "recommendation": { "type": "string" },
-          "priority": { "type": "string" },
-          "effort": { "type": "string" },
-          "source_attack_paths": { "type": "array", "items": { "type": "string" } }
+          "role_name": { "type": "string" },
+          "file": { "type": "string", "description": "Relative path e.g. replacements/iam-replacement-MyRole.json" },
+          "original_policy_arn": { "type": "string" },
+          "replacement_policy_json": { "type": "object" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "staleness_reasoning": { "type": "string", "description": "Reasoning about why permissions are stale — no fixed thresholds per D-21" },
+          "boundary_considerations": { "type": "string", "description": "How permission boundaries/SCPs were accounted for per D-22" }
         }
       }
     },
-    "prioritization": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["rank", "action", "risk", "effort", "category"],
-        "properties": {
-          "rank": { "type": "integer" },
-          "action": { "type": "string" },
-          "risk": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-          "effort": { "type": "string", "enum": ["low", "medium", "high"] },
-          "category": { "type": "string", "enum": ["scp", "rcp", "detection", "control", "config"] }
-        }
+    "remediation": {
+      "type": "object",
+      "required": ["file", "items"],
+      "properties": {
+        "file": { "type": "string", "description": "Path to remediation-plan.md" },
+        "items": { "type": "integer", "description": "Count of prioritized remediation items" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["status", "blocks", "warns"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "partial", "fail"] },
+        "blocks": { "type": "integer" },
+        "warns": { "type": "integer" },
+        "file": { "type": "string", "description": "Path to validation-report.md" }
       }
     },
     "status": {

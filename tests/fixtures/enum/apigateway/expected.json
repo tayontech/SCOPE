@@ -1,0 +1,124 @@
+{
+  "resources": [
+    {
+      "resource_type": "apigateway_rest_api",
+      "resource_id": "abc123def4",
+      "arn": "arn:aws:apigateway:us-east-1::/restapis/abc123def4",
+      "region": "us-east-1",
+      "name": "TestRestApi",
+      "api_type": "REST",
+      "authorizers": [
+        {
+          "type": "COGNITO_USER_POOLS",
+          "name": "CognitoAuthorizer"
+        }
+      ],
+      "authorizers_status": "present",
+      "stages": [
+        "prod",
+        "dev"
+      ],
+      "stages_status": "present",
+      "lambda_integrations": [],
+      "lambda_integrations_status": "present",
+      "resource_policy": null,
+      "findings": []
+    },
+    {
+      "resource_type": "apigateway_http_api",
+      "resource_id": "zyxwvuts12",
+      "arn": "arn:aws:apigateway:us-east-1::/apis/zyxwvuts12",
+      "region": "us-east-1",
+      "name": "TestHttpApi",
+      "api_type": "HTTP",
+      "authorizers": [],
+      "authorizers_status": "present",
+      "stages": [
+        "$default"
+      ],
+      "stages_status": "present",
+      "lambda_integrations": [
+        "arn:aws:lambda:us-east-1:123456789012:function:TestFunction"
+      ],
+      "lambda_integrations_status": "present",
+      "resource_policy": null,
+      "findings": []
+    }
+  ],
+  "status": "complete",
+  "coverage": [
+    {
+      "check": "get_rest_apis",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "rest_authorizers",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "rest_stages",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "rest_resources",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "get_apis",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "v2_authorizers",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "v2_stages",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "v2_integrations",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    }
+  ],
+  "errors": []
+}

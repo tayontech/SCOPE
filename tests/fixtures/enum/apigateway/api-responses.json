@@ -1,0 +1,70 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "GetRestApisCommand": {
+    "items": [
+      {
+        "id": "abc123def4",
+        "name": "TestRestApi",
+        "description": "Test REST API",
+        "createdDate": "2024-01-01T00:00:00Z",
+        "apiKeySource": "HEADER",
+        "endpointConfiguration": { "types": ["REGIONAL"] }
+      }
+    ]
+  },
+  "GetAuthorizersCommand": {
+    "items": [
+      {
+        "id": "auth1",
+        "name": "CognitoAuthorizer",
+        "type": "COGNITO_USER_POOLS"
+      }
+    ]
+  },
+  "GetStagesCommand": {
+    "item": [
+      { "stageName": "prod" },
+      { "stageName": "dev" }
+    ]
+  },
+  "GetResourcesCommand": {
+    "items": [
+      {
+        "id": "res1",
+        "path": "/",
+        "resourceMethods": {}
+      }
+    ]
+  },
+  "GetApisCommand": {
+    "Items": [
+      {
+        "ApiId": "zyxwvuts12",
+        "Name": "TestHttpApi",
+        "ProtocolType": "HTTP",
+        "CreatedDate": "2024-01-01T00:00:00Z"
+      }
+    ]
+  },
+  "GetAuthorizersV2Command": {
+    "Items": []
+  },
+  "GetStagesV2Command": {
+    "Items": [
+      { "StageName": "$default" }
+    ]
+  },
+  "GetIntegrationsCommand": {
+    "Items": [
+      {
+        "IntegrationId": "int1",
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": "arn:aws:lambda:us-east-1:123456789012:function:TestFunction"
+      }
+    ]
+  }
+}

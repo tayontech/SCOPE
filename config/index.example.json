@@ -1,0 +1,50 @@
+{
+  "_note": "Splunk index configuration for SCOPE agents. Copy to config/index.json and customize, or let the agent auto-discover indexes on first run. Index names below are common conventions -- rename to match your environment.",
+  "version": "1.0",
+  "updated": "2026-04-20T00:00:00Z",
+  "discovery_method": "manual",
+  "groups": {
+    "aws_api": {
+      "description": "AWS API call logs",
+      "indexes": ["cloudtrail"],
+      "primary_fields": ["eventName", "eventSource", "userIdentity.arn", "userIdentity.userName", "sourceIPAddress", "requestParameters", "responseElements"],
+      "time_field": "_time"
+    },
+    "aws_network": {
+      "description": "AWS network flow and DNS logs",
+      "indexes": ["vpc_flow", "route53"],
+      "primary_fields": ["src_ip", "dest_ip", "dest_port", "protocol", "bytes"],
+      "time_field": "_time"
+    },
+    "identity": {
+      "description": "Identity provider logs (Okta, Azure AD, etc.)",
+      "indexes": ["okta", "azure_ad"],
+      "primary_fields": ["actor.alternateId", "outcome.result", "displayMessage", "client.ipAddress"],
+      "time_field": "_time"
+    },
+    "endpoint": {
+      "description": "Endpoint detection and Windows event logs",
+      "indexes": ["wineventlog", "crowdstrike", "sentinel_one"],
+      "primary_fields": ["EventCode", "ComputerName", "SubjectUserName", "ProcessName"],
+      "time_field": "_time"
+    },
+    "vcs": {
+      "description": "Version control and CI/CD audit logs",
+      "indexes": ["github", "github_audit"],
+      "primary_fields": ["actor", "action", "repo", "org"],
+      "time_field": "_time"
+    },
+    "network": {
+      "description": "Firewall, proxy, and network infrastructure logs",
+      "indexes": ["firewall", "palo_alto", "fortinet", "proxy"],
+      "primary_fields": ["src_ip", "dest_ip", "dest_port", "app", "action"],
+      "time_field": "_time"
+    },
+    "cloud_platform": {
+      "description": "Other cloud platform logs (GCP, Azure)",
+      "indexes": ["gcp_audit", "azure_activity"],
+      "primary_fields": ["principalEmail", "methodName", "resourceName"],
+      "time_field": "_time"
+    }
+  }
+}

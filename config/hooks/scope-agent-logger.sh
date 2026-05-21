@@ -33,12 +33,21 @@ fi
 # Fork to background — return control to the agent immediately.
 # This prevents TUI flickering on platforms with synchronous hooks (Gemini CLI).
 (
-  # Find the most recent active run directory (audit, defend, or exploit, modified in last 30 min)
+  # Find most recent run directory across all phases
   RUN_DIR=""
-  for dir in "$CWD"/audit/audit-* "$CWD"/audit/audit-*/defend/defend-* "$CWD"/exploit/exploit-*; do
-    if [ -d "$dir" ] && [ "$(find "$dir" -maxdepth 0 -mmin -30 2>/dev/null)" ]; then
-      RUN_DIR="$dir"
-    fi
+  LATEST_TIME=0
+  for dir_pattern in "$CWD/audit/audit-"* "$CWD/exploit/exploit-"* "$CWD/hunt/hunt-"* "$CWD/audit/audit-"/*/defend/defend-*; do
+    for d in $dir_pattern; do
+      [ -d "$d" ] || continue
+      # Check modified within last 30 min
+      if find "$d" -maxdepth 0 -mmin -30 -print -quit 2>/dev/null | grep -q .; then
+        mod_time=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo 0)
+        if [ "$mod_time" -gt "$LATEST_TIME" ]; then
+          LATEST_TIME=$mod_time
+          RUN_DIR="$d"
+        fi
+      fi
+    done
   done
 
   # No active run — skip

@@ -1,0 +1,49 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "DescribeDBInstancesCommand": {
+    "DBInstances": [
+      {
+        "DBInstanceIdentifier": "test-db-instance",
+        "DBInstanceArn": "arn:aws:rds:us-east-1:123456789012:db:test-db-instance",
+        "Engine": "mysql",
+        "EngineVersion": "8.0.33",
+        "PubliclyAccessible": false,
+        "StorageEncrypted": true,
+        "KmsKeyId": "arn:aws:kms:us-east-1:123456789012:key/aaaa-1111-bbbb-2222",
+        "IAMDatabaseAuthenticationEnabled": false,
+        "DeletionProtection": true,
+        "VpcSecurityGroups": [
+          { "VpcSecurityGroupId": "sg-12345678", "Status": "active" }
+        ],
+        "MultiAZ": true
+      }
+    ]
+  },
+  "DescribeDBSnapshotsCommand": {
+    "DBSnapshots": [
+      {
+        "DBSnapshotIdentifier": "test-snapshot-1",
+        "DBSnapshotArn": "arn:aws:rds:us-east-1:123456789012:snapshot:test-snapshot-1",
+        "Engine": "mysql",
+        "Encrypted": true,
+        "KmsKeyId": "arn:aws:kms:us-east-1:123456789012:key/aaaa-1111-bbbb-2222",
+        "DBInstanceIdentifier": "test-db-instance"
+      }
+    ]
+  },
+  "DescribeDBSnapshotAttributesCommand": {
+    "DBSnapshotAttributesResult": {
+      "DBSnapshotIdentifier": "test-snapshot-1",
+      "DBSnapshotAttributes": [
+        {
+          "AttributeName": "restore",
+          "AttributeValues": []
+        }
+      ]
+    }
+  }
+}
