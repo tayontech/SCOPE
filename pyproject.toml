@@ -1,7 +1,7 @@
 [project]
-name = "scope-enumerators"
+name = "scope"
 version = "1.14.0"
-description = "Python AWS enumeration foundation for SCOPE"
+description = "Python AWS inventory runtime for SCOPE"
 requires-python = ">=3.11"
 dependencies = [
   "boto3>=1.34",
@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["enumerators*", "scope_core*", "scope_runtime*", "tools*"]
+include = ["scope*", "tools*"]
 exclude = ["agents*", "config*", "dashboard*", "docs*", "scripts*", "test*", "tests*"]
 
 [tool.pytest.ini_options]

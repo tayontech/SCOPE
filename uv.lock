@@ -251,7 +251,7 @@ wheels = [
 ]
 
 [[package]]
-name = "scope-enumerators"
+name = "scope"
 version = "1.14.0"
 source = { editable = "." }
 dependencies = [

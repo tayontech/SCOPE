@@ -65,9 +65,9 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 ```
 agents/               Core agents: audit orchestrator, defend, exploit, hunt
 agents/subagents/     Attack analysis, defend subagents, hunt intake, research, synthesizer, verification
-enumerators/          Python boto3 resource inventory modules
-scope_core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
-scope_runtime/        Audit orchestration, target selection, aggregation, post-processing
+scope/enumerators/          Python boto3 resource inventory modules
+scope.core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
+scope/runtime/        Audit orchestration, target selection, aggregation, post-processing
 dashboard/            React + D3 interactive dashboard (self-contained HTML output)
 config/               Runtime reference data, lifecycle hooks, schemas, settings templates
 bin/                  Tooling: installer, report generator, graph extractor
@@ -140,7 +140,7 @@ SCOPE has two types of agents:
 - `scope-research` — real-world technique research integration
 - `scope-synthesizer` — engagement synthesis and narrative generation
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope_runtime audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
 ### Model Routing
 
@@ -150,7 +150,7 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 |------------|-------------|------------|-------|
 | Reasoning (attack analysis, defend + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
-Enumeration is deterministic Python via `scope_runtime` and `enumerators/` — no AI model. Skills (audit, exploit, hunt) inherit your session model.
+Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, hunt) inherit your session model.
 
 ## Documentation
 
