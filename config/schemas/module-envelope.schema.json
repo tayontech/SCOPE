@@ -1,24 +1,225 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "scope-module-envelope",
-  "title": "SCOPE Module Output Envelope",
-  "description": "Shared envelope for all per-module enumeration output files. Validated by scope-schema-validate.sh hook.",
-  "type": "object",
-  "required": ["module", "account_id", "region", "timestamp", "status", "findings"],
+  "$defs": {
+    "CoverageEntry": {
+      "properties": {
+        "check": {
+          "title": "Check",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "module_wide",
+            "per_resource"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "partial",
+            "skipped",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "succeeded": {
+          "minimum": 0,
+          "title": "Succeeded",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "skipped": {
+          "minimum": 0,
+          "title": "Skipped",
+          "type": "integer"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/CoverageReason"
+          },
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "check",
+        "scope",
+        "status",
+        "succeeded",
+        "failed",
+        "skipped"
+      ],
+      "title": "CoverageEntry",
+      "type": "object"
+    },
+    "CoverageReason": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "count": {
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "sample_resource": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Resource"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "title": "CoverageReason",
+      "type": "object"
+    },
+    "ErrorRecord": {
+      "properties": {
+        "operation": {
+          "title": "Operation",
+          "type": "string"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        }
+      },
+      "required": [
+        "operation",
+        "code"
+      ],
+      "title": "ErrorRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
   "properties": {
     "module": {
-      "type": "string",
-      "enum": ["iam", "sts", "s3", "kms", "secrets", "lambda", "ec2",
-               "rds", "sns", "sqs", "apigateway", "codebuild"]
+      "enum": [
+        "apigateway",
+        "bedrock",
+        "codebuild",
+        "cognito",
+        "dynamodb",
+        "ec2",
+        "iam",
+        "kms",
+        "lambda",
+        "rds",
+        "s3",
+        "secrets",
+        "sns",
+        "sqs",
+        "ssm",
+        "sts"
+      ],
+      "title": "Module",
+      "type": "string"
     },
-    "account_id": { "type": "string", "pattern": "^\\d{12}$" },
-    "region": { "type": "string" },
-    "timestamp": { "type": "string", "format": "date-time" },
+    "account_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{12}$"
+        },
+        {
+          "const": "unknown"
+        }
+      ],
+      "description": "12-digit AWS account ID, or 'unknown' when status is 'error' (pre-STS crash). The 'unknown' case is enforced by runtime validation and the validation hook."
+    },
+    "region": {
+      "title": "Region",
+      "type": "string"
+    },
     "status": {
-      "type": "string",
-      "enum": ["complete", "partial", "error"]
+      "enum": [
+        "complete",
+        "partial",
+        "error"
+      ],
+      "title": "Status",
+      "type": "string"
     },
-    "error": { "type": "string" },
-    "findings": { "type": "array" }
-  }
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "resources": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Resources",
+      "type": "array"
+    },
+    "coverage": {
+      "items": {
+        "$ref": "#/$defs/CoverageEntry"
+      },
+      "title": "Coverage",
+      "type": "array"
+    },
+    "errors": {
+      "items": {
+        "$ref": "#/$defs/ErrorRecord"
+      },
+      "title": "Errors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "module",
+    "account_id",
+    "region",
+    "timestamp",
+    "status",
+    "resources"
+  ],
+  "title": "SCOPE Module Output Envelope",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scope-module-envelope",
+  "description": "Shared envelope for all per-module enumeration output files. Validated by scope-schema-validate.sh hook."
 }

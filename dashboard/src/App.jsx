@@ -170,18 +170,30 @@ function normalizeForDashboard(json, indexSource) {
     // Map summary field variants to dashboard-expected names
     if (!data.summary) data.summary = {};
     const s = data.summary;
-    // Array lengths ALWAYS win for defend KPIs — summary fields become informational only
-    s.detections_generated = data.detections?.length ?? 0;
-    s.scps_generated = data.scps?.length ?? s.scps_generated ?? s.scps ?? 0;
-    s.rcps_generated = data.rcps?.length ?? s.rcps_generated ?? s.rcps ?? 0;
-    s.controls_recommended = data.security_controls?.length ?? 0;
 
     // Normalize audit_run (string) → audit_runs_analyzed (array)
     if (!data.audit_runs_analyzed && data.audit_run) {
       data.audit_runs_analyzed = [data.audit_run];
     }
 
-    // Split flat policies[] array by type into separate scps[]/rcps[] arrays
+    // New schema (78-defend-rework): guardrails[] array with type: "scp"|"rcp"
+    // Derive scps[]/rcps[] from guardrails[] for PolicyViewer compatibility
+    if (Array.isArray(data.guardrails) && !data.scps && !data.rcps) {
+      const mapGuardrail = (g) => ({
+        name: g.name || g.file?.replace(/^policies\//, "").replace(/\.json$/, "") || "Unnamed",
+        policy_json: g.policy_json || null,
+        source_attack_paths: g.source_attack_paths || [],
+        impact_analysis: g.impact_analysis || {
+          prevents: [],
+          blast_radius: "unknown",
+          break_glass: "none",
+        },
+      });
+      data.scps = data.guardrails.filter((g) => g.type === "scp").map(mapGuardrail);
+      data.rcps = data.guardrails.filter((g) => g.type === "rcp").map(mapGuardrail);
+    }
+
+    // Legacy flat policies[] array by type into separate scps[]/rcps[] arrays
     // Some agents produce policies: [{ file, type: "SCP", ... }] instead of scps[]/rcps[]
     if (!data.scps && !data.rcps && Array.isArray(data.policies)) {
       const mapPolicy = (p) => ({
@@ -201,6 +213,23 @@ function normalizeForDashboard(json, indexSource) {
         .filter((p) => (p.type || "").toUpperCase() === "RCP")
         .map(mapPolicy);
     }
+
+    // Normalize remediation: new schema uses remediation.items count; legacy used prioritization[]
+    if (!data.prioritization && data.remediation?.file) {
+      // New schema: expose file path and item count for the Remediation tab
+      data.remediationPlanFile = data.remediation.file;
+      data.remediationItemCount = data.remediation.items ?? 0;
+    }
+
+    // KPI derivation — array lengths ALWAYS win for defend KPIs
+    // New field names: summary.guardrails, summary.detections, summary.remediation_items
+    // Legacy field names preserved as fallbacks for backward compatibility
+    s.scps_generated = data.scps?.length ?? 0;
+    s.rcps_generated = data.rcps?.length ?? 0;
+    s.detections_generated = data.detections?.length ?? s.detections ?? 0;
+    s.remediation_items = s.remediation_items ?? data.remediation?.items ?? 0;
+    // controls_recommended: new schema has no security_controls[] — map to remediation_items
+    s.controls_recommended = s.remediation_items;
   }
 
   // Severity canonicalization: normalize aliases to canonical values
@@ -2271,13 +2300,13 @@ function DefendView({ data }) {
         <StatCard label="SCPs" value={summary.scps_generated ?? data.scps?.length ?? 0} color={COLORS.high} onClick={() => setDefendTab("policies")} active={defendTab === "policies"} />
         <StatCard label="RCPs" value={summary.rcps_generated ?? data.rcps?.length ?? 0} color={COLORS.medium} onClick={() => setDefendTab("policies")} active={defendTab === "policies"} />
         <StatCard label="Detections" value={summary.detections_generated ?? data.detections?.length ?? 0} color={COLORS.detection} onClick={() => setDefendTab("detections")} active={defendTab === "detections"} />
-        <StatCard label="Controls" value={summary.controls_recommended ?? data.security_controls?.length ?? 0} color={COLORS.low} onClick={() => setDefendTab("controls")} active={defendTab === "controls"} />
+        <StatCard label="Remediation" value={summary.remediation_items ?? summary.controls_recommended ?? 0} color={COLORS.low} onClick={() => setDefendTab("remediation")} active={defendTab === "remediation"} />
         <StatCard label="Quick Wins" value={summary.quick_wins ?? 0} color={COLORS.accent} onClick={() => setDefendTab("executive")} active={defendTab === "executive"} />
       </div>
 
       {/* Main Content: Sidebar + Tabbed Center */}
       <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0, overflow: "hidden" }}>
-        {/* Prioritization Sidebar */}
+        {/* Prioritization Sidebar — uses legacy prioritization[] array when present */}
         <PrioritizationSidebar items={data.prioritization} />
 
         {/* Center: Tabbed content */}
@@ -2288,7 +2317,7 @@ function DefendView({ data }) {
               { key: "technical", label: "Tech Recommendations" },
               { key: "policies", label: "Policies" },
               { key: "detections", label: "Detections" },
-              { key: "controls", label: "Controls" },
+              { key: "remediation", label: "Remediation" },
             ].map((t) => (
               <button
                 key={t.key}
@@ -2310,7 +2339,21 @@ function DefendView({ data }) {
             {defendTab === "technical" && <TechnicalRecommendationsView data={data} />}
             {defendTab === "policies" && <PolicyViewer scps={data.scps} rcps={data.rcps} />}
             {defendTab === "detections" && <DetectionRulesList detections={data.detections} />}
-            {defendTab === "controls" && <ControlsMatrix controls={data.security_controls} />}
+            {defendTab === "remediation" && (
+              data.prioritization?.length
+                ? <ControlsMatrix controls={data.prioritization} />
+                : data.remediationPlanFile
+                  ? <div style={{ padding: 20, color: "#c8d0e0" }}>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>Remediation Plan</div>
+                      <div style={{ fontSize: 13, marginBottom: 4 }}>
+                        <span style={{ color: "#8899aa" }}>Items: </span>{data.remediationItemCount ?? 0}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8899aa", wordBreak: "break-all" }}>
+                        {data.remediationPlanFile}
+                      </div>
+                    </div>
+                  : <div style={{ color: "#8899aa", fontSize: 13, padding: 20 }}>No remediation plan available.</div>
+            )}
           </div>
         </div>
       </div>

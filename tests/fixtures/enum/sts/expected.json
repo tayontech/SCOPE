@@ -1,0 +1,21 @@
+{
+  "module": "sts",
+  "account_id": "123456789012",
+  "region": "global",
+  "status": "complete",
+  "resources": [
+    {
+      "resource_type": "sts_identity",
+      "resource_id": "caller",
+      "arn": "arn:aws:iam::123456789012:user/TestUser",
+      "region": "global",
+      "account_id": "123456789012",
+      "user_id": "AIDATEST123456789",
+      "principal_type": "user",
+      "org_accessible": false,
+      "org_status": "not_accessible",
+      "org_error_code": "AccessDeniedException",
+      "findings": []
+    }
+  ]
+}

@@ -22,8 +22,9 @@ fi
 case "$FILE_PATH" in
   */results.json|*/dashboard/public/*.json)
     ;; # fall through to existing results validation
-  */iam.json|*/sts.json|*/s3.json|*/kms.json|*/secrets.json|*/lambda.json|*/ec2.json|\
-*/rds.json|*/sns.json|*/sqs.json|*/apigateway.json|*/codebuild.json)
+  */apigateway.json|*/bedrock.json|*/codebuild.json|*/cognito.json|*/dynamodb.json|\
+*/ec2.json|*/iam.json|*/kms.json|*/lambda.json|*/rds.json|*/s3.json|*/secrets.json|\
+*/sns.json|*/sqs.json|*/ssm.json|*/sts.json)
     # Module envelope validation — validate required fields per module-envelope.schema.json
     # NOTE: Enum subagents write via Bash redirect (not Write tool), so this hook
     # does NOT fire on their output during normal operation. This case block catches
@@ -51,8 +52,8 @@ case "$FILE_PATH" in
     check_field "region" "AWS region or 'global'"
     check_field "timestamp" "ISO8601 timestamp"
     check_field "status" "complete|partial|error"
-    check_field "findings" "findings array"
-    check_field_type "findings" "array" "findings must be an array"
+    check_field "resources" "resources array"
+    check_field_type "resources" "array" "resources must be an array"
 
     # Validate status enum
     STATUS_VAL=$(jq -r '.status // empty' "$FILE_PATH")
@@ -67,15 +68,22 @@ case "$FILE_PATH" in
     MODULE_VAL=$(jq -r '.module // empty' "$FILE_PATH")
     if [ -n "$MODULE_VAL" ]; then
       case "$MODULE_VAL" in
-        iam|sts|s3|kms|secrets|lambda|ec2|rds|sns|sqs|apigateway|codebuild) ;;
-        *) ERRORS+=("Field 'module' must be one of: iam, sts, s3, kms, secrets, lambda, ec2, rds, sns, sqs, apigateway, codebuild (got: $MODULE_VAL)") ;;
+        apigateway|bedrock|codebuild|cognito|dynamodb|ec2|iam|kms|lambda|rds|s3|secrets|sns|sqs|ssm|sts) ;;
+        *) ERRORS+=("Field 'module' must be one of: apigateway, bedrock, codebuild, cognito, dynamodb, ec2, iam, kms, lambda, rds, s3, secrets, sns, sqs, ssm, sts (got: $MODULE_VAL)") ;;
       esac
     fi
 
     # Validate account_id format
+    # Allow "unknown" only when status is "error" (crash envelope from base-enum.js).
     ACCT_ID=$(jq -r '.account_id // empty' "$FILE_PATH")
     if [ -n "$ACCT_ID" ]; then
-      if ! echo "$ACCT_ID" | grep -qE '^\d{12}$'; then
+      if [ "$ACCT_ID" = "unknown" ]; then
+        if [ -z "$STATUS_VAL" ]; then
+          ERRORS+=("account_id 'unknown' is only allowed when status is 'error' (status field is missing)")
+        elif [ "$STATUS_VAL" != "error" ]; then
+          ERRORS+=("account_id 'unknown' is only allowed when status is 'error' (got status: $STATUS_VAL)")
+        fi
+      elif ! echo "$ACCT_ID" | grep -qE '^[0-9]{12}$'; then
         ERRORS+=("account_id '$ACCT_ID' is not a valid 12-digit AWS account ID")
       fi
     fi
@@ -177,7 +185,7 @@ check_field "timestamp" "ISO8601 timestamp"
 # Validate account_id format (12 digits) — allow "unknown" for defend fallback
 ACCOUNT_ID=$(jq -r '.account_id // empty' "$FILE_PATH")
 if [ -n "$ACCOUNT_ID" ] && [ "$ACCOUNT_ID" != "unknown" ]; then
-  if ! echo "$ACCOUNT_ID" | grep -qE '^\d{12}$'; then
+  if ! echo "$ACCOUNT_ID" | grep -qE '^[0-9]{12}$'; then
     ERRORS+=("account_id '$ACCOUNT_ID' is not a valid 12-digit AWS account ID")
   fi
 fi
@@ -191,10 +199,10 @@ case "$SOURCE" in
     check_field "principals" "array of IAM principals"
     check_field "trust_relationships" "array of trust relationships"
 
-    # summary.risk_score is required
+    # summary.severity is required
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      if [ "$(jq '.summary | has("risk_score")' "$FILE_PATH")" != "true" ]; then
-        ERRORS+=("Missing required field: 'summary.risk_score' (critical|high|medium|low)")
+      if [ "$(jq '.summary | has("severity")' "$FILE_PATH")" != "true" ]; then
+        ERRORS+=("Missing required field: 'summary.severity' (critical|high|medium|low)")
       fi
     fi
 
@@ -229,9 +237,9 @@ case "$SOURCE" in
 
     # SCHM-02: Validate graph.edges[].edge_type -- known types only
     if [ "$(jq 'has("graph") and (.graph | has("edges"))' "$FILE_PATH")" = "true" ]; then
-      INVALID_ET=$(jq -r '[.graph.edges[] | select(.edge_type != null) | .edge_type | select(. != "priv_esc" and . != "trust" and . != "data_access" and . != "network" and . != "service" and . != "public_access" and . != "cross_account" and . != "membership")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      INVALID_ET=$(jq -r '[.graph.edges[] | select(.edge_type != null) | .edge_type | select(. != "priv_esc" and . != "trust" and . != "data_access" and . != "network" and . != "service" and . != "public_access" and . != "cross_account" and . != "membership" and . != "executes_as" and . != "invokes" and . != "authenticates_to")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
       if [ -n "$INVALID_ET" ]; then
-        ERRORS+=("graph.edges[].edge_type contains invalid values (must be one of: priv_esc, trust, data_access, network, service, public_access, cross_account, membership): $INVALID_ET")
+        ERRORS+=("graph.edges[].edge_type contains invalid values (must be one of: priv_esc, trust, data_access, network, service, public_access, cross_account, membership, executes_as, invokes, authenticates_to): $INVALID_ET")
       fi
     fi
 
@@ -248,15 +256,15 @@ case "$SOURCE" in
     check_field "region" "AWS region or 'global' (defend is always 'global')"
     check_field "summary" "defend summary object"
     check_field "audit_runs_analyzed" "array of consumed audit run IDs"
-    check_field "scps" "array of SCPs"
-    check_field "rcps" "array of RCPs"
+    check_field "guardrails" "array of SCP/RCP guardrail policies"
     check_field "detections" "array of SPL detections"
-    check_field "security_controls" "array of security control recommendations"
-    check_field "prioritization" "prioritized remediation actions"
+    check_field "policy_replacements" "array of IAM replacement policies"
+    check_field "remediation" "remediation plan summary object"
+    check_field "validation" "validation results object"
 
     # summary required subfields
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      for subfield in scps_generated rcps_generated detections_generated controls_recommended risk_score; do
+      for subfield in guardrails detections policy_replacements remediation_items validation_status severity; do
         if [ "$(jq ".summary | has(\"$subfield\")" "$FILE_PATH")" != "true" ]; then
           ERRORS+=("Missing required field: 'summary.$subfield'")
         fi
@@ -271,20 +279,14 @@ case "$SOURCE" in
       fi
     fi
 
-    # scps items must have name, file, policy_json, source_attack_paths, source_run_ids, impact_analysis
-    check_array_item_fields "scps" "name,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "SCP entries"
-
-    # rcps items must have same fields
-    check_array_item_fields "rcps" "name,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "RCP entries"
+    # guardrails items must have name, type, file, policy_json, source_attack_paths, source_run_ids, impact_analysis
+    check_array_item_fields "guardrails" "name,type,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "guardrail entries"
 
     # detections items must have name, spl, severity, category, mitre_technique, source_attack_paths, source_run_ids
     check_array_item_fields "detections" "name,spl,severity,category,mitre_technique,source_attack_paths,source_run_ids" "detection entries"
 
-    # security_controls items must have service, recommendation, priority, effort, source_attack_paths
-    check_array_item_fields "security_controls" "service,recommendation,priority,effort,source_attack_paths" "security control entries"
-
-    # prioritization items must have rank, action, risk, effort, category
-    check_array_item_fields "prioritization" "rank,action,risk,effort,category" "prioritization entries"
+    # policy_replacements items must have role_name, file, original_policy_arn, replacement_policy_json, source_attack_paths, staleness_reasoning
+    check_array_item_fields "policy_replacements" "role_name,file,original_policy_arn,replacement_policy_json,source_attack_paths,staleness_reasoning" "policy replacement entries"
 
     # SCHM-01 (defend): Validate detections[].severity -- lowercase only
     if [ "$(jq 'has("detections")' "$FILE_PATH")" = "true" ]; then
@@ -296,8 +298,8 @@ case "$SOURCE" in
 
     # --- Type and consistency validation (SCHM-04, SCHM-05) ---
 
-    # SCHM-04: Validate scps[].policy_json and rcps[].policy_json are objects (not strings)
-    for ARRAY in scps rcps; do
+    # SCHM-04: Validate guardrails[].policy_json is an object (not a string)
+    for ARRAY in guardrails; do
       if [ "$(jq "has(\"$ARRAY\")" "$FILE_PATH")" = "true" ]; then
         INVALID_POLICY=$(jq -r --arg arr "$ARRAY" '[.[$arr][] | select(has("policy_json")) | select(.policy_json | type != "object") | .name // "unnamed"] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
         if [ -n "$INVALID_POLICY" ]; then
@@ -306,9 +308,17 @@ case "$SOURCE" in
       fi
     done
 
+    # SCHM-04 (policy_replacements): Validate policy_replacements[].replacement_policy_json is an object
+    if [ "$(jq 'has("policy_replacements")' "$FILE_PATH")" = "true" ]; then
+      INVALID_POLICY=$(jq -r '[.policy_replacements[] | select(has("replacement_policy_json")) | select(.replacement_policy_json | type != "object") | .role_name // "unnamed"] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_POLICY" ]; then
+        ERRORS+=("policy_replacements[].replacement_policy_json must be an object (not a string) — invalid items: $INVALID_POLICY")
+      fi
+    fi
+
     # SCHM-05: Validate defend summary counts match actual array lengths
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
-      for PAIR in "detections_generated:detections" "scps_generated:scps" "rcps_generated:rcps" "controls_recommended:security_controls"; do
+      for PAIR in "detections:detections" "guardrails:guardrails" "policy_replacements:policy_replacements"; do
         SUMMARY_FIELD="${PAIR%%:*}"
         ARRAY_FIELD="${PAIR##*:}"
         if [ "$(jq ".summary | has(\"$SUMMARY_FIELD\")" "$FILE_PATH")" = "true" ] && [ "$(jq "has(\"$ARRAY_FIELD\")" "$FILE_PATH")" = "true" ]; then
@@ -320,15 +330,32 @@ case "$SOURCE" in
         fi
       done
     fi
+
+    # SCHM-05 (remediation): Validate summary.remediation_items matches remediation.items
+    if [ "$(jq '.summary | has("remediation_items")' "$FILE_PATH")" = "true" ] && [ "$(jq 'has("remediation")' "$FILE_PATH")" = "true" ]; then
+      SUMMARY_VAL=$(jq '.summary.remediation_items // 0' "$FILE_PATH" 2>/dev/null || echo "0")
+      ACTUAL_VAL=$(jq '.remediation.items // 0' "$FILE_PATH" 2>/dev/null || echo "0")
+      if [ "$SUMMARY_VAL" -ne "$ACTUAL_VAL" ] 2>/dev/null; then
+        ERRORS+=("summary.remediation_items (${SUMMARY_VAL}) does not match remediation.items (${ACTUAL_VAL})")
+      fi
+    fi
     ;;
 
   exploit)
     check_field "target_arn" "principal ARN analyzed"
     check_field "summary" "exploit summary object"
-    check_field "attack_paths" "array of attack paths"
+    check_field "discovery_mode" "standalone or audit"
+    check_field "paths" "array of attack paths"
 
-    # attack_paths items must have name, steps
-    check_array_item_fields "attack_paths" "name,steps" "attack path entries"
+    # paths items must have name, steps
+    check_array_item_fields "paths" "name,steps" "path entries"
+
+    # summary.severity is required
+    if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
+      if [ "$(jq '.summary | has("severity")' "$FILE_PATH")" != "true" ]; then
+        ERRORS+=("Missing required field: 'summary.severity' (critical|high|medium|low)")
+      fi
+    fi
     ;;
 
   *)

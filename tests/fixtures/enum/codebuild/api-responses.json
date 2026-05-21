@@ -1,0 +1,37 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListProjectsCommand": {
+    "projects": ["test-project"]
+  },
+  "BatchGetProjectsCommand": {
+    "projects": [
+      {
+        "name": "test-project",
+        "arn": "arn:aws:codebuild:us-east-1:123456789012:project/test-project",
+        "serviceRole": "arn:aws:iam::123456789012:role/CodeBuildRole",
+        "source": {
+          "type": "GITHUB",
+          "location": "https://github.com/example/repo",
+          "buildspec": null
+        },
+        "environment": {
+          "type": "LINUX_CONTAINER",
+          "image": "aws/codebuild/standard:5.0",
+          "computeType": "BUILD_GENERAL1_SMALL",
+          "privilegedMode": false,
+          "environmentVariables": [
+            { "name": "REGION", "value": "us-east-1" }
+          ]
+        },
+        "vpcConfig": null,
+        "encryptionKey": "arn:aws:kms:us-east-1:123456789012:alias/aws/s3",
+        "lastModified": null
+      }
+    ],
+    "projectsNotFound": []
+  }
+}

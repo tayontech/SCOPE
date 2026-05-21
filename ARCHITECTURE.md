@@ -5,7 +5,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 ## Agent Overview
 
 **Orchestrator agent** (slash command — operator-triggered):
-- `scope-audit` — AWS resource enumeration orchestrator: dispatches enum subagents in parallel, runs attack-paths analysis, auto-chains defend
+- `scope-audit` — AWS resource enumeration orchestrator: runs Python `scope_runtime` audit, dispatches attack-path analysis, auto-chains defend
 
 **Standalone agents** (slash commands — operator-triggered):
 - `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
@@ -14,17 +14,19 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 **Operator-invoked or orchestrator-dispatched:**
 - `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
 
-**Enumeration subagents** (dispatched in parallel by scope-audit, model: haiku):
-- `scope-enum-iam`, `scope-enum-sts`, `scope-enum-s3`, `scope-enum-kms`, `scope-enum-secrets`, `scope-enum-lambda`, `scope-enum-ec2`, `scope-enum-rds`, `scope-enum-sns`, `scope-enum-sqs`, `scope-enum-apigateway`, `scope-enum-codebuild`
+**Enumeration runtime** (invoked by scope-audit, model: none — deterministic Python):
+- `scope_runtime audit` orchestrates Python boto3 enumerators from `enumerators/`
+- `scope_core` owns AWS clients, coverage, envelope models, retry, and region discovery
 
-**Analysis subagent** (dispatched as fresh-context by scope-audit, model: inherit):
-- `scope-attack-paths` — Reads per-module JSON from disk, performs cross-service attack path analysis
+**Attack path analysis** (fresh-context subagent dispatched by scope-audit):
+- `extract-graph.js` — Deterministic graph extraction from per-module JSON (Node.js, no AI model)
+- `scope-attack-analyze` — Cross-service attack path analysis over `results.json`, `resources.jsonl`, `graph.json`, and module envelopes
 
 **Verification agent** (read inline during execution):
 - `scope-verify` — Unified verification: claim ledger, taxonomy, AWS API validation, SPL lints (domain sections dispatched by caller)
 
-**Middleware agent** (read inline, sequential pipeline after artifacts are written):
-- `scope-pipeline` — Phase 1: raw artifacts → normalized JSON in `./data/`; Phase 2: `agent-log.jsonl` → provenance envelopes in `./agent-logs/`
+**Runtime post-processing**:
+- `scope_runtime` writes `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` during audit execution
 
 ## System Flow
 
@@ -39,42 +41,68 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  Gate 1: credential check         │
     │                               │  Gate 2: batch dispatch approval  │
     │                               │                                   │
-    │                               │  Parallel subagent dispatch:      │
+    │                               │  Enumeration (Python runtime):     │
     │                               │  ┌──────────────────────────┐    │
-    │                               │  │ 12 enum subagents (haiku)│    │
+    │                               │  │ scope_runtime audit      │    │
     │                               │  │ iam, sts, s3, kms,       │    │
     │                               │  │ secrets, lambda, ec2,    │    │
     │                               │  │ rds, sns, sqs,           │    │
-    │                               │  │ apigateway, codebuild    │    │
+    │                               │  │ apigateway, codebuild,   │    │
+    │                               │  │ bedrock, cognito,        │    │
+    │                               │  │ dynamodb, ssm            │    │
     │                               │  └──────────────────────────┘    │
-    │                               │       │ writes $RUN_DIR/*.json    │
+    │                               │       │ writes modules/*/*.json    │
     │                               │       ▼                           │
-    │                               │  scope-attack-paths (sonnet)      │
-    │                               │  (fresh-context, reads from disk) │
+    │                               │  Attack Path Analysis:               │
+    │                               │  ┌──────────────────────────────┐    │
+    │                               │  │ extract-graph.js             │    │
+    │                               │  │ (deterministic)              │    │
+    │                               │  └──────────┬───────────────────┘    │
+    │                               │             ▼                         │
+    │                               │  ┌──────────────────────────────┐    │
+    │                               │  │ scope-attack-analyze         │    │
+    │                               │  │ (cross-service paths)        │    │
+    │                               │  └──────────────────────────────┘    │
     │                               │       │                           │
     │                               │  Gate 3: results                  │
     │                               │  Gate 4: scope-defend approval    │
     │                               │       │                           │
     │                               │       ▼                           │
     │                               │  scope-defend (auto-chained)      │
+    │                               │  scope-synthesizer                │
+    │                               │  (engagement-report.md)           │
     │                               │  scope-verify (inline)            │
-    │                               │  scope-pipeline (inline)          │
+    │                               │  runtime post-processing          │
     │                               └──────────────────────────────────┘
     │
     ├── /scope:exploit ────────────►┌──────────────────────────────────┐
     │                               │  scope-exploit (standalone)       │
     │                               │                                   │
     │                               │  1. Enumerate / Analyze           │
-    │                               │  2. Read scope-verify inline      │
-    │                               │  3. Write artifacts               │
-    │                               │  4. Read scope-pipeline inline    │
+    │                               │  2. Dispatch scope-research       │
+    │                               │     (real-world technique lookup) │
+    │                               │  3. Read scope-verify inline      │
+    │                               │  4. Write artifacts               │
+    │                               │  5. Write artifacts               │
     │                               └──────────────────────────────────┘
     │
     ├── /scope:defend [run-dir] ───►┌──────────────────────────────────┐
     │   (operator-invoked after     │  scope-defend                     │
-    │    audit completes)           │  Reads audit run,                 │
-    │                               │  generates SCPs/RCPs,             │
-    │                               │  detections, controls             │
+    │    audit completes)           │  Reads audit run                  │
+    │                               │                                   │
+    │                               │  Wave 1 (parallel):               │
+    │                               │  ├─ scope-defend-guardrails       │
+    │                               │  ├─ scope-defend-splunk           │
+    │                               │  ├─ scope-defend-policy           │
+    │                               │  └─ scope-defend-remediation      │
+    │                               │       │                           │
+    │                               │       ▼                           │
+    │                               │  Wave 2:                          │
+    │                               │  └─ scope-defend-validate         │
+    │                               │     (reviews Wave 1 output)       │
+    │                               │       │                           │
+    │                               │       ▼                           │
+    │                               │  Assembly: results.json           │
     │                               └──────────────────────────────────┘
     │
     └── /scope:hunt [input] ──►┌──────────────────────────────────┐
@@ -124,28 +152,20 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
                                     └──────────────────────────────────┘
 ```
 
-## Post-Processing Pipeline
+## Runtime Post-Processing
 
-Source agents (audit, exploit, defend) trigger this pipeline after writing artifacts. Hunt does not run the post-processing pipeline in any mode — if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice. In hunt mode, scope-hunt reads from an existing audit or exploit run directory but does not write back to it. In intel mode, extracted IOCs and TTPs are session-scoped and written only to `context.json`.
+`scope_runtime audit` performs deterministic post-processing immediately after enumeration. Hunt does not run post-processing in any mode; if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice. In hunt mode, scope-hunt reads from an existing audit or exploit run directory but does not write back to it. In intel mode, extracted IOCs and TTPs are session-scoped and written only to `context.json`.
 
 ```
-  $RUN_DIR/findings.md          ./data/$PHASE/$RUN_ID.json
-  $RUN_DIR/playbook.md     ┌──►  ./data/index.json
-  $RUN_DIR/policies/*.json │
-           │               │
-           ▼               │
-    ┌──────────────────┐   │
-    │  scope-pipeline  │───┘
-    │  Phase 1: data   │
-    └──────────────────┘
-           │ params: PHASE, RUN_DIR
+  $RUN_DIR/modules/<service>/<region>.json
+           │
            ▼
-    ┌──────────────────┐   ./agent-logs/$PHASE/$RUN_ID.json
-    │  Phase 2:        │──► ./agent-logs/index.json
-    │  agent-log       │
+    ┌──────────────────┐
+    │  scope_runtime   │──► $RUN_DIR/summary.json
+    │  post-processing │    $RUN_DIR/resources.jsonl
+    │                  │    $RUN_DIR/graph.json
+    │                  │    $RUN_DIR/results.json
     └──────────────────┘
-           reads: $RUN_DIR/agent-log.jsonl
-                  ./data/$PHASE/$RUN_ID.json
 
     Visualization: SCOPE dashboard (`dashboard/<run-id>-dashboard.html`, generated via `cd dashboard && npm run dashboard`)
                    reads dashboard/public/index.json + $RUN_ID.json
@@ -200,10 +220,10 @@ Verification results are in-memory — scope-verify returns corrections to the c
 ```
                    ┌───────────────────────────────────┐
                    │           scope-audit              │
-                   │  (orchestrator — dispatches        │
-                   │   12 enum subagents + attack-paths) │
+                   │  (orchestrator — runs Python       │
+                   │   runtime + attack analysis)        │
                    └──────────┬────────────────────────┘
-                              │ writes ./audit/
+                              │ writes ./runs/ or explicit RUN_DIR
                               │
               ┌───────────────┼───────────────┐
               │               │               │
@@ -222,7 +242,7 @@ Verification results are in-memory — scope-verify returns corrections to the c
   │   scope-hunt — tri-mode isolation
   │
   │   Detection investigation mode (no path argument):
-  │   • No reads from ./audit/, ./exploit/, ./agent-logs/
+  │   • No reads from ./runs/, ./exploit/, ./agent-logs/
   │   • Reads ./hunt/context.json (environment knowledge)
   │   • Analyst brings alert context, queries Splunk
   │   • Intentional isolation: SOC ≠ pentest
@@ -235,7 +255,7 @@ Verification results are in-memory — scope-verify returns corrections to the c
   │   • Resource identifiers are session-scoped — not written to MEMORY.md
   │
   │   Intel mode (threat intel URL or natural language input):
-  │   • No reads from ./audit/, ./exploit/, ./agent-logs/
+  │   • No reads from ./runs/, ./exploit/, ./agent-logs/
   │   • Reads ./hunt/context.json (environment knowledge)
   │   • Fetches URL (WebFetch) or parses NL description
   │   • Extracts IOCs (IPs, ARNs, hashes) and TTPs (MITRE IDs, eventNames)
@@ -251,30 +271,28 @@ Downstream agents consume upstream output in this priority order:
 
 ```
   ┌─────────────────────────────────────────────┐
-  │ 1. ./agent-logs/$PHASE/$RUN_ID.json         │  Highest fidelity
-  │    Claim-level provenance, coverage,        │  WHY a claim was made
-  │    policy evaluation chains                 │
+  │ 1. $RUN_DIR/results.json                    │  Highest fidelity
+  │    Runtime inventory plus attack paths      │  WHAT was found
   ├─────────────────────────────────────────────┤
-  │ 2. ./data/$PHASE/$RUN_ID.json               │  Structured data
-  │    Summaries, graphs, attack paths          │  WHAT was found
+  │ 2. $RUN_DIR/summary.json + resources.jsonl  │  Structured facts
+  │    Module status, resources, errors         │  WHY scope is complete/partial
   ├─────────────────────────────────────────────┤
-  │ 3. $RUN_DIR/ (raw artifacts)                │  Fallback
-  │    Markdown, raw JSON                       │  Requires regex parsing
+  │ 3. $RUN_DIR/modules/**                      │  Fallback
+  │    Raw module envelopes                     │  Service-level facts
   └─────────────────────────────────────────────┘
-
-  Fallback: if agent-logs missing → use data → if data missing → parse raw
 ```
 
 ## Communication Matrix
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs | `$RUN_DIR/findings.md`, `results.json`, `agent-log.jsonl`, per-module JSON | dispatches 12 enum subagents + attack-paths + defend |
-| **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./audit/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
-| **exploit** | `/scope:exploit` | `./audit/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify → scope-pipeline |
+| **audit** | `/scope:audit` | AWS APIs through `scope_runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs Python runtime + scope-attack-analyze + defend + synthesizer |
+| **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./runs/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify |
+| **exploit** | `/scope:exploit` | `./runs/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **hunt** | `/scope:hunt [input]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json`. Intel mode: WebFetch (URL) or NL parse, `./hunt/context.json`, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in any mode) |
+| **scope-research** | Dispatched by exploit and attack-paths | WebSearch, external technique references | Research findings (in-memory, consumed by caller) | — |
+| **scope-synthesizer** | Dispatched by audit after defend | `$RUN_DIR/`, defend artifacts | `$RUN_DIR/engagement-report.md` | — |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
-| **scope-pipeline** | Read inline after artifacts | `$RUN_DIR/` raw artifacts (Phase 1), `$RUN_DIR/agent-log.jsonl` + `./data/` (Phase 2) | `./data/$PHASE/$RUN_ID.json`, `./data/index.json` (Phase 1); `./agent-logs/$PHASE/$RUN_ID.json`, `./agent-logs/index.json` (Phase 2) | — |
 
 ## Enforcement Layer
 
@@ -297,4 +315,4 @@ config/schemas/
 Editor-specific hook configuration:
 - **Claude Code:** `.claude/settings.json` — PreToolUse / PostToolUse / Stop events
 - **Gemini CLI:** `.gemini/settings.json` — BeforeTool / AfterTool / AfterAgent events
-- **Codex:** No hook support — safety enforced through AGENTS.md guidance; schema compliance is self-checked
+- **Codex:** `.codex/hooks.json` — PreToolUse / PostToolUse events

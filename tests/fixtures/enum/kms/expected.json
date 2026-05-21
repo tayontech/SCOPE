@@ -1,0 +1,72 @@
+{
+  "resources": [
+    {
+      "resource_type": "kms_key",
+      "resource_id": "aaaa-1111-bbbb-2222",
+      "arn": "arn:aws:kms:us-east-1:123456789012:key/aaaa-1111-bbbb-2222",
+      "region": "us-east-1",
+      "key_state": "Enabled",
+      "usage": "ENCRYPT_DECRYPT",
+      "origin": "AWS_KMS",
+      "description": "My test key",
+      "rotation_enabled": true,
+      "rotation_status": "present",
+      "policy_principals": [
+        "arn:aws:iam::123456789012:root"
+      ],
+      "policy_status": "present",
+      "grants": [],
+      "grants_status": "present",
+      "findings": []
+    }
+  ],
+  "status": "complete",
+  "coverage": [
+    {
+      "check": "list_keys",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "describe_key",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 2,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "key_policy",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "grants",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "rotation_status",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,40 @@
+{
+  "resources": [
+    {
+      "resource_type": "sqs_queue",
+      "resource_id": "test-queue",
+      "arn": "arn:aws:sqs:us-east-1:123456789012:test-queue",
+      "region": "us-east-1",
+      "queue_url": "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue",
+      "resource_policy": null,
+      "fifo": false,
+      "dlq_arn": null,
+      "kms_key_id": null,
+      "visibility_timeout": 30,
+      "queue_attributes_status": "present",
+      "findings": []
+    }
+  ],
+  "status": "complete",
+  "coverage": [
+    {
+      "check": "list_queues",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "queue_attributes",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,58 @@
+{
+  "resources": [
+    {
+      "resource_type": "ssm_parameter",
+      "resource_id": "/app/secret-key",
+      "arn": "arn:aws:ssm:us-east-1:123456789012:parameter/app/secret-key",
+      "region": "us-east-1",
+      "type": "SecureString",
+      "tier": "Standard",
+      "kms_key_id": "arn:aws:kms:us-east-1:123456789012:key/secure-key-id",
+      "data_type": "text",
+      "last_modified": "2024-03-15T00:00:00.000Z",
+      "version": 3,
+      "has_resource_policy": false,
+      "resource_policy": null,
+      "resource_policy_status": "absent",
+      "findings": []
+    },
+    {
+      "resource_type": "ssm_parameter",
+      "resource_id": "/app/config/region",
+      "arn": "arn:aws:ssm:us-east-1:123456789012:parameter/app/config/region",
+      "region": "us-east-1",
+      "type": "String",
+      "tier": "Standard",
+      "kms_key_id": null,
+      "data_type": "text",
+      "last_modified": "2024-01-01T00:00:00.000Z",
+      "version": 1,
+      "has_resource_policy": false,
+      "resource_policy": null,
+      "resource_policy_status": "absent",
+      "findings": []
+    }
+  ],
+  "status": "complete",
+  "coverage": [
+    {
+      "check": "describe_parameters",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "resource_policy",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 2,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    }
+  ],
+  "errors": []
+}

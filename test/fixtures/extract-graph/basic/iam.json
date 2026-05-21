@@ -1,0 +1,92 @@
+{
+  "module": "iam",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "timestamp": "2026-04-19T00:00:00Z",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "iam_user",
+      "resource_id": "alice",
+      "arn": "arn:aws:iam::123456789012:user/alice",
+      "region": "global",
+      "groups": ["Developers"],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_user",
+      "resource_id": "bob",
+      "arn": "arn:aws:iam::123456789012:user/bob",
+      "region": "global",
+      "groups": [],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "AdminRole",
+      "arn": "arn:aws:iam::123456789012:role/AdminRole",
+      "region": "global",
+      "is_service_linked": false,
+      "trust_relationships": [
+        {
+          "principal": "arn:aws:iam::123456789012:user/alice",
+          "trust_type": "same-account",
+          "risk": "medium"
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "LambdaExecRole",
+      "arn": "arn:aws:iam::123456789012:role/LambdaExecRole",
+      "region": "global",
+      "is_service_linked": false,
+      "trust_relationships": [
+        {
+          "principal": "lambda.amazonaws.com",
+          "trust_type": "service",
+          "risk": "low"
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "AWSServiceRoleForSSO",
+      "arn": "arn:aws:iam::123456789012:role/aws-service-role/sso.amazonaws.com/AWSServiceRoleForSSO",
+      "region": "global",
+      "is_service_linked": true,
+      "trust_relationships": [
+        {
+          "principal": "sso.amazonaws.com",
+          "trust_type": "service",
+          "risk": "low"
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "CrossAccountRole",
+      "arn": "arn:aws:iam::123456789012:role/CrossAccountRole",
+      "region": "global",
+      "is_service_linked": false,
+      "trust_relationships": [
+        {
+          "principal": "arn:aws:iam::999888777666:root",
+          "trust_type": "cross-account",
+          "risk": "high"
+        }
+      ],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_group",
+      "resource_id": "Developers",
+      "arn": "arn:aws:iam::123456789012:group/Developers",
+      "region": "global",
+      "findings": []
+    }
+  ]
+}

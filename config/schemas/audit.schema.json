@@ -34,7 +34,7 @@
     },
     "summary": {
       "type": "object",
-      "required": ["risk_score"],
+      "required": ["severity"],
       "properties": {
         "total_users": { "type": "integer" },
         "total_roles": { "type": "integer" },
@@ -44,7 +44,7 @@
         "wildcard_trust_policies": { "type": "integer" },
         "cross_account_trusts": { "type": "integer" },
         "users_without_mfa": { "type": "integer" },
-        "risk_score": {
+        "severity": {
           "type": "string",
           "enum": ["critical", "high", "medium", "low"]
         },
@@ -69,7 +69,7 @@
         },
         "reachability": {
           "type": "object",
-          "description": "Aggregate reachability stats from Part 9 analysis — computed by scope-attack-paths",
+          "description": "Aggregate reachability stats from Part 9 analysis — computed by attack path pipeline (domain sub-agents + synthesizer)",
           "properties": {
             "principals_with_admin_reach": { "type": "integer" },
             "principals_with_data_reach": { "type": "integer" },
@@ -93,7 +93,10 @@
             "properties": {
               "id": { "type": "string" },
               "label": { "type": "string" },
-              "type": { "type": "string", "enum": ["user", "role", "group", "escalation", "data", "external"] }
+              "type": {
+                "type": "string",
+                "enum": ["user", "role", "group", "escalation", "data", "external", "compute", "gateway", "messaging", "ai", "idp", "oidc"]
+              }
             }
           }
         },
@@ -106,7 +109,10 @@
               "source": { "type": "string" },
               "target": { "type": "string" },
               "trust_type": { "type": "string" },
-              "edge_type": { "type": "string", "enum": ["priv_esc", "trust", "data_access", "network", "service", "public_access", "cross_account", "membership"] },
+              "edge_type": {
+                "type": "string",
+                "enum": ["priv_esc", "trust", "data_access", "network", "service", "public_access", "cross_account", "membership", "executes_as", "invokes", "authenticates_to"]
+              },
               "severity": { "type": "string" },
               "label": { "type": "string" }
             }
@@ -147,7 +153,7 @@
           "arn": { "type": "string" },
           "reachability": {
             "type": "object",
-            "description": "Part 9 reachability analysis — computed by scope-attack-paths",
+            "description": "Part 9 reachability analysis — computed by attack path pipeline (domain sub-agents + synthesizer)",
             "properties": {
               "reachable_roles": { "type": "array", "items": { "type": "string" } },
               "reachable_data": {

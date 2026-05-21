@@ -1,0 +1,32 @@
+{
+  "module": "iam",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "timestamp": "2026-04-19T00:00:00Z",
+  "status": "complete",
+  "findings": [
+    {
+      "resource_type": "iam_user",
+      "resource_id": "admin",
+      "arn": "arn:aws:iam::123456789012:user/admin",
+      "region": "global",
+      "groups": [],
+      "findings": []
+    },
+    {
+      "resource_type": "iam_role",
+      "resource_id": "DeployRole",
+      "arn": "arn:aws:iam::123456789012:role/DeployRole",
+      "region": "global",
+      "is_service_linked": false,
+      "trust_relationships": [
+        {
+          "principal": "arn:aws:iam::123456789012:role/BuildRole",
+          "trust_type": "same-account",
+          "risk": "low"
+        }
+      ],
+      "findings": []
+    }
+  ]
+}

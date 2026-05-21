@@ -1,0 +1,95 @@
+{
+  "version": "2026-04",
+  "description": "Reference pattern catalogue for hunt investigation. Keyed by alert type. Each pattern provides investigation angles and SPL templates for common CloudTrail alert types. Match investigation_context.alert_type case-insensitively against pattern keys. Fall back to Generic when no match is found.",
+  "patterns": {
+    "CreateAccessKey": {
+      "description": "IAM access key creation — actor vs target user, credential usage, related persistence",
+      "investigation_angles": [
+        "Anchor event — Find the triggering CreateAccessKey, extract actor vs. target user, source IP, user agent",
+        "Target user privilege assessment — What can the target user do? Recent IAM changes to the target?",
+        "Actor reconnaissance — Did the actor enumerate IAM resources before key creation?",
+        "Credential usage — Has the new key been used? From what IP? What services?",
+        "Related persistence — Other persistence mechanisms in the same time window (CreateLoginProfile, AddUserToGroup, policy changes)?"
+      ],
+      "spl_templates": {
+        "anchor_event": "index=cloudtrail eventName=CreateAccessKey (userIdentity.arn=\"[user_arn]\" OR userIdentity.userName=\"[user_name]\") earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| rename userIdentity.userName AS actor, userIdentity.arn AS actor_arn, requestParameters.userName AS target_user\n| table _time eventName actor actor_arn target_user sourceIPAddress userAgent recipientAccountId errorCode\n| sort _time",
+        "target_user_iam_history": "index=cloudtrail eventSource=iam.amazonaws.com (userIdentity.userName=\"[target_user]\" OR requestParameters.userName=\"[target_user]\") earliest=\"[24h_before_event]\" latest=\"[event_time]\"\n| table _time eventName userIdentity.userName userIdentity.arn requestParameters.policyArn requestParameters.groupName sourceIPAddress errorCode\n| sort _time",
+        "actor_enumeration": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") (eventName=ListUsers OR eventName=ListAccessKeys OR eventName=ListRoles OR eventName=ListGroupsForUser OR eventName=GetUser OR eventName=GetRole OR eventName=ListAttachedRolePolicies OR eventName=ListAttachedUserPolicies OR eventName=GetUserPolicy OR eventName=GetAccountAuthorizationDetails) earliest=\"[30_min_before_event]\" latest=\"[event_time]\"\n| table _time eventName userIdentity.userName sourceIPAddress userAgent errorCode\n| sort _time",
+        "credential_usage": "index=cloudtrail (sourceIPAddress=\"[source_ip]\" OR userIdentity.userName=\"[target_user]\") earliest=\"[event_time]\" latest=\"[2h_after_event]\"\n| table _time eventName eventSource userIdentity.userName userIdentity.arn userIdentity.accessKeyId sourceIPAddress userAgent errorCode\n| sort _time",
+        "related_persistence": "index=cloudtrail eventSource=iam.amazonaws.com (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[30_min_before_event]\" latest=\"[30_min_after_event]\"\n| table _time eventName userIdentity.userName requestParameters.userName requestParameters.policyArn sourceIPAddress errorCode\n| sort _time"
+      }
+    },
+    "Root Account Login": {
+      "description": "Root account console login — MFA status, post-login activity, brute force patterns, IP history",
+      "investigation_angles": [
+        "Anchor event — Find ConsoleLogin for Root, extract MFA status, login result, source IP, user agent",
+        "Post-login activity — All Root activity in 1 hour after login (IAM mods, CloudTrail changes, security tool changes)",
+        "Pre-login attempts — Failed ConsoleLogin for Root in 1 hour before (brute force / credential stuffing pattern)",
+        "IP history — Has this source IP been seen before in this account? Which other principals use it?"
+      ],
+      "spl_templates": {
+        "anchor_event": "index=cloudtrail eventName=ConsoleLogin \"userIdentity.type\"=Root earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| eval mfa_used=coalesce('additionalEventData.MFAUsed', \"unknown\")\n| eval login_result=if(errorCode=\"\" OR isnull(errorCode), \"Success\", \"Failed: \".errorCode)\n| table _time eventName sourceIPAddress userAgent mfa_used login_result recipientAccountId\n| sort _time",
+        "post_login_activity": "index=cloudtrail \"userIdentity.type\"=Root earliest=\"[login_time]\" latest=\"[1h_after_login]\"\n| table _time eventName eventSource requestParameters.* sourceIPAddress userAgent errorCode\n| sort _time",
+        "pre_login_attempts": "index=cloudtrail eventName=ConsoleLogin \"userIdentity.type\"=Root earliest=\"[1h_before_login]\" latest=\"[login_time]\"\n| eval login_result=if(errorCode=\"\" OR isnull(errorCode), \"Success\", \"Failed: \".errorCode)\n| table _time eventName sourceIPAddress userAgent login_result\n| sort _time",
+        "ip_history": "index=cloudtrail sourceIPAddress=\"[source_ip]\" earliest=\"[1.5h_before_login]\" latest=\"[1.5h_after_login]\"\n| stats count by userIdentity.arn userIdentity.userName userIdentity.type\n| table userIdentity.arn userIdentity.userName userIdentity.type count\n| sort -count"
+      }
+    },
+    "IAM Policy Change": {
+      "description": "Covers: AttachRolePolicy, PutUserPolicy, CreatePolicyVersion, AttachUserPolicy, PutRolePolicy, CreatePolicy",
+      "investigation_angles": [
+        "Anchor event — Find the policy change, extract what was changed, who changed it, target principal",
+        "Privilege exploitation — Did the target principal use new permissions in 2 hours after? Which services?",
+        "Actor reconnaissance — IAM enumeration by the actor in 2 hours before (ListPolicies, GetPolicy, GetAccountAuthorizationDetails)",
+        "Lateral movement — If role policy changed, did new principals assume the role after the change?"
+      ],
+      "spl_templates": {
+        "anchor_event": "index=cloudtrail (eventName=AttachRolePolicy OR eventName=PutUserPolicy OR eventName=CreatePolicyVersion OR eventName=AttachUserPolicy OR eventName=PutRolePolicy OR eventName=CreatePolicy) (userIdentity.arn=\"[user_arn]\" OR userIdentity.userName=\"[user_name]\") earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName userIdentity.arn userIdentity.userName requestParameters.policyArn requestParameters.roleName requestParameters.userName requestParameters.policyDocument sourceIPAddress errorCode\n| sort _time",
+        "target_principal_activity_after": "index=cloudtrail (userIdentity.arn=\"[target_principal_arn]\" OR userIdentity.userName=\"[target_principal_name]\") earliest=\"[change_time]\" latest=\"[2h_after_change]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time",
+        "actor_history_before": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[2h_before_change]\" latest=\"[change_time]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time",
+        "role_assumption_after": "index=cloudtrail eventName=AssumeRole requestParameters.roleArn=\"[target_role_arn]\" earliest=\"[change_time]\" latest=\"[2h_after_change]\"\n| table _time eventName userIdentity.arn userIdentity.userName requestParameters.roleArn requestParameters.roleSessionName sourceIPAddress errorCode\n| sort _time"
+      }
+    },
+    "AssumeRole": {
+      "description": "AssumeRole / Cross-Account Access — assuming principal, session activity, historical baseline, post-assumption IAM changes",
+      "investigation_angles": [
+        "Anchor event — Find the AssumeRole event, extract assuming principal, target role, session name, external ID, cross-account status",
+        "Session activity — What did the assumed role session do in 2 hours after? Key: IAM changes, data access, role chaining",
+        "Historical baseline — Who normally assumes this role? From where? Compare alerting assumption to 7-day baseline",
+        "Post-assumption IAM — Did the assumed role session make IAM changes (privilege escalation from temporary session)?"
+      ],
+      "spl_templates": {
+        "anchor_event": "index=cloudtrail eventName=AssumeRole (userIdentity.arn=\"[user_arn]\" OR requestParameters.roleArn=\"[role_arn_if_known]\") earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName userIdentity.arn userIdentity.type requestParameters.roleArn requestParameters.roleSessionName requestParameters.externalId responseElements.assumedRoleUser.arn sourceIPAddress userAgent errorCode\n| sort _time",
+        "session_activity": "index=cloudtrail \"userIdentity.arn\"=\"[assumed_role_session_arn]\" earliest=\"[assumption_time]\" latest=\"[2h_after_assumption]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time",
+        "historical_assumption_pattern": "index=cloudtrail eventName=AssumeRole requestParameters.roleArn=\"[target_role_arn]\" earliest=\"[7d_before_event]\" latest=\"[event_time]\"\n| stats count by userIdentity.arn sourceIPAddress\n| table userIdentity.arn sourceIPAddress count\n| sort -count",
+        "post_assumption_iam": "index=cloudtrail eventSource=iam.amazonaws.com \"userIdentity.arn\"=\"[assumed_role_session_arn]\" earliest=\"[assumption_time]\" latest=\"[1h_after_assumption]\"\n| table _time eventName requestParameters.policyArn requestParameters.userName requestParameters.roleName sourceIPAddress errorCode\n| sort _time"
+      }
+    },
+    "CloudTrail Modification": {
+      "description": "Covers: StopLogging, DeleteTrail, UpdateTrail, PutEventSelectors — defense evasion via CloudTrail suppression",
+      "investigation_angles": [
+        "Anchor event — Find the modification, extract which trail, what type (StopLogging vs DeleteTrail vs UpdateTrail vs PutEventSelectors)",
+        "Logging gap activity — What did the actor do during the suppression period? (Note: events may be missing if StopLogging succeeded)",
+        "Restoration check — Was logging restored? Gap duration? Who restored it?",
+        "Full actor timeline — 4-hour window centered on modification (recon → evasion → exploitation sequence)"
+      ],
+      "spl_templates": {
+        "anchor_event": "index=cloudtrail (eventName=StopLogging OR eventName=DeleteTrail OR eventName=UpdateTrail OR eventName=PutEventSelectors) earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName userIdentity.arn userIdentity.userName requestParameters.name requestParameters.trailName sourceIPAddress userAgent recipientAccountId errorCode\n| sort _time",
+        "activity_during_gap": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[modification_time]\" latest=\"[1h_after_modification]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time",
+        "restoration_check": "index=cloudtrail eventName=StartLogging (requestParameters.name=\"[trail_name]\" OR requestParameters.trailName=\"[trail_name]\") earliest=\"[modification_time]\" latest=\"[4h_after_modification]\"\n| table _time eventName userIdentity.arn userIdentity.userName sourceIPAddress\n| sort _time",
+        "full_actor_timeline": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[2h_before_modification]\" latest=\"[2h_after_modification]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time"
+      }
+    },
+    "Generic": {
+      "description": "Generic / Unknown Alert Type — use when alert_type does not match any specific pattern above",
+      "investigation_angles": [
+        "Find triggering events — Search by available fields (event name, user identity, source IP, time range). Determine actual event type",
+        "Actor activity timeline — 2-hour window centered on triggering event. Is this isolated or part of a sequence?",
+        "Analyst-directed pivot — After timeline, present pivot menu. The analyst decides direction"
+      ],
+      "spl_templates": {
+        "find_triggering_events": "index=cloudtrail (eventName=\"[event_name_if_known]\") (userIdentity.arn=\"[user_arn]\" OR userIdentity.userName=\"[user_name]\" OR sourceIPAddress=\"[source_ip]\") earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| table _time eventName eventSource userIdentity.arn userIdentity.userName userIdentity.type sourceIPAddress userAgent recipientAccountId errorCode\n| sort _time",
+        "actor_timeline": "index=cloudtrail (userIdentity.arn=\"[actor_arn]\" OR userIdentity.userName=\"[actor_name]\") earliest=\"[1h_before_event]\" latest=\"[1h_after_event]\"\n| table _time eventName eventSource userIdentity.arn sourceIPAddress userAgent errorCode\n| sort _time"
+      }
+    }
+  }
+}

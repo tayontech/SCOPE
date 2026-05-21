@@ -1,0 +1,37 @@
+{
+  "resources": [
+    {
+      "resource_type": "sns_topic",
+      "resource_id": "test-topic",
+      "arn": "arn:aws:sns:us-east-1:123456789012:test-topic",
+      "region": "us-east-1",
+      "resource_policy": null,
+      "kms_key_id": null,
+      "subscriptions_confirmed": 2,
+      "topic_attributes_status": "present",
+      "findings": []
+    }
+  ],
+  "status": "complete",
+  "coverage": [
+    {
+      "check": "list_topics",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "topic_attributes",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    }
+  ],
+  "errors": []
+}

@@ -20,8 +20,6 @@ You do NOT:
 - Write to memory or context.json
 
 You return an `INTEL_HANDOFF` block that the parent reads to set up the investigation session.
-
-**Memory hygiene — STRICT PROHIBITION:** IOCs, ARNs, account IDs, and resource identifiers extracted from threat intel must NOT be written to MEMORY.md or any memory file. They are session-scoped only. This prohibition applies even when the intel appears to describe activity in a known AWS environment. Context.json is the correct target for persistent environment-specific data — that is managed by the parent, not this subagent.
 </role>
 
 <threat_intel_intake>

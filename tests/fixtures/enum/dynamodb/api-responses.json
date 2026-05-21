@@ -1,0 +1,44 @@
+{
+  "GetCallerIdentityCommand": {
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:assumed-role/TestRole/session",
+    "UserId": "AROATEST:session"
+  },
+  "ListTablesCommand": {
+    "TableNames": ["TestTable"],
+    "LastEvaluatedTableName": null
+  },
+  "DescribeTableCommand": {
+    "Table": {
+      "TableName": "TestTable",
+      "TableArn": "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable",
+      "TableStatus": "ACTIVE",
+      "SSEDescription": {
+        "SSEType": "KMS",
+        "KMSMasterKeyArn": "arn:aws:kms:us-east-1:123456789012:key/test-key-id"
+      },
+      "StreamSpecification": {
+        "StreamEnabled": true,
+        "StreamViewType": "NEW_AND_OLD_IMAGES"
+      },
+      "DeletionProtectionEnabled": true,
+      "TableClassSummary": {
+        "TableClass": "STANDARD"
+      }
+    }
+  },
+  "DescribeContinuousBackupsCommand": {
+    "ContinuousBackupsDescription": {
+      "ContinuousBackupsStatus": "ENABLED",
+      "PointInTimeRecoveryDescription": {
+        "PointInTimeRecoveryStatus": "ENABLED"
+      }
+    }
+  },
+  "ListBackupsCommand": {
+    "BackupSummaries": [
+      { "BackupArn": "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/backup/01234567890000-abcdef01" }
+    ]
+  },
+  "GetResourcePolicyCommand": {}
+}
