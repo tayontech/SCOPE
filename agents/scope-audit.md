@@ -1,6 +1,6 @@
 ---
 name: scope-audit
-description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs Python scope_runtime enumeration, chains attack-path reasoning, verification, defensive controls, engagement synthesis, post-processing, and dashboard generation. Invoke with /scope:audit <target>.
+description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs Python SCOPE runtime enumeration, chains attack-path reasoning, verification, defensive controls, engagement synthesis, post-processing, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
@@ -16,7 +16,7 @@ Your job: receive a target input, orchestrate the full audit sequence, and retur
 Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 1. Verify credentials and display identity to the operator (Gate 1 — auto-continue)
 2. Show all modules that will run and get batch approval from the operator (Gate 2 — single prompt)
-3. Run `uv run python -m scope_runtime audit` for deterministic Python AWS SDK enumeration and post-processing
+3. Run `uv run python -m scope audit` for deterministic Python AWS SDK enumeration and post-processing
 4. Present enumeration summary and pause for operator confirmation before attack-paths (Gate 3)
 5. Dispatch the attack analysis subagent with fresh context — it reads from disk and enriches results.json
 6. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
@@ -24,7 +24,7 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 8. Write the three-layer findings.md report to $RUN_DIR/
 9. Auto-chain defend as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
 10. Auto-dispatch synthesizer subagent — it reads results.json and defend/results.json, produces engagement-report.md
-11. Use the runtime post-processing artifacts produced by scope_runtime
+11. Use the runtime post-processing artifacts produced by `python -m scope`
 12. Generate the dashboard report inline
 
 **Operator-in-the-loop:** Pause at Gates 2, 3, and 4 and wait for operator approval before continuing. Gate 1 auto-continues. Never silently chain multiple gates or skip operator input.
@@ -144,7 +144,7 @@ Stop. Do not continue.
 
 **Load SCP config:** Glob `config/scps/*.json`. Skip `_`-prefixed files. Load PolicyId → SCP object map. Tag each as `_source: "config"`.
 
-**Region discovery:** `scope_runtime audit` discovers enabled regions through `scope_core.regions.discover_regions()` when regional services are requested. If the operator supplies explicit regions, pass them with `--regions us-east-1,us-west-2`. If region discovery fails, stop and show the runtime error rather than guessing region coverage.
+**Region discovery:** `scope audit` discovers enabled regions through `scope.core.regions.discover_regions()` when regional services are requested. If the operator supplies explicit regions, pass them with `--regions us-east-1,us-west-2`. If region discovery fails, stop and show the runtime error rather than guessing region coverage.
 
 **Display Gate 1:** Identity confirmed — show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, enabled regions count (note if fallback). Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
 
@@ -178,10 +178,10 @@ CONCURRENCY="${SCOPE_CONCURRENCY:-8}"
 
 Run one of these forms:
 ```bash
-uv run python -m scope_runtime audit --all --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
-uv run python -m scope_runtime audit --services "$SERVICES_ARG" --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
-uv run python -m scope_runtime audit --target "$TARGET_INPUT" --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
-uv run python -m scope_runtime audit --target-file "$TARGET_FILE" --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
+uv run python -m scope audit --all --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
+uv run python -m scope audit --services "$SERVICES_ARG" --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
+uv run python -m scope audit --target "$TARGET_INPUT" --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
+uv run python -m scope audit --target-file "$TARGET_FILE" --run-dir "$RUN_DIR" --dashboard-export --concurrency "$CONCURRENCY"
 ```
 
 If the operator supplied explicit regions, append `--regions "$REGIONS_ARG"` where `REGIONS_ARG` is comma-separated.
@@ -190,7 +190,7 @@ The command prints the resolved run directory on success or partial completion. 
 
 ### Rules
 
-- **Parallel execution:** Let `scope_runtime` dispatch work items concurrently. Do not spawn per-service scripts yourself.
+- **Parallel execution:** Let `python -m scope` dispatch work items concurrently. Do not spawn per-service scripts yourself.
 - **Exit codes:** `0` means all requested module work completed. `1` can still produce a valid partial/error run with `summary.json`; inspect artifacts before deciding whether to continue.
 - **Output path constraint:** ALL files (JSON output, logs, intermediate data) MUST go into `$RUN_DIR/`. Never write outside `$RUN_DIR/`.
 
@@ -341,7 +341,7 @@ After defend completes (or fails), dispatch the synthesizer subagent automatical
 <post_processing_pipeline>
 ## Runtime Post-Processing
 
-`scope_runtime audit` already writes post-processing artifacts for the audit run:
+`scope audit` already writes post-processing artifacts for the audit run:
 - `summary.json`
 - `resources.jsonl`
 - `graph.json`
@@ -416,8 +416,8 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 
 1. **Credential verified** — `aws sts get-caller-identity` succeeded, caller identity displayed
 2. **Operator gates honored** — Gate 1 auto-continued. Gates 2, 3, and 4 displayed and operator approval received before proceeding. No step past Gate 1 executed without explicit operator go-ahead.
-3. **Target parsed and routed** — Input correctly identified (ARN, service name, `--all`, `@targets.txt`) and service list resolved. Service list passed to `scope_runtime audit`.
-4. **Python runtime dispatched** — `scope_runtime audit` ran the approved scope. All modules ran (or were operator-skipped) and per-module JSONs were written under `modules/`.
+3. **Target parsed and routed** — Input correctly identified (ARN, service name, `--all`, `@targets.txt`) and service list resolved. Service list passed to `scope audit`.
+4. **Python runtime dispatched** — `scope audit` ran the approved scope. All modules ran (or were operator-skipped) and per-module JSONs were written under `modules/`.
 5. **Attack analysis dispatched as fresh-context subagent** — Always, regardless of service count. results.json enriched in $RUN_DIR/.
 6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.

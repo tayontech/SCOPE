@@ -5,7 +5,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 ## Agent Overview
 
 **Orchestrator agent** (slash command — operator-triggered):
-- `scope-audit` — AWS resource enumeration orchestrator: runs Python `scope_runtime` audit, dispatches attack-path analysis, auto-chains defend
+- `scope-audit` — AWS resource enumeration orchestrator: runs `python -m scope audit`, dispatches attack-path analysis, auto-chains defend
 
 **Standalone agents** (slash commands — operator-triggered):
 - `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
@@ -15,8 +15,8 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 - `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
 
 **Enumeration runtime** (invoked by scope-audit, model: none — deterministic Python):
-- `scope_runtime audit` orchestrates Python boto3 enumerators from `enumerators/`
-- `scope_core` owns AWS clients, coverage, envelope models, retry, and region discovery
+- `scope audit` orchestrates Python boto3 enumerators from `scope/enumerators/`
+- `scope.core` owns AWS clients, coverage, envelope models, retry, and region discovery
 
 **Attack path analysis** (fresh-context subagent dispatched by scope-audit):
 - `extract-graph.js` — Deterministic graph extraction from per-module JSON (Node.js, no AI model)
@@ -26,7 +26,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 - `scope-verify` — Unified verification: claim ledger, taxonomy, AWS API validation, SPL lints (domain sections dispatched by caller)
 
 **Runtime post-processing**:
-- `scope_runtime` writes `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` during audit execution
+- `scope.runtime` writes `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` during audit execution
 
 ## System Flow
 
@@ -43,7 +43,7 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │                                   │
     │                               │  Enumeration (Python runtime):     │
     │                               │  ┌──────────────────────────┐    │
-    │                               │  │ scope_runtime audit      │    │
+    │                               │  │ scope audit      │    │
     │                               │  │ iam, sts, s3, kms,       │    │
     │                               │  │ secrets, lambda, ec2,    │    │
     │                               │  │ rds, sns, sqs,           │    │
@@ -154,14 +154,14 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 
 ## Runtime Post-Processing
 
-`scope_runtime audit` performs deterministic post-processing immediately after enumeration. Hunt does not run post-processing in any mode; if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice. In hunt mode, scope-hunt reads from an existing audit or exploit run directory but does not write back to it. In intel mode, extracted IOCs and TTPs are session-scoped and written only to `context.json`.
+`scope audit` performs deterministic post-processing immediately after enumeration. Hunt does not run post-processing in any mode; if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. `./hunt/context.json` is always updated regardless of save choice. In hunt mode, scope-hunt reads from an existing audit or exploit run directory but does not write back to it. In intel mode, extracted IOCs and TTPs are session-scoped and written only to `context.json`.
 
 ```
   $RUN_DIR/modules/<service>/<region>.json
            │
            ▼
     ┌──────────────────┐
-    │  scope_runtime   │──► $RUN_DIR/summary.json
+    │  scope.runtime   │──► $RUN_DIR/summary.json
     │  post-processing │    $RUN_DIR/resources.jsonl
     │                  │    $RUN_DIR/graph.json
     │                  │    $RUN_DIR/results.json
@@ -286,7 +286,7 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs through `scope_runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs Python runtime + scope-attack-analyze + defend + synthesizer |
+| **audit** | `/scope:audit` | AWS APIs through `scope.runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs `python -m scope audit` + scope-attack-analyze + defend + synthesizer |
 | **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./runs/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **exploit** | `/scope:exploit` | `./runs/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **hunt** | `/scope:hunt [input]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json`. Intel mode: WebFetch (URL) or NL parse, `./hunt/context.json`, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in any mode) |

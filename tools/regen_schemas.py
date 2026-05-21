@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scope_core.models import ModuleEnvelope  # noqa: E402
+from scope.core.models import ModuleEnvelope  # noqa: E402
 
 
 MODULE_SCHEMA = ROOT / "config" / "schemas" / "module-envelope.schema.json"
