@@ -21,6 +21,46 @@ def valid_envelope(module_name: str) -> dict[str, Any]:
     }
 
 
+def valid_controls_results() -> dict[str, Any]:
+    return {
+        "account_id": "123456789012",
+        "source": "controls",
+        "region": "global",
+        "timestamp": "2026-05-17T12:00:00Z",
+        "audit_runs_analyzed": ["audit-20260517-120000-all"],
+        "summary": {
+            "guardrails": 0,
+            "detections": 1,
+            "policy_replacements": 0,
+            "remediation_items": 0,
+            "validation_status": "pass",
+            "severity": "high",
+        },
+        "guardrails": [],
+        "detections": [
+            {
+                "name": "Policy Mutation Sequence",
+                "type": "composite",
+                "objective": "Detect attacker-controlled IAM policy activation.",
+                "spl": "index=cloudtrail earliest=-24h latest=now eventName=SetDefaultPolicyVersion | stats count by userIdentity.arn",
+                "severity": "high",
+                "category": "privilege_escalation",
+                "mitre_technique": "T1548",
+                "source_attack_paths": ["Validated policy mutation path"],
+                "source_run_ids": ["audit-20260517-120000-all"],
+                "promotion_decision": "alert",
+                "fidelity_rationale": "Specific policy mutation against a path-identified policy produces high signal.",
+                "noise_controls": ["scope to affected policy ARN from the attack path"],
+                "expected_volume": "low",
+                "validation_status": "not_validated",
+            }
+        ],
+        "policy_replacements": [],
+        "remediation": {"file": "remediation-plan.md", "items": 0},
+        "validation": {"status": "pass", "blocks": 0, "warns": 0},
+    }
+
+
 def run_hook(tmp_path: Path, envelope_body: dict[str, Any], filename: str) -> subprocess.CompletedProcess[str]:
     file_path = tmp_path / filename
     file_path.write_text(json.dumps(envelope_body, indent=2))
@@ -126,6 +166,38 @@ def test_hook_accepts_populated_coverage_and_errors(tmp_path: Path) -> None:
 def test_hook_accepts_envelope_without_coverage_and_errors(tmp_path: Path) -> None:
     result = run_hook(tmp_path, valid_envelope("iam"), "iam.json")
     assert_accepted(result, "envelope without optional coverage/errors")
+
+
+def test_controls_hook_requires_detection_production_fields(tmp_path: Path) -> None:
+    payload = valid_controls_results()
+    del payload["detections"][0]["promotion_decision"]
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "controls detection missing promotion_decision")
+    assert "promotion_decision" in parse_decision(result.stdout)["reason"]
+
+
+def test_controls_hook_blocks_unknown_volume_alerts(tmp_path: Path) -> None:
+    payload = valid_controls_results()
+    payload["detections"][0]["expected_volume"] = "unknown"
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "controls alert with unknown expected volume")
+    assert "expected_volume unknown/high cannot be promoted to alert" in parse_decision(result.stdout)["reason"]
+
+
+def test_controls_hook_blocks_weak_atomic_alerts(tmp_path: Path) -> None:
+    payload = valid_controls_results()
+    payload["detections"][0]["type"] = "atomic"
+    payload["detections"][0]["fidelity_rationale"] = "generic"
+    payload["detections"][0]["noise_controls"] = []
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "weak atomic controls alert")
+    assert "atomic alert detections require non-empty noise_controls" in parse_decision(result.stdout)["reason"]
 
 
 def test_hook_accepts_valid_iam_envelope(tmp_path: Path) -> None:

@@ -390,3 +390,60 @@ def test_controls_workers_own_structured_output_for_assembly() -> None:
     assert "guardrails.md guardrails.json detections.md detections.json policy-replacements.md policy-replacements.json remediation-plan.md" in validate
     assert "source_attack_paths` maps every guardrail to every attack path without evidence" in validate
     assert "source_attack_paths` maps every replacement to every attack path without role/resource evidence" in validate
+
+
+def test_controls_detections_use_production_detection_bar() -> None:
+    prompt = read("agents/subagents/scope-controls-detections.md")
+    validate = read("agents/subagents/scope-controls-validate.md")
+    schema = read("config/schemas/controls.schema.json")
+
+    for text in [
+        "attacker progress, not raw AWS event usage",
+        "Do not start with SPL syntax.",
+        "promotion_decision",
+        "fidelity_rationale",
+        "noise_controls",
+        "expected_volume",
+        "validation_status",
+        "`expected_volume: unknown` or `high` cannot be promoted to `alert`",
+        "Do not emit generic single-event alerts",
+        "AssumeRole",
+        "GetObject",
+        "List*",
+        "Describe*",
+        "ConsoleLogin",
+        "CreateAccessKey",
+        "hunt_query",
+        "coverage_gap",
+    ]:
+        assert text in prompt
+
+    assert_matches(
+        prompt,
+        r"Atomic[\s\S]{0,240}one event plus meaningful context filters[\s\S]{0,260}privileged/sensitive target context",
+    )
+    assert_matches(
+        prompt,
+        r"Composite[\s\S]{0,260}ordered or bounded correlation[\s\S]{0,260}common events into attacker-progress signal",
+    )
+    assert_matches(
+        prompt,
+        r"promotion_decision[\s\S]{0,220}alert[\s\S]{0,220}hunt_query[\s\S]{0,220}coverage_gap[\s\S]{0,220}reject",
+    )
+
+    for field in [
+        '"type"',
+        '"objective"',
+        '"promotion_decision"',
+        '"fidelity_rationale"',
+        '"noise_controls"',
+        '"expected_volume"',
+        '"validation_status"',
+        '"coverage_caveats"',
+        '"tuning_guidance"',
+    ]:
+        assert field in schema
+
+    assert "promotion_decision` is `alert` and `expected_volume` is `unknown` or `high`" in validate
+    assert "Atomic alerts require concrete context filters" in validate
+    assert "future `scope-controls-detection-validate` subagent" in validate

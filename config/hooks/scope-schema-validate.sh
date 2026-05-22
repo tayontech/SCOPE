@@ -288,8 +288,8 @@ case "$SOURCE" in
     # guardrails items must have name, type, file, policy_json, source_attack_paths, source_run_ids, impact_analysis
     check_array_item_fields "guardrails" "name,type,file,policy_json,source_attack_paths,source_run_ids,impact_analysis" "guardrail entries"
 
-    # detections items must have name, spl, severity, category, mitre_technique, source_attack_paths, source_run_ids
-    check_array_item_fields "detections" "name,spl,severity,category,mitre_technique,source_attack_paths,source_run_ids" "detection entries"
+    # detections items must include production-readiness fields, not just SPL text
+    check_array_item_fields "detections" "name,type,objective,spl,severity,category,mitre_technique,source_attack_paths,source_run_ids,promotion_decision,fidelity_rationale,noise_controls,expected_volume,validation_status" "detection entries"
 
     # policy_replacements items must have role_name, file, original_policy_arn, replacement_policy_json, source_attack_paths, staleness_reasoning
     check_array_item_fields "policy_replacements" "role_name,file,original_policy_arn,replacement_policy_json,source_attack_paths,staleness_reasoning" "policy replacement entries"
@@ -299,6 +299,36 @@ case "$SOURCE" in
       INVALID_DET_SEV=$(jq -r '[.detections[] | select(.severity != null) | .severity | select(. != "critical" and . != "high" and . != "medium" and . != "low")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
       if [ -n "$INVALID_DET_SEV" ]; then
         ERRORS+=("detections[].severity contains invalid values (must be lowercase: critical|high|medium|low): $INVALID_DET_SEV")
+      fi
+
+      INVALID_DET_TYPE=$(jq -r '[.detections[] | select(.type != null) | .type | select(. != "atomic" and . != "composite" and . != "hunt_query" and . != "coverage_gap")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_DET_TYPE" ]; then
+        ERRORS+=("detections[].type contains invalid values (must be one of: atomic|composite|hunt_query|coverage_gap): $INVALID_DET_TYPE")
+      fi
+
+      INVALID_PROMOTION=$(jq -r '[.detections[] | select(.promotion_decision != null) | .promotion_decision | select(. != "alert" and . != "hunt_query" and . != "coverage_gap" and . != "reject")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_PROMOTION" ]; then
+        ERRORS+=("detections[].promotion_decision contains invalid values (must be one of: alert|hunt_query|coverage_gap|reject): $INVALID_PROMOTION")
+      fi
+
+      INVALID_VOLUME=$(jq -r '[.detections[] | select(.expected_volume != null) | .expected_volume | select(. != "low" and . != "medium" and . != "high" and . != "unknown")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_VOLUME" ]; then
+        ERRORS+=("detections[].expected_volume contains invalid values (must be one of: low|medium|high|unknown): $INVALID_VOLUME")
+      fi
+
+      INVALID_VALIDATION=$(jq -r '[.detections[] | select(.validation_status != null) | .validation_status | select(. != "not_validated" and . != "validated" and . != "too_noisy" and . != "failed")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_VALIDATION" ]; then
+        ERRORS+=("detections[].validation_status contains invalid values (must be one of: not_validated|validated|too_noisy|failed): $INVALID_VALIDATION")
+      fi
+
+      UNKNOWN_ALERTS=$(jq -r '[.detections[] | select(.promotion_decision == "alert" and (.expected_volume == "unknown" or .expected_volume == "high")) | .name // "unnamed"] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$UNKNOWN_ALERTS" ]; then
+        ERRORS+=("detections with expected_volume unknown/high cannot be promoted to alert: $UNKNOWN_ALERTS")
+      fi
+
+      WEAK_ATOMICS=$(jq -r '[.detections[] | select(.type == "atomic" and .promotion_decision == "alert" and (((.noise_controls // []) | length) == 0 or ((.fidelity_rationale // "") | length) < 20)) | .name // "unnamed"] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$WEAK_ATOMICS" ]; then
+        ERRORS+=("atomic alert detections require non-empty noise_controls and a concrete fidelity_rationale: $WEAK_ATOMICS")
       fi
     fi
 

@@ -76,15 +76,25 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "spl", "severity", "category", "mitre_technique", "source_attack_paths", "source_run_ids"],
+        "required": ["name", "type", "objective", "spl", "severity", "category", "mitre_technique", "source_attack_paths", "source_run_ids", "promotion_decision", "fidelity_rationale", "noise_controls", "expected_volume", "validation_status"],
         "properties": {
           "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["atomic", "composite", "hunt_query", "coverage_gap"] },
+          "objective": { "type": "string", "description": "Attacker progress or defensive visibility goal this detection covers" },
           "spl": { "type": "string" },
           "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
           "category": { "type": "string" },
           "mitre_technique": { "type": "string", "pattern": "^T\\d{4}" },
           "source_attack_paths": { "type": "array", "items": { "type": "string" } },
-          "source_run_ids": { "type": "array", "items": { "type": "string" } }
+          "source_run_ids": { "type": "array", "items": { "type": "string" } },
+          "covered_hops": { "type": "array", "items": { "type": "string" } },
+          "promotion_decision": { "type": "string", "enum": ["alert", "hunt_query", "coverage_gap", "reject"] },
+          "fidelity_rationale": { "type": "string", "description": "Why this will be high signal in production" },
+          "noise_controls": { "type": "array", "items": { "type": "string" }, "description": "Context filters, exclusions, and scoping that prevent noisy alerts" },
+          "expected_volume": { "type": "string", "enum": ["low", "medium", "high", "unknown"] },
+          "validation_status": { "type": "string", "enum": ["not_validated", "validated", "too_noisy", "failed"] },
+          "coverage_caveats": { "type": "array", "items": { "type": "string" } },
+          "tuning_guidance": { "type": "string" }
         }
       }
     },

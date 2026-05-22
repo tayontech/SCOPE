@@ -131,7 +131,7 @@ jq . < "$CONTROLS_RUN_DIR/policies/scp-FILENAME.json" > /dev/null 2>&1 && echo "
 </review_guardrails>
 
 <review_detections>
-## Review 2: SPL Detections (detections.md)
+## Review 2: SPL Detections (detections.md + detections.json)
 
 Note: The `scope-spl-lint.sh` hook already validates SPL syntax (index=cloudtrail, field names, time bounds, composite/transaction rules) on Write. This review focuses on SEMANTIC correctness that the hook cannot check.
 
@@ -139,6 +139,12 @@ Note: The `scope-spl-lint.sh` hook already validates SPL syntax (index=cloudtrai
 
 ```bash
 cat "$CONTROLS_RUN_DIR/detections.md"
+```
+
+Read and validate the structured detection array:
+
+```bash
+jq -e 'type == "array"' "$CONTROLS_RUN_DIR/detections.json"
 ```
 
 ### Step 2: Read audit results.json for cross-reference
@@ -149,6 +155,10 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, valid
 
 **BLOCK criteria:**
 
+- **BLOCK** if `detections.json` is not an array or any item misses required production-readiness fields: `type`, `objective`, `promotion_decision`, `fidelity_rationale`, `noise_controls`, `expected_volume`, `validation_status`.
+- **BLOCK** if `promotion_decision` is `alert` and `expected_volume` is `unknown` or `high`.
+- **BLOCK** if an atomic alert has empty `noise_controls` or a generic fidelity rationale. Atomic alerts require concrete context filters such as affected resources, sensitive targets, privileged role names, external account IDs, known automation exclusions, or risky policy details.
+- **BLOCK** if a detection promotes raw common AWS mechanics to alert without context: `AssumeRole`, `GetObject`, `List*`, `Describe*`, `ConsoleLogin`, or `CreateAccessKey`.
 - **BLOCK** if a detection references a CloudTrail `eventName` that doesn't exist for the claimed `eventSource`. Examples of invalid combinations:
   - `eventSource="iam.amazonaws.com"` with `eventName` that is an S3 operation
   - `eventSource="s3.amazonaws.com"` with `eventName=CreateUser`
@@ -159,6 +169,7 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, valid
 - **WARN** if a detection has `eventName=*` or wildcard matching without additional restrictive filters — high false positive risk
 - **WARN** if a detection has no false positive guidance section
 - **WARN** if a detection covers a `validation_status=conditional` attack path but has no tuning guidance or coverage caveat note. Conditional paths have validated control-plane chains with runtime variance or missing context.
+- **WARN** if useful detection logic remains `hunt_query` because production volume is unknown; note that the future `scope-controls-detection-validate` subagent should validate volume before alert promotion.
 
 **Consistency check:**
 
