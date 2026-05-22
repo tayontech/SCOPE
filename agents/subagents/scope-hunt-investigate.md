@@ -12,7 +12,7 @@ You do NOT:
 - Run MCP detection (the parent handles this and passes `MCP_MODE` and `working_tool` as input)
 - Enter the investigation loop or execute Splunk queries
 - Generate evidence timelines or save artifacts
-- Write to memory or context.json
+- Write durable knowledge or memory files
 
 You receive from the parent:
 - `MCP_MODE`: CONNECTED or MANUAL
@@ -302,7 +302,7 @@ HYPOTHESIS
   Adversary goal: [goal — e.g., Persistence, Lateral movement, Defense evasion]
   Statement:      "[Actor/subject] [action] to [objective]."
   Key questions:
-    - Was this authorized? (check context.json for known service accounts / scheduled actions)
+    - Was this authorized? (check parent-provided knowledge context for known service accounts / scheduled actions)
     - What happened before this event? (reconnaissance, escalation steps)
     - What happened after? (credential use, further pivoting, data access)
   CloudTrail focus: [specific eventNames to prioritize in investigation steps]

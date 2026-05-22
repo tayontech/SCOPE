@@ -33,7 +33,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Execution modes:** CONNECTED (Splunk MCP available — execute directly) | MANUAL (no MCP — display SPL, wait for analyst to paste results).
 
-**Hunt-specific session exceptions:** (1) Load `./hunt/context.json` at startup (operator-curated baseline). (2) In hunt mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided.
+**Hunt-specific session exceptions:** (1) Load bounded environment knowledge through `skills/scope-knowledge-load/SKILL.md` at startup. (2) In hunt mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided.
 
 **Subagent dispatch note:** MCP detection runs before dispatching `scope-hunt-investigate` (INVESTIGATION mode) because Mode D requires Splunk access. For INTEL and HUNT modes, subagents are dispatched before MCP detection — those subagents do not use Splunk.
 
@@ -114,32 +114,32 @@ Append after save:
 2. **No shared state.** Do not read files from other `./hunt/` subdirectories.
 3. **Audit/exploit reads — conditional.** In detection investigation mode: do NOT load or reference SCOPE audit or exploit artifacts. In hunt mode: reading the audit/exploit run directory provided by the operator at startup is permitted and expected. Do NOT speculatively read other run directories not provided at startup.
 4. **investigation_findings accumulator:** Maintain in memory. Each entry: step number, step name, query run, result summary (event count, key findings), approved/skipped/pivoted status.
-5. **Environment context exception.** Reading `./hunt/context.json` is permitted — distilled environmental knowledge, not raw artifacts. The prohibition on other `./hunt/` subdirectories remains.
+5. **Environment knowledge exception.** Reading the bounded context returned by `skills/scope-knowledge-load/SKILL.md` is permitted — distilled environmental knowledge, not raw artifacts.
 6. **Hunt mode isolation.** In hunt mode, resource identifiers from the run directory (ARNs, account IDs, bucket names, role names, key IDs, access key IDs) are session-scoped only.
 </run_directory>
 
 <environment_context>
 ## Environment Context — Persistent Knowledge Across Investigations
 
-**Read** `./hunt/context.json` at the start of every investigation (before prompting for alert details). This file is read-only — the operator manages it manually.
+Use `skills/scope-knowledge-load/SKILL.md` at the start of every investigation before prompting for alert details. Provide `AGENT=scope-investigate`, raw input, entity, alert type, IOC, threat intel topic, and timeframe when known.
 
-**First-run:** If missing, proceed without baseline. No error, no warning — empty knowledge base.
+**First-run:** If no knowledge files exist, proceed without baseline. No error, no warning — empty knowledge base.
 
 **At startup, display context summary:**
 
 ```
 ENVIRONMENT CONTEXT LOADED
-  Investigations to date: [investigation_count]
-  Known principals:       [count of user_baselines + known_service_accounts]
-  Known network ranges:   [count of known_cidrs + known_vpn_ranges]
-  Known IOCs:             [count of ips + user_agents + arns in iocs]
-  Alert patterns tracked: [count of by_alert_type entries]
-  Last updated:           [updated timestamp]
+  Files read:             [count]
+  Relevant observations:  [count]
+  Known baselines:        [count]
+  Observables:            [count]
+  Coverage gaps:          [count]
+  Conflicts/stale entries:[count]
 ```
 
 If missing or empty: `ENVIRONMENT CONTEXT: None (first investigation — context will build over time)`
 
-Context contains: network baselines (CIDRs, VPNs, external IPs), principal baselines (service accounts, user behavior), account info, alert FP/TP patterns, and known IOCs (IPs, user agents, ARNs). The reasoning framework references these entries by label/value when selecting investigation steps.
+Context may contain network baselines, principal baselines, account info, alert false-positive and true-positive patterns, known IOCs, deployed controls, coverage gaps, prior investigations, and threat intel research. Treat knowledge as context, not ground truth. Cite knowledge entries that influence investigation steps. Current query evidence wins when it conflicts with stored knowledge.
 </environment_context>
 
 <entry_point_detection>
@@ -173,7 +173,7 @@ Announce mode before continuing (e.g., `Hunt mode — reading run directory: $HU
 **After return:** Extract `investigation_context` and `active_hypothesis` (or `selected_hypothesis`) from the handoff.
 </entry_point_detection>
 
-**Load environment observations:** Read `config/observations.md` if it exists. Use investigation baselines and account patterns to contextualize the current alert — recognize repeat actors, known-good trusts, and prior false positive patterns. Do not treat observations as ground truth.
+**Knowledge preflight:** Use the `KNOWLEDGE_CONTEXT` from `<environment_context>` to contextualize the current alert, entity, intel source, or investigation question. Recognize repeat actors, known-good trusts, prior false-positive patterns, deployed controls, and coverage gaps. Do not treat knowledge as ground truth.
 
 <hypothesis_engine>
 ## Hypothesis Engine — Post-Handoff Finalization
@@ -272,7 +272,7 @@ Probe for Splunk MCP at startup — no analyst action required. Announce: `Check
 **Analyst override:** If analyst reports MCP is connected but probe failed, ask which tool name they use, attempt it, update accordingly.
 
 **After MCP detection:**
-1. Load environment context (`./hunt/context.json`) — display summary or first-investigation message
+1. Load environment knowledge through `skills/scope-knowledge-load/SKILL.md` — display summary or first-investigation message
 2. Dispatch `scope-hunt-investigate` with MCP_MODE, working_tool, and raw input
 
 **Hunt mode note:** If MODE=HUNT and MCP_MODE=MANUAL, the agent can produce a hypothesis report from run directory data alone without Splunk.
@@ -308,7 +308,7 @@ INVESTIGATION STEP [N]: [Agent-chosen step name]
 ```
 REASONING:
   Alert context:         [What the alert tells us — key fields, event type, urgency signals]
-  Environment knowledge: [What context.json tells us about entities involved — cite specific
+  Environment knowledge: [What KNOWLEDGE_CONTEXT tells us about entities involved — cite specific
                           entries by label/value, or "no context entries match" if none]
   Reference pattern:     [Which former playbook pattern this draws from, if any — e.g.,
                           "CreateAccessKey pattern Step 1: Anchor event", or "none — novel approach"]
@@ -500,10 +500,10 @@ At each step, the agent evaluates these priorities in order. The highest-priorit
 
 0. **Hypothesis test** — If `active_hypothesis` is set, the highest-priority next step is the one that most directly tests the active hypothesis. Evaluate which question in the active hypothesis is most unanswered and select accordingly. Priorities 1-5 apply when no active hypothesis exists or when all hypothesis-critical CloudTrail signals have been checked.
 
-1. **IOC match** — An entity in the alert (IP, ARN, user agent) matches a known IOC from `context.json`. Immediately confirm or refute the IOC match.
-2. **Baseline deviation** — A known principal (from `context.json`) is acting outside their recorded baseline (unusual source IP, unusual actions, unusual hours, unusual region). Investigate the deviation.
-3. **Novel entity** — An entity in the alert (IP, user, account) has no match in `context.json`. Establish whether it is truly novel or simply not yet recorded.
-4. **FP pattern check** — The alert type has a high false-positive rate in `context.json` (>50% FP rate). Check known FP patterns first to quickly dismiss or escalate.
+1. **IOC match** — An entity in the alert (IP, ARN, user agent) matches a known IOC from `KNOWLEDGE_CONTEXT`. Immediately confirm or refute the IOC match.
+2. **Baseline deviation** — A known principal from `KNOWLEDGE_CONTEXT` is acting outside their recorded baseline (unusual source IP, unusual actions, unusual hours, unusual region). Investigate the deviation.
+3. **Novel entity** — An entity in the alert (IP, user, account) has no match in `KNOWLEDGE_CONTEXT`. Establish whether it is truly novel or simply not yet recorded.
+4. **FP pattern check** — The alert type has a high false-positive rate in `KNOWLEDGE_CONTEXT` (>50% FP rate). Check known FP patterns first to quickly dismiss or escalate.
 5. **Reference pattern** — No environmental signal applies. Fall back to the reference pattern steps for this alert type (see Reference Patterns below).
 
 When the priority hierarchy produces a step, the structured reasoning block must cite which priority triggered the selection and what specific context entry or absence of context drove the decision.
@@ -614,22 +614,22 @@ Bulleted, plain-English actions tied to specific findings. Max 5 items. "Conside
 
 ### Part 3 — Context Annotations (if environment context was loaded)
 
-If `context.json` was loaded at the start of this investigation, include a context annotations section in the summary:
+If `KNOWLEDGE_CONTEXT` was loaded at the start of this investigation, include a context annotations section in the summary:
 
 ```markdown
 ### Environment context used in this investigation
 
 | Entity | Context Entry | How It Informed Investigation |
 |--------|--------------|------------------------------|
-| [IP/ARN/user] | [context.json entry label and key] | [How this context entry influenced step selection or reasoning] |
+| [IP/ARN/user] | [knowledge entry label and key] | [How this context entry influenced step selection or reasoning] |
 | [IP/ARN/user] | No prior context (novel entity) | [Noted as novel, baseline will be created from this investigation] |
 ```
 
-This section documents which `context.json` entries the reasoning framework cited during the investigation. It serves two purposes:
+This section documents which `KNOWLEDGE_CONTEXT` entries the reasoning framework cited during the investigation. It serves two purposes:
 1. **Transparency** — the analyst can see exactly what prior knowledge influenced the investigation direction
 2. **Auditability** — reviewers can verify that context-driven decisions were appropriate
 
-Only include entities that were actually referenced in structured reasoning blocks during the investigation. Do not list every entity in context.json — only those that influenced this specific investigation.
+Only include entities that were actually referenced in structured reasoning blocks during the investigation. Do not list every knowledge entry — only those that influenced this specific investigation.
 
 If no context was loaded (first investigation), omit this section entirely.
 
@@ -781,14 +781,7 @@ An investigation session is complete when ALL of the following are true:
 - The completion signal was never shown (even if all reference pattern angles were explored, the signal must appear before generating output)
 - The skill silently advanced past a step without analyst interaction
 
-**Update environment observations (gated on analyst save approval):** Only run this step if the analyst chose to save artifacts in step 6 above. If the analyst declined to save, do not write observations — operator controls what gets written to disk.
+**Knowledge update (gated on analyst save approval):** Only run this step if the analyst chose to save artifacts in step 6 above. If the analyst declined to save, call `skills/scope-knowledge-update/SKILL.md` with `status=skipped` and do not write durable knowledge.
 
-When save was approved, append up to 5 concise observations to `config/observations.md`. If the file does not exist, create it using the structure from `config/observations.example.md`. Split entries by topic:
-
-- **Principal/account baselines** (normal behavior for the principal under investigation, account-specific patterns) → `## Account: <ACCOUNT_ID>` section.
-- **Investigation tradecraft** (new IOCs, detection blind spots, false positive patterns, query patterns that worked) → `## Investigation Baselines` top-level section.
-
-Substitute the real account ID — never write the literal `<ACCOUNT_ID>` placeholder. Prefix each entry with today's date (YYYY-MM-DD). Never delete or overwrite existing entries.
-
-Focus on: principal behavior baselines, new IOCs, detection blind spots, false positive patterns.
+When save was approved, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-investigate`, investigation disposition, saved artifacts, evidence timeline, query results, and learning candidates. Focus on principal behavior baselines, new IOCs, detection blind spots, false-positive patterns, query patterns that worked, and stale knowledge discovered during the investigation. The skill owns `config/observations.md`, `knowledge/observables.jsonl`, `knowledge/baselines.json`, `knowledge/coverage-gaps.md`, and saved investigation/research records.
 </success_criteria>

@@ -17,7 +17,7 @@ You do NOT:
 - Enter the investigation loop or execute Splunk queries
 - Handle alert intake or hunt mode run directory reading
 - Generate evidence timelines or save artifacts
-- Write to memory or context.json
+- Write durable knowledge or memory files
 
 You return an `INTEL_HANDOFF` block that the parent reads to set up the investigation session.
 </role>

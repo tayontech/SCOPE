@@ -147,7 +147,7 @@ Stop. Do not continue.
 
 **Display Gate 1:** Identity confirmed — show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, enabled regions count (note if fallback). Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
 
-**Load environment observations:** Read `config/observations.md` if it exists. Note account-specific patterns and org-wide observations for this account. Use these to contextualize findings during the run — flag when new findings match or contradict prior observations. Do not treat observations as ground truth (the environment may have changed since the last run).
+**Knowledge preflight:** Use `skills/scope-knowledge-load/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, target, services, and enabled regions before planning findings or dispatching downstream analysis. Use the returned `KNOWLEDGE_CONTEXT` to contextualize findings, public exposure, attack paths, and coverage gaps. Do not treat knowledge as ground truth; current audit evidence wins when it conflicts with stored knowledge. Cite knowledge entries that influence decisions.
 </gate_1_credentials>
 
 <gate_2_batch_approval>
@@ -345,11 +345,7 @@ If all modules have `status === 'complete'` and no per-finding `<field>_status` 
 **Rules:** Use REAL ARNs and resource names throughout — never placeholders. End with RECOMMENDED NEXT ACTION referencing controls artifacts and available follow-up commands (`/scope:exploit`, `/scope:audit`, dashboard link).
 </findings_md>
 
-**Update environment observations:** Before finishing, append up to 5 concise observations to `config/observations.md`. If the file does not exist, create it using the structure from `config/observations.example.md`. Write to the `## Account: <ACCOUNT_ID>` section — substitute the real account ID (e.g., `## Account: 123456789012`), not the literal placeholder. Create the section if missing, with subsections: Naming & Structure, Recurring Gaps, Known-Good Trusts. Prefix each entry with today's date (YYYY-MM-DD). Never delete or overwrite existing entries.
-
-**Org-Wide Patterns promotion:** Before adding to `## Org-Wide Patterns`, grep existing `## Account:` sections in `config/observations.md` for the same pattern text. Only promote if the pattern already appears under 1+ other account ID — meaning the current observation makes it the 2nd account with this pattern (spec: 2+ accounts total). If this is the first time you're seeing the pattern, leave it in the per-account section only.
-
-Focus on: naming conventions, role structure patterns, service usage patterns, severity trends vs prior observations, new finding categories not previously observed.
+**Knowledge update:** Before finishing, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, `RUN_DIR`, findings, coverage gaps, and evidence-backed learning candidates. Focus on naming conventions, role structure patterns, service usage patterns, severity trends vs prior knowledge, public exposure patterns, and new finding categories. The skill owns `config/observations.md` creation, dedupe, section routing, date stamping, org-wide promotion, and durable knowledge writes.
 
 <results_export>
 ## Results JSON Export

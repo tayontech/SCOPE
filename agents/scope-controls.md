@@ -117,7 +117,7 @@ printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" --arg audit_dir "$AUDIT_RUN_DIR" '
 ```
 </intake_protocol>
 
-**Load environment observations:** Read `config/observations.md` if it exists. Use to understand: what controls are already deployed in this account, what remediation has been attempted before, detection FP rates. Avoid re-recommending controls already noted as deployed.
+**Knowledge preflight:** Use `skills/scope-knowledge-load/SKILL.md` with `AGENT=scope-controls`, `ACCOUNT_ID`, `AUDIT_RUN_DIR`, and attack path categories before dispatching Wave 1. Use the returned `KNOWLEDGE_CONTEXT` to understand deployed controls, remediation history, detection false positives, known-good automation, and coverage gaps. Do not treat knowledge as ground truth; current audit and controls artifacts win when they conflict with stored knowledge. Cite knowledge entries that influence control decisions.
 
 <wave1_dispatch>
 ## Wave 1: Parallel Dispatch (4 Subagents)
@@ -373,14 +373,7 @@ VALIDATION_WARNS=${VALIDATION_WARNS:-0}
 ```
 </wave2_validate>
 
-**Update environment observations:** Before finishing, append up to 5 concise observations to `config/observations.md`. If the file does not exist, create it using the structure from `config/observations.example.md`. Split entries by topic:
-
-- **Deployed controls** (SCPs/RCPs added, IAM policy replacements, detections rolled out) → `## Deployed Controls` top-level section. Prefix each entry with the account ID so multi-account state stays attributable: `YYYY-MM-DD [<ACCOUNT_ID>] <entry>`.
-- **Account-specific patterns** (remediation blockers, detection effectiveness, control gaps unique to this account) → `## Account: <ACCOUNT_ID>` section. Prefix with today's date only.
-
-Substitute the real account ID — never write the literal `<ACCOUNT_ID>` placeholder. Never delete or overwrite existing entries.
-
-Focus on: new controls deployed, remediation blockers, detection effectiveness.
+**Knowledge update:** Before finishing, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-controls`, `ACCOUNT_ID`, `AUDIT_RUN_DIR`, `CONTROLS_RUN_DIR`, validation outcome, deployed controls, remediation blockers, detection effectiveness, and coverage gaps. The skill owns `config/observations.md` creation, deployed-control routing, dedupe, date stamping, and durable knowledge writes.
 
 <results_assembly>
 ## Results.JSON Assembly
