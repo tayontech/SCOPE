@@ -505,6 +505,7 @@ function installSubagentsGemini(subagents, scope) {
   // Source frontmatter tools: values are comma-separated strings — Gemini needs YAML arrays.
   const GEMINI_AGENT_CONFIG = {
     'scope-attack-analyze':     { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-public-exposure-analysis': { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-controls':             { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-controls-guardrails':  { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-controls-policy':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },

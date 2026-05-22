@@ -168,6 +168,32 @@ def test_hook_accepts_envelope_without_coverage_and_errors(tmp_path: Path) -> No
     assert_accepted(result, "envelope without optional coverage/errors")
 
 
+def test_audit_hook_blocks_malformed_public_entrypoints(tmp_path: Path) -> None:
+    payload = {
+        "account_id": "123456789012",
+        "source": "audit",
+        "timestamp": "2026-05-17T12:00:00Z",
+        "summary": {"severity": "low"},
+        "graph": {"nodes": [], "edges": []},
+        "attack_paths": [],
+        "principals": [],
+        "trust_relationships": [],
+        "public_entrypoints": [
+            {
+                "id": "entry-public-api",
+                "service": "apigateway",
+                "resource": "api-id/stage",
+                "public_access": True,
+            }
+        ],
+    }
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "malformed public_entrypoints")
+    assert "public_entrypoints" in parse_decision(result.stdout)["reason"]
+
+
 def test_controls_hook_requires_detection_production_fields(tmp_path: Path) -> None:
     payload = valid_controls_results()
     del payload["detections"][0]["promotion_decision"]

@@ -26,18 +26,19 @@ Required runtime artifacts:
 - `$RUN_DIR/graph.json` — deterministic graph v2 relationship graph with stable edge IDs and source evidence
 - `$RUN_DIR/modules/<service>/<region>.json` — per-module resource envelopes
 
-If `results.json`, `summary.json`, `resources.jsonl`, or `graph.json` is missing, return `STATUS: error`. If a module file is missing or has `status: "error"`, continue with available data. For candidates, represent the gap as a hop with `validation_type: "coverage_caveat"` and `evidence[].type: "coverage_caveat"`. For observations, explain the gap in `description` and `reason_not_path`.
+If `results.json`, `summary.json`, `resources.jsonl`, or `graph.json` is missing, return `STATUS: error`. If `public_entrypoints[]` is missing, continue but do not invent public entrypoints from generic public flags; use only graph/module evidence. If a module file is missing or has `status: "error"`, continue with available data. For candidates, represent the gap as a hop with `validation_type: "coverage_caveat"` and `evidence[].type: "coverage_caveat"`. For observations, explain the gap in `description` and `reason_not_path`.
 </input_contract>
 
 <analysis_method>
 Analyze across the full inventory, not by service silo:
 
-1. Read `results.json`, `summary.json`, `graph.json`, and enough of `resources.jsonl` to understand inventory shape.
+1. Read `results.json`, `summary.json`, `graph.json`, and enough of `resources.jsonl` to understand inventory shape. If `results.json.public_entrypoints[]` exists, load it before constructing external-start candidates.
 2. Read `modules/iam/global.json` first when present. IAM attached/inline customer policies, trust policies, OIDC providers, permission boundaries, role relationships, and service roles are the primary context for attack reasoning.
 3. Read other module envelopes as needed from `modules/<service>/<region>.json`. Use `resources[]`, `coverage[]`, and `errors[]`. Do not use legacy top-level module JSON paths.
 4. Use `skills/scope-attack-path-analysis/SKILL.md` for chain construction and rejection rules. Build multi-hop chains where each hop changes attacker position, principal context, capability, reachable resource, or final impact.
 5. Use `skills/scope-evidence-logging/SKILL.md` for evidence handles. Every candidate hop needs evidence using only schema-valid evidence types: `graph_edge`, `module_resource`, `policy_document`, `runtime_assumption`, or `coverage_caveat`.
 6. Follow graph v2 edges and policy relationships to discover candidate chains:
+   - public entrypoint seeds from `public_entrypoints[]` where `attack_path_seed` is true
    - trust / assume-role paths
    - OIDC or federated trust paths
    - compute executes-as role paths
@@ -68,7 +69,7 @@ Minimum chain bar:
 - Do not create a single-hop candidate unless the hop itself proves a complete exploit path from attacker-controlled start to concrete impact. Most single-hop facts belong in `security_observations[]`.
 
 Candidate decision test:
-1. Define the initial attacker control, such as external web access, a compromised principal, federated identity control, write access to an event source, or resource-policy access.
+1. Define the initial attacker control, such as a `public_entrypoints[]` seed, external web access, a compromised principal, federated identity control, write access to an event source, or resource-policy access.
 2. Name the transition that changes context, such as `invoke`, `execute_as`, `assume_role`, `pass_role`, `create_compute`, `resource_policy_access`, or `event_injection`.
 3. Name the new capability and why the prior context did not already have it.
 4. End with concrete impact on a resource ARN and AWS action.

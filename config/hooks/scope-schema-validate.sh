@@ -225,6 +225,11 @@ case "$SOURCE" in
     # trust_relationships items must have role_id, role_arn, principal, trust_type
     check_array_item_fields "trust_relationships" "role_id,role_arn,principal,trust_type" "trust relationship entries"
 
+    # public_entrypoints are optional but must be structured when present
+    if [ "$(jq 'has("public_entrypoints")' "$FILE_PATH")" = "true" ]; then
+      check_array_item_fields "public_entrypoints" "id,service,resource,public_access,auth_type,starting_position,attack_path_seed,risk,evidence" "public entrypoint entries"
+    fi
+
     # --- Enum value validation (SCHM-01, SCHM-02, SCHM-03) ---
 
     # SCHM-01: Validate attack_paths[].severity -- lowercase only

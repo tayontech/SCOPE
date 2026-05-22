@@ -131,3 +131,34 @@ def test_audit_schema_documents_attack_pipeline_fields() -> None:
     assert allows_null(schema, schema["$defs"]["attackContext"]["properties"]["principal"])
     assert allows_null(schema, schema["$defs"]["startingPosition"]["properties"]["arn"])
     assert allows_null(schema, schema["properties"]["attack_validation"]["items"]["properties"]["validated_impact"])
+
+
+def test_audit_schema_documents_public_entrypoint_fields() -> None:
+    schema = load_schema()
+
+    entrypoints = schema["properties"]["public_entrypoints"]
+    entrypoint = schema["$defs"]["publicEntrypoint"]
+    props = entrypoint["properties"]
+
+    assert entrypoints["items"]["$ref"] == "#/$defs/publicEntrypoint"
+    for field in [
+        "id",
+        "service",
+        "resource",
+        "public_access",
+        "auth_type",
+        "starting_position",
+        "attack_path_seed",
+        "risk",
+        "evidence",
+    ]:
+        assert field in entrypoint["required"]
+    for field in ["invokes", "execution_roles", "reachable_resources", "seed_reason", "exposure_type"]:
+        assert field in props
+
+    assert "external_unauthenticated" in props["starting_position"]["enum"]
+    assert "external_cross_account" in props["starting_position"]["enum"]
+    assert "NONE" in props["auth_type"]["enum"]
+    assert "RESOURCE_POLICY" in props["auth_type"]["enum"]
+    assert "public_endpoint" in props["exposure_type"]["enum"]
+    assert entrypoint["additionalProperties"] is False

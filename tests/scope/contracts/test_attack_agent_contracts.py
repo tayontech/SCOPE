@@ -55,6 +55,9 @@ def test_attack_analyze_agent_contract() -> None:
     assert "skills/scope-attack-path-analysis/SKILL.md" in prompt
     assert "skills/scope-evidence-logging/SKILL.md" in prompt
     assert "uv run python -m scope.attack.lint --run-dir \"$RUN_DIR\" --stage candidates" in prompt
+    assert "public_entrypoints[]" in prompt
+    assert "attack_path_seed" in prompt
+    assert "do not invent public entrypoints from generic public flags" in prompt
 
     for field in [
         '"id"',
@@ -211,13 +214,19 @@ def test_attack_validate_agent_contract() -> None:
 def test_audit_orchestrates_attack_pipeline() -> None:
     prompt = read("agents/scope-audit.md")
 
+    exposure = prompt.index("Dispatch `scope-public-exposure-analysis` with:")
     analyze = prompt.index("Dispatch `scope-attack-analyze` with:")
     candidate_lint = prompt.index('uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage candidates')
     validate = prompt.index("Dispatch `scope-attack-validate` with:")
     validation_lint = prompt.index('uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage validation')
     gate4 = prompt.index("<gate_4_results_approval>")
-    assert analyze < candidate_lint < validate < validation_lint < gate4
+    assert exposure < analyze < candidate_lint < validate < validation_lint < gate4
 
+    assert_matches(prompt, r"Dispatch `scope-public-exposure-analysis` with:[\s\S]*- `RUN_DIR`[\s\S]*- `ACCOUNT_ID`[\s\S]*- `OWNED_ACCOUNTS`")
+    assert_matches(prompt, r"Expected output:[\s\S]*`public_entrypoints\[\]`[\s\S]*`\$RUN_DIR/results\.json`")
+    assert_matches(prompt, r"Public exposure alone is not an attack path")
+    assert_matches(prompt, r"attack_path_seed: true[\s\S]{0,160}execution context[\s\S]{0,160}sensitive resource reachability")
+    assert_matches(prompt, r"public_entrypoints\[\][\s\S]{0,160}preferred external starting positions")
     assert_matches(prompt, r"Dispatch `scope-attack-analyze` with:[\s\S]*- `RUN_DIR`[\s\S]*- `ACCOUNT_ID`[\s\S]*- `OWNED_ACCOUNTS`")
     assert_matches(prompt, r"Expected analyze output:[\s\S]*`candidate_attack_paths\[\]`[\s\S]*`security_observations\[\]`[\s\S]*`\$RUN_DIR/results\.json`")
     assert_matches(prompt, r"If candidate lint fails,[\s\S]{0,120}stop before validation[\s\S]{0,120}linter errors")
@@ -228,6 +237,10 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert "Attack validation failure | Log, stop before validation lint and surface the error." in prompt
 
     attack_section = section(prompt, "attack_paths_dispatch")
+    exposure_section = section(prompt, "public_exposure_analysis")
+    assert exposure_section.index("scope-public-exposure-analysis") < attack_section.index("scope-attack-analyze")
+    assert "Public exposure analysis must run first." in attack_section
+    assert "public_entrypoints[]" in attack_section
     assert attack_section.index("scope-attack-analyze") < attack_section.index("stage candidates")
     assert attack_section.index("stage candidates") < attack_section.index("scope-attack-validate")
     assert attack_section.index("scope-attack-validate") < attack_section.index("stage validation")
@@ -266,6 +279,40 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert_not_matches(prompt, r"enriches final attack paths|enriches `?attack_paths\[\]`?")
     assert_not_matches(prompt, r"METRICS \(attack_paths and severity counts\)")
     assert_not_matches(prompt, r"single fresh-context subagent")
+
+
+def test_public_exposure_analysis_agent_contract() -> None:
+    prompt = read("agents/subagents/scope-public-exposure-analysis.md")
+
+    assert_matches(prompt, r"^name: scope-public-exposure-analysis$", "frontmatter name missing")
+    for text in [
+        "public_entrypoints[]",
+        "attack_path_seed",
+        "Public exposure alone is not an attack path.",
+        "Do not call AWS APIs.",
+        "API Gateway",
+        "Lambda Function URLs",
+        "internet-facing listeners",
+        "S3 public buckets",
+        "Cognito",
+        "SNS/SQS resource policies",
+        "Set `attack_path_seed: false` when the exposure is real but lacks an observed internal transition or impact.",
+        '"starting_position"',
+        '"external_unauthenticated|external_authenticated|external_cross_account|external_unknown"',
+        '"invokes"',
+        '"execution_roles"',
+        '"reachable_resources"',
+        '"seed_reason"',
+        'METRICS: {"public_entrypoints": 0, "attack_path_seeds": 0, "observations": 0}',
+    ]:
+        assert text in prompt
+
+    assert_matches(
+        prompt,
+        r"attack_path_seed: true[\s\S]{0,220}execution context[\s\S]{0,220}identity/resource-policy context[\s\S]{0,220}sensitive resource",
+    )
+    assert "You do not write `candidate_attack_paths[]`, `attack_paths[]`, controls, detections, or remediation plans." in prompt
+    assert_not_matches(prompt, r"update only:[\s\S]{0,120}candidate_attack_paths")
 
 
 def test_downstream_prompts_use_validation_status_contract() -> None:

@@ -18,14 +18,15 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 2. Show all modules that will run and get batch approval from the operator (Gate 2 — single prompt)
 3. Run `uv run python -m scope audit` for deterministic Python AWS SDK enumeration and post-processing
 4. Present enumeration summary and pause for operator confirmation before attack-paths (Gate 3)
-5. Dispatch the attack analysis pipeline — candidate generation, candidate lint, validation, validation lint
-6. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
-7. Present validated attack path findings, await operator approval before controls (Gate 4)
-8. Write the three-layer findings.md report to $RUN_DIR/
-9. Auto-chain controls as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
-10. Auto-dispatch synthesizer subagent — it reads results.json and controls/results.json, produces engagement-report.md
-11. Use the runtime post-processing artifacts produced by `python -m scope`
-12. Generate the dashboard report inline
+5. Dispatch public exposure analysis — identify externally reachable entrypoints and attack-path starting positions
+6. Dispatch the attack analysis pipeline — candidate generation, candidate lint, validation, validation lint
+7. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
+8. Present validated attack path findings, await operator approval before controls (Gate 4)
+9. Write the three-layer findings.md report to $RUN_DIR/
+10. Auto-chain controls as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
+11. Auto-dispatch synthesizer subagent — it reads results.json and controls/results.json, produces engagement-report.md
+12. Use the runtime post-processing artifacts produced by `python -m scope`
+13. Generate the dashboard report inline
 
 **Operator-in-the-loop:** Pause at Gates 2, 3, and 4 and wait for operator approval before continuing. Gate 1 auto-continues. Never silently chain multiple gates or skip operator input.
 </role>
@@ -224,10 +225,35 @@ After enumeration completes and before Gate 3, spot-check module JSON under `$RU
 **NON-BLOCKING** — log warnings, do not abort. For each `*.json` with a `.module` field, verify: non-empty file, required envelope fields present (`module`, `account_id`, `status`, `timestamp`, `resources`). Skip non-module files (`manifest.json`, `summary.json`, `resources.jsonl`, `graph.json`, `results.json`). Display warning count at Gate 3.
 </module_validation>
 
+<public_exposure_analysis>
+## Public Exposure Analysis
+
+Before attack-path candidate generation, dispatch `scope-public-exposure-analysis`.
+
+The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, module envelopes, and base `results.json`. Public exposure analysis turns externally reachable AWS surfaces into structured `public_entrypoints[]` that attack analysis can use as realistic starting positions.
+
+Dispatch `scope-public-exposure-analysis` with:
+- `RUN_DIR`
+- `ACCOUNT_ID`
+- `OWNED_ACCOUNTS`
+
+The subagent reads runtime artifacts from `$RUN_DIR/`, identifies public entrypoints and exposure observations, and writes `public_entrypoints[]` to `$RUN_DIR/results.json`.
+
+**Expected output:** `public_entrypoints[]` in `$RUN_DIR/results.json`.
+
+Rules:
+- Public exposure alone is not an attack path.
+- `attack_path_seed: true` requires a transition from public access into execution context, identity/resource-policy context, or sensitive resource reachability.
+- If exposure is public but does not create a meaningful chain seed, preserve it with `attack_path_seed: false` and a concrete `seed_reason`.
+- If public exposure analysis fails, stop before attack analysis and surface the error. Do not ask attack analysis to infer public entrypoints from generic public flags.
+</public_exposure_analysis>
+
 <attack_paths_dispatch>
 ## Attack Path Analysis — Candidate and Validation Pipeline
 
 Attack path analysis uses a candidate generation subagent followed by a validation subagent. The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, and base `results.json`.
+
+Public exposure analysis must run first. `scope-attack-analyze` consumes `public_entrypoints[]` from `$RUN_DIR/results.json` as preferred external starting positions.
 
 ### Candidate Dispatch
 
@@ -236,7 +262,7 @@ Dispatch `scope-attack-analyze` with:
 - `ACCOUNT_ID`
 - `OWNED_ACCOUNTS`
 
-The subagent reads runtime artifacts from `$RUN_DIR/`, reasons across IAM, graph, resources, and module envelopes, then writes candidate attack data to `$RUN_DIR/results.json`.
+The subagent reads runtime artifacts from `$RUN_DIR/`, reasons across IAM, graph, resources, module envelopes, and `public_entrypoints[]`, then writes candidate attack data to `$RUN_DIR/results.json`.
 
 **Expected analyze output:** `candidate_attack_paths[]` and `security_observations[]` in `$RUN_DIR/results.json`.
 

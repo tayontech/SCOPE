@@ -123,6 +123,37 @@
         "action": { "$ref": "#/$defs/nonEmptyString" }
       },
       "additionalProperties": false
+    },
+    "publicEntrypoint": {
+      "type": "object",
+      "required": ["id", "service", "resource", "public_access", "auth_type", "starting_position", "attack_path_seed", "risk", "evidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "service": { "$ref": "#/$defs/nonEmptyString" },
+        "resource": { "$ref": "#/$defs/nonEmptyString" },
+        "arn": { "$ref": "#/$defs/nullableNonEmptyString" },
+        "public_access": { "type": "boolean" },
+        "auth_type": {
+          "type": "string",
+          "enum": ["NONE", "IAM", "JWT", "COGNITO", "CUSTOM", "SAML", "OIDC", "RESOURCE_POLICY", "UNKNOWN"]
+        },
+        "starting_position": {
+          "type": "string",
+          "enum": ["external_unauthenticated", "external_authenticated", "external_cross_account", "external_unknown"]
+        },
+        "exposure_type": {
+          "type": "string",
+          "enum": ["public_endpoint", "public_resource_policy", "internet_facing_network", "external_identity_path", "public_data_surface", "unknown"]
+        },
+        "invokes": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "execution_roles": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "reachable_resources": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "attack_path_seed": { "type": "boolean" },
+        "seed_reason": { "$ref": "#/$defs/nonEmptyString" },
+        "risk": { "$ref": "#/$defs/severity" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } }
+      },
+      "additionalProperties": false
     }
   },
   "properties": {
@@ -271,6 +302,10 @@
           }
         }
       }
+    },
+    "public_entrypoints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/publicEntrypoint" }
     },
     "attack_paths": {
       "type": "array",
