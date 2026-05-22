@@ -278,7 +278,9 @@ If validation lint fails, stop before Gate 4 and surface linter errors to the op
 
 After attack validation, validation lint, and verification complete, display: candidates generated, validated paths, conditional paths, rejected paths, final attack path count by severity (critical/high/medium/low), and top 3 validated/conditional paths (one sentence each).
 
-Options: `continue` (export results.json, full output), `skip` (text output only — sets GATE4_SKIP=true, skips dashboard export, defend, and synthesizer), `stop` (end session).
+Options: `continue` (full output), `skip` (sets GATE4_SKIP=true, writes findings.md, skips scope-defend, scope-synthesizer, and dashboard HTML generation), `stop` (end session).
+
+On skip, still write `$RUN_DIR/findings.md` and keep `$RUN_DIR/results.json` intact. Do not dispatch scope-defend or scope-synthesizer. Do not delete or roll back dashboard export files already written by the Python runtime.
 
 Wait for operator approval before proceeding.
 </gate_4_results_approval>
@@ -331,7 +333,7 @@ After findings.md is written (and Gate 4 was NOT skipped):
 
 The Python runtime performs this automatically when invoked with `--dashboard-export`. If the export is missing, rerun the runtime command with `--dashboard-export` or copy the run into `dashboard/public/` using the same index shape.
 
-**Gate 4 skip exception:** If GATE4_SKIP=true, skip dashboard exports only. `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required.
+**Gate 4 skip exception:** If GATE4_SKIP=true, do not create or update dashboard export files after Gate 4. Keep any dashboard export files the Python runtime already wrote. `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required.
 </results_export>
 
 <defend_auto_chain>
@@ -390,7 +392,7 @@ If generation fails: log warning, continue — raw artifacts are still valid. An
 
 Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
 
-**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Dashboard export, dashboard index, defend output, and synthesizer output are skipped.
+**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Defend output, synthesizer output, and dashboard HTML generation are skipped. Dashboard export and dashboard index remain acceptable when the Python runtime already created them before Gate 4.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|

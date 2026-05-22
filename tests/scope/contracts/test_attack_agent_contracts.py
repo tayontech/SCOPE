@@ -244,12 +244,15 @@ def test_audit_orchestrates_attack_pipeline() -> None:
         "rejected paths",
         "final attack path count by severity",
         "top 3 validated/conditional paths",
+        "On skip, still write `$RUN_DIR/findings.md`",
+        "Do not dispatch scope-defend or scope-synthesizer",
     ]:
         assert text in gate4_section
     assert_not_matches(gate4_section, r"confidence|confidence tier|confidence tiers")
 
-    assert_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,180}\$RUN_DIR/results\.json[\s\S]{0,80}remain required")
+    assert_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,180}\$RUN_DIR/results\.json[\s\S]{0,120}findings\.md[\s\S]{0,120}remain required")
     assert_not_matches(prompt, r"skips results\.json|results\.json[\s\S]{0,80}skipped")
+    assert_not_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,220}Dashboard export, dashboard index")
     assert_matches(prompt, r"engagement-report\.md[\s\S]{0,140}required only when synthesizer runs and succeeds")
     assert "Do not require `engagement-report.md` when Gate 4 was skipped, defend failed, or synthesizer failed." in prompt
     assert_matches(prompt, r"Defend failure is non-blocking[\s\S]{0,140}Do not dispatch synthesizer without defend output\.")
