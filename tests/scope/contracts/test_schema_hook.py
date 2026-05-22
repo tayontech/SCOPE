@@ -61,6 +61,47 @@ def valid_controls_results() -> dict[str, Any]:
     }
 
 
+def valid_audit_results() -> dict[str, Any]:
+    return {
+        "account_id": "123456789012",
+        "source": "audit",
+        "timestamp": "2026-05-17T12:00:00Z",
+        "summary": {"severity": "low"},
+        "graph": {"nodes": [], "edges": []},
+        "attack_paths": [],
+        "principals": [],
+        "trust_relationships": [],
+    }
+
+
+def valid_public_entrypoint(**overrides: Any) -> dict[str, Any]:
+    entrypoint = {
+        "id": "entry-public-api",
+        "service": "apigateway",
+        "resource": "api-id/stage",
+        "arn": "arn:aws:execute-api:us-east-1:123456789012:api-id/prod/GET/payments",
+        "public_access": True,
+        "auth_type": "NONE",
+        "starting_position": "external_unauthenticated",
+        "exposure_type": "public_endpoint",
+        "invokes": ["arn:aws:lambda:us-east-1:123456789012:function:payments"],
+        "execution_roles": [],
+        "reachable_resources": [],
+        "attack_path_seed": True,
+        "seed_reason": "Public API invokes the payments Lambda function.",
+        "risk": "high",
+        "evidence": [
+            {
+                "type": "module_resource",
+                "source_path": "modules/apigateway/us-east-1.json",
+                "arn": "arn:aws:execute-api:us-east-1:123456789012:api-id/prod/GET/payments",
+            }
+        ],
+    }
+    entrypoint.update(overrides)
+    return entrypoint
+
+
 def run_hook(tmp_path: Path, envelope_body: dict[str, Any], filename: str) -> subprocess.CompletedProcess[str]:
     file_path = tmp_path / filename
     file_path.write_text(json.dumps(envelope_body, indent=2))
@@ -169,29 +210,81 @@ def test_hook_accepts_envelope_without_coverage_and_errors(tmp_path: Path) -> No
 
 
 def test_audit_hook_blocks_malformed_public_entrypoints(tmp_path: Path) -> None:
-    payload = {
-        "account_id": "123456789012",
-        "source": "audit",
-        "timestamp": "2026-05-17T12:00:00Z",
-        "summary": {"severity": "low"},
-        "graph": {"nodes": [], "edges": []},
-        "attack_paths": [],
-        "principals": [],
-        "trust_relationships": [],
-        "public_entrypoints": [
-            {
-                "id": "entry-public-api",
-                "service": "apigateway",
-                "resource": "api-id/stage",
-                "public_access": True,
-            }
-        ],
-    }
+    payload = valid_audit_results()
+    payload["public_entrypoints"] = [
+        {
+            "id": "entry-public-api",
+            "service": "apigateway",
+            "resource": "api-id/stage",
+            "public_access": True,
+        }
+    ]
 
     result = run_hook(tmp_path, payload, "results.json")
 
     assert_blocked(result, "malformed public_entrypoints")
     assert "public_entrypoints" in parse_decision(result.stdout)["reason"]
+
+
+def test_audit_hook_blocks_public_entrypoint_seed_without_transition(
+    tmp_path: Path,
+) -> None:
+    payload = valid_audit_results()
+    payload["public_entrypoints"] = [
+        valid_public_entrypoint(
+            invokes=[],
+            execution_roles=[],
+            reachable_resources=[],
+        )
+    ]
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "public entrypoint seed without transition")
+    assert "attack_path_seed true without invokes" in parse_decision(result.stdout)["reason"]
+
+
+def test_audit_hook_blocks_public_entrypoint_seed_without_reason(
+    tmp_path: Path,
+) -> None:
+    payload = valid_audit_results()
+    payload["public_entrypoints"] = [valid_public_entrypoint(seed_reason=" ")]
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "public entrypoint seed without reason")
+    assert "attack_path_seed true without non-empty seed_reason" in parse_decision(result.stdout)["reason"]
+
+
+def test_audit_hook_accepts_public_entrypoint_seed_with_transition(
+    tmp_path: Path,
+) -> None:
+    payload = valid_audit_results()
+    payload["public_entrypoints"] = [valid_public_entrypoint()]
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_accepted(result, "public entrypoint seed with transition")
+
+
+def test_audit_hook_accepts_public_entrypoint_observation_without_transition(
+    tmp_path: Path,
+) -> None:
+    payload = valid_audit_results()
+    payload["public_entrypoints"] = [
+        valid_public_entrypoint(
+            invokes=[],
+            execution_roles=[],
+            reachable_resources=[],
+            attack_path_seed=False,
+            seed_reason="Public endpoint has no observed internal transition.",
+            risk="medium",
+        )
+    ]
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_accepted(result, "public entrypoint observation without transition")
 
 
 def test_controls_hook_requires_detection_production_fields(tmp_path: Path) -> None:

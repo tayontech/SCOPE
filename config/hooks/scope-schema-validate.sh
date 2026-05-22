@@ -177,6 +177,20 @@ check_array_item_fields() {
   fi
 }
 
+check_public_entrypoint_seed_quality() {
+  local weak_seed_count
+  weak_seed_count=$(jq '[.public_entrypoints[]? | select(.attack_path_seed == true) | select(((.invokes // []) | length) == 0 and ((.execution_roles // []) | length) == 0 and ((.reachable_resources // []) | length) == 0)] | length' "$FILE_PATH" 2>/dev/null || echo "0")
+  if [ "$weak_seed_count" -gt 0 ]; then
+    ERRORS+=("$weak_seed_count item(s) in 'public_entrypoints' set attack_path_seed true without invokes, execution_roles, or reachable_resources")
+  fi
+
+  local missing_reason_count
+  missing_reason_count=$(jq '[.public_entrypoints[]? | select(.attack_path_seed == true) | select((.seed_reason // "" | strings | gsub("^\\s+|\\s+$"; "")) == "")] | length' "$FILE_PATH" 2>/dev/null || echo "0")
+  if [ "$missing_reason_count" -gt 0 ]; then
+    ERRORS+=("$missing_reason_count item(s) in 'public_entrypoints' set attack_path_seed true without non-empty seed_reason")
+  fi
+}
+
 # Common required fields
 check_field "account_id" "12-digit AWS account ID"
 check_field "source" "phase identifier: audit, controls, or exploit"
@@ -228,6 +242,7 @@ case "$SOURCE" in
     # public_entrypoints are optional but must be structured when present
     if [ "$(jq 'has("public_entrypoints")' "$FILE_PATH")" = "true" ]; then
       check_array_item_fields "public_entrypoints" "id,service,resource,public_access,auth_type,starting_position,attack_path_seed,risk,evidence" "public entrypoint entries"
+      check_public_entrypoint_seed_quality
     fi
 
     # --- Enum value validation (SCHM-01, SCHM-02, SCHM-03) ---
