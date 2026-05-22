@@ -459,10 +459,6 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert "policy-replacements.json" in controls
     assert "Do not infer guardrail mappings" in controls
     assert "The orchestrator does not parse markdown to invent results fields." in controls
-    assert "skills/scope-controls-summary/SKILL.md" in controls
-    assert "$CONTROLS_RUN_DIR/executive-summary.md" in controls
-    assert "$CONTROLS_RUN_DIR/technical-remediation.md" in controls
-    assert "The top-level orchestrator does not synthesize these sections inline." in controls
     assert "ATTACK_PATH_CONTEXT=" not in controls
     assert "source_attack_paths: $source_attack_paths" not in controls
     assert "source_attack_path_context" not in controls

@@ -516,23 +516,6 @@ Verify the file was written:
 ```bash
 test -f "$CONTROLS_RUN_DIR/results.json" && echo "results.json WRITTEN" || echo "ERROR: results.json not written"
 ```
-
-### Step 6: Generate summary artifacts
-
-After results.json is assembled, use `skills/scope-controls-summary/SKILL.md` with `ACCOUNT_ID`, `AUDIT_RUN_DIR`, `CONTROLS_RUN_DIR`, `VALIDATION_STATUS`, `$CONTROLS_RUN_DIR/results.json`, audit module envelopes, and subagent artifacts.
-
-The skill writes:
-- `$CONTROLS_RUN_DIR/executive-summary.md`
-- `$CONTROLS_RUN_DIR/technical-remediation.md`
-
-The top-level orchestrator does not synthesize these sections inline. It verifies both files exist before completion:
-
-```bash
-test -f "$CONTROLS_RUN_DIR/executive-summary.md" || { echo "ERROR: executive-summary.md not written"; exit 1; }
-test -f "$CONTROLS_RUN_DIR/technical-remediation.md" || { echo "ERROR: technical-remediation.md not written"; exit 1; }
-```
-
-If the skill returns `status: error`, stop with STATUS: error because these are required controls artifacts.
 </results_assembly>
 
 <dashboard_export>

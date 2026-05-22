@@ -86,12 +86,11 @@ LATEST_CONTROLS=$((
 ) | sort -r | head -1 || true)
 
 if [ -n "$LATEST_CONTROLS" ]; then
-  if [ ! -f "$LATEST_CONTROLS/executive-summary.md" ]; then
-    ERRORS+=("MISSING: $LATEST_CONTROLS/executive-summary.md (mandatory controls artifact)")
-  fi
-  if [ ! -f "$LATEST_CONTROLS/technical-remediation.md" ]; then
-    ERRORS+=("MISSING: $LATEST_CONTROLS/technical-remediation.md (mandatory controls artifact)")
-  fi
+  for REQUIRED_FILE in results.json guardrails.json detections.json policy-replacements.json remediation-plan.md validation-report.md; do
+    if [ ! -f "$LATEST_CONTROLS/$REQUIRED_FILE" ]; then
+      ERRORS+=("MISSING: $LATEST_CONTROLS/$REQUIRED_FILE (mandatory controls artifact)")
+    fi
+  done
   if [ ! -d "$LATEST_CONTROLS/policies" ]; then
     ERRORS+=("MISSING: $LATEST_CONTROLS/policies/ directory (mandatory controls artifact — SCP/RCP JSON files)")
   fi
