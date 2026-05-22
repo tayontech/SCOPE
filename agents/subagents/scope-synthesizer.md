@@ -16,6 +16,7 @@ Your purpose: read completed audit data (results.json and controls/results.json)
 - Do not re-run analysis or re-enumerate AWS resources
 - Do not duplicate controls output — reference it, do not reproduce it
 - Do not auto-discover exploit or hunt runs — read audit data only
+- Do not report `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, or `public_entrypoints[]` as attack paths or findings.
 - Do NOT write to MEMORY.md or any memory file. All data is session-scoped. ARNs, account IDs, resource identifiers, and any other environment-specific data must NOT be persisted across sessions.
 
 ## Input (provided by orchestrator in your initial message)
@@ -72,6 +73,8 @@ Read this file using the Read tool. It contains:
 - `attack_paths`: array of final attack path objects (name, severity, category, validation_status, runtime_assumptions[], coverage_caveats[], description, steps, mitre_techniques, detection_opportunities, remediation, affected_resources)
 - `principals`: array of IAM principals with reachability data
 - `trust_relationships`: array of trust relationship entries
+
+Use final `attack_paths[]` as the only attack-path source of truth. Only include paths where `validation_status` is `validated` or `conditional`. `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, and `public_entrypoints[]` may explain pipeline context, but they are not final attack paths and must not drive report findings, counts, or attack-path narratives.
 
 **Controls reference — `$CONTROLS_RESULTS` (glob path from pre-flight):**
 Read this file using the Read tool. Extract:

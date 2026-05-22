@@ -59,12 +59,15 @@ cat "$HUNT_RUN_DIR/results.json"
 - `attack_paths[]` — for each: `name`, `severity`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `description`, `detection_opportunities[]`, `affected_resources[]`, `mitre_techniques[]`, `steps[]`
 - `principals[]` — for each: `arn`, `reachability.max_privilege`, `reachability.critical_paths[]`
 - `trust_relationships[]` — for each: `role_arn`, `trust_type`, `risk`, `is_wildcard`
+- Filter: prefer `validation_status=validated` paths for hunt focus. If none exist, include `validation_status=conditional` paths.
 
 **For EXPLOIT runs, extract:**
 - `target_arn`, `summary.risk_score`, `summary.persistence_techniques`, `summary.exfiltration_vectors`, `summary.passrole_chains`
 - `attack_paths[]` — for each: `name`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `steps[]` (especially `steps[].action` as exploit command/action text and `steps[].visibility` as MGT/DATA/NONE), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`
 - Filter: prefer `validation_status=validated` paths for hunt focus. If none exist, include `validation_status=conditional` paths.
 Do not treat exploit `steps[].action` as a CloudTrail eventName. Derive CloudTrail event candidates from the AWS CLI command or API operation when possible, then fall back to the MITRE mapping below.
+
+Use final `attack_paths[]` as the only attack-path source of truth for audit and exploit hunt mode. Do not generate hypotheses from `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, or `public_entrypoints[]`. Those fields may provide context, but they are not final validated or conditional attack paths.
 
 ### Step 4: Read Per-Module JSONs (Audit Only)
 
@@ -123,10 +126,11 @@ After the run summary is displayed, generate hypotheses from the loaded attack p
 
 **Formation logic:**
 
-1. Select critical and high severity attack paths first.
-2. If critical+high count < 3: include medium paths to pad up to a minimum of 3 hypotheses.
-3. low severity paths are excluded unless the operator explicitly requests them.
-4. For each selected path:
+1. Filter to `validation_status=validated` paths first. If none exist, include `validation_status=conditional` paths. Do not lower hunt priority only because a path is conditional; use runtime assumptions and coverage caveats to shape the hypothesis.
+2. Select critical and high severity attack paths first.
+3. If critical+high count < 3: include medium paths to pad up to a minimum of 3 hypotheses.
+4. low severity paths are excluded unless the operator explicitly requests them.
+5. For each selected path:
    a. Use `detection_opportunities[]` directly if non-empty — these are the CloudTrail signals.
    b. If `detection_opportunities[]` is empty or sparse (fewer than 2 entries): supplement using the MITRE T-ID fallback mapping below.
    c. Extract `affected_resources[]` as ARN anchors for Splunk queries.
