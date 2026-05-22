@@ -40,17 +40,18 @@ SCOPE is an AI agent suite for AWS purple team security operations. Agents handl
 
 ## Environmental Learning
 
-Read `config/observations.md` at session start if it exists. This file accumulates patterns across audit runs.
+Use `skills/scope-knowledge-load/SKILL.md` at session start when running SCOPE workflows. It loads environment knowledge from `knowledge/` and `config/observations.md` into bounded context.
 
 During a run:
 - Note account-specific patterns (naming conventions, role structure, tagging, service usage)
-- Use accumulated context to sharpen downstream reasoning (attack-paths, controls, exploit)
+- Use accumulated context to sharpen downstream reasoning (attack paths, controls, exploit, investigate)
 - Flag when a new finding matches a previously observed recurring gap
+- Treat knowledge as context, not ground truth. Current evidence wins when it conflicts with stored knowledge
 
 After a run completes:
-- Append notable observations to `config/observations.md` (accumulate, don't overwrite)
-- Keep entries concise — observations and patterns, not full findings (those live in results.json)
-- Cross-account patterns go under "Recurring Gaps" — these build institutional knowledge over time
+- Use `skills/scope-knowledge-update/SKILL.md` after evidence review, final disposition, or operator-approved save
+- Keep entries concise — observations and patterns, not full findings
+- Cross-account patterns require evidence from at least two accounts before promotion to org-wide knowledge
 
 ## Error Visibility
 

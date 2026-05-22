@@ -9,7 +9,7 @@
 
 Most AWS security assessments are manual, fragmented, and slow. Enumeration scripts dump raw output that someone has to stitch together. Findings live in spreadsheets. Attack paths exist only in the assessor's head. Defensive recommendations are generic and disconnected from what was actually found.
 
-**SCOPE changes that.** It's an agentic AI framework that runs the full purple team loop: enumerate AWS resources, reason about attack paths, generate exploit playbooks, produce targeted defensive controls, and hunt threats.
+**SCOPE changes that.** It's an agentic AI framework that runs the full purple team loop: enumerate AWS resources, reason about attack paths, generate exploit playbooks, produce targeted defensive controls, and investigate threats.
 
 ## How It Works
 
@@ -26,8 +26,8 @@ The orchestrator runs the Python AWS SDK runtime across 16 AWS services, feeds f
 | **Audit** | Python enumerators inventory IAM, STS, S3, KMS, Secrets Manager, Lambda, EC2, RDS, API Gateway, SNS, SQS, CodeBuild, Bedrock, Cognito, DynamoDB, SSM |
 | **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
 | **Controls** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
-| **Exploit** | Produces stealth-ordered playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
-| **Hunt** | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing — three modes: investigation, hunt (from audit data), and intel (from URLs/descriptions) |
+| **Exploit** | Produces narrative red team playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
+| **Investigate** | SOC alert investigation, run-guided threat hunting, and threat intel parsing — three modes: investigation, run-guided, and intel |
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ export AWS_PROFILE=your-profile
 # Self-target mode (discovers caller identity automatically)
 /scope:exploit
 
-# Hunt a SOC alert
+# Investigate a SOC alert
 /scope:investigate
 ```
 
@@ -63,8 +63,8 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 ## Architecture
 
 ```
-agents/               Core agents: audit orchestrator, controls, exploit, hunt
-agents/subagents/     Attack analysis, controls subagents, hunt intake, research, synthesizer, verification
+agents/               Core agents: audit orchestrator, controls, exploit, investigate
+agents/subagents/     Attack analysis, controls subagents, investigation intake, research, synthesizer, verification
 scope/enumerators/    Python boto3 resource inventory modules
 scope/core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
 scope/runtime/        Audit orchestration, target selection, aggregation, post-processing
@@ -78,7 +78,7 @@ bin/                  Tooling: installer, report generator, graph extractor
 The exploit agent uses creative reasoning to discover abuse paths — not just a static checklist. It analyzes a principal's actual permissions and reasons about what attack chains are possible, using known escalation families as a floor, not a ceiling.
 
 - **Permission auto-discovery** — self-target mode discovers caller identity, reads own policies, falls back to targeted probes
-- **Stealth-aware ordering** — CloudTrail classification tags each step as management event, data event, or not logged; playbooks present quiet moves first
+- **Visibility tagging** — CloudTrail classification tags each step as management event, data event, or not logged without turning the playbook into detection guidance
 - **Creative reasoning** — LLM reasons about unconventional service chain abuse beyond the standard catalogue
 - **PassRole attack surface** — maps composable role-passing chains across 10+ AWS services
 
@@ -95,7 +95,7 @@ SCOPE agents are **read-only**. A lifecycle hook blocks every destructive AWS AP
 
 ### SIEM Integration
 
-SCOPE connects to your SIEM via MCP for live query execution during threat hunts. The default configuration targets Splunk Cloud (Splunkbase app 7931), but you can use any SIEM that exposes an MCP server. Replace the `mcpServers` block in your platform's config with your SIEM's MCP server definition and credentials. The hunt agent probes for available search tools at startup and adapts accordingly. See `config/mcp-setup.md` for details.
+SCOPE connects to your SIEM via MCP for live query execution during investigations. The default configuration targets Splunk Cloud (Splunkbase app 7931), but you can use any SIEM that exposes an MCP server. Replace the `mcpServers` block in your platform's config with your SIEM's MCP server definition and credentials. The investigation agent probes for available search tools at startup and adapts accordingly. See `config/mcp-setup.md` for details.
 
 ## Dashboard
 
@@ -148,9 +148,9 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
-| Reasoning (attack analysis, controls + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack analysis, controls + subagents, investigation intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
-Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, hunt) inherit your session model.
+Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, investigate) inherit your session model.
 
 ## Documentation
 

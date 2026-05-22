@@ -448,6 +448,8 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert "Exploit results must expose final paths in `attack_paths[]`, not `paths[]`" in exploit
     assert "Exploit results must not expose `candidate_attack_paths[]`, `attack_validation[]`, `security_observations[]`, or `public_entrypoints[]`." in exploit
     assert "Downstream investigation and reporting agents treat `attack_paths[]` as the only attack-path source of truth." in exploit
+    assert "skills/scope-exploit-playbook/SKILL.md" in exploit
+    assert "The top-level agent owns reasoning, gates, artifact writes, `results.json`, dashboard export, and knowledge updates." in exploit
 
     controls = prompts["agents/scope-controls.md"]
     assert "subagent-owned structured JSON artifacts" in controls

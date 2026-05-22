@@ -113,3 +113,25 @@ def test_repo_investigation_report_skill_contract() -> None:
         "knowledge_update_candidates",
     ]:
         assert text in report
+
+
+def test_repo_exploit_playbook_skill_contract() -> None:
+    playbook = read("skills/scope-exploit-playbook/SKILL.md")
+
+    assert_frontmatter(playbook, "scope-exploit-playbook")
+
+    for text in [
+        "EXPLOIT_PLAYBOOK",
+        "`TARGET_ARN`",
+        "`DISCOVERY_MODE`: `standalone` or `audit`",
+        "operator-approved paths",
+        "research results from `scope-research`",
+        "The top-level agent owns permission discovery, path reasoning, research dispatch, gates, artifact writes, and `results.json`.",
+        "Use actual ARNs, account IDs, resource names, and permissions from discovery.",
+        "Order steps by technical dependency, not quietness or stealth.",
+        "Do not include CloudTrail event names, GuardDuty finding types, detection likelihood, OPSEC notes, SOC recommendations, numeric confidence scores, or stealth-ordering headers.",
+        "Establish Persistence",
+        "Post-Exploitation",
+        "IAM Policy Document",
+    ]:
+        assert text in playbook

@@ -31,7 +31,7 @@
           }
         },
         "confirm_criteria": "≥1 CreateAccessKey event for a user outside a known provisioning window, followed by API calls using the new key from a different source IP than the creating actor.",
-        "refute_criteria": "CreateAccessKey event matches a known service account provisioning pattern in context.json, or the key was immediately deleted (DeleteAccessKey within 5 min).",
+        "refute_criteria": "CreateAccessKey event matches a known service account provisioning pattern in KNOWLEDGE_CONTEXT, or the key was immediately deleted (DeleteAccessKey within 5 min).",
         "data_event_caveat": false,
         "mitre_techniques": ["T1098.001", "T1078.004"]
       },
@@ -63,7 +63,7 @@
           }
         },
         "confirm_criteria": "≥2 sequential AssumeRole calls where the session ARN from call N is the assuming principal in call N+1, or cross-account assumption where userIdentity.accountId != recipientAccountId with no baseline match.",
-        "refute_criteria": "All AssumeRole callers and target roles match documented automation or CI/CD service accounts in context.json with consistent source IPs.",
+        "refute_criteria": "All AssumeRole callers and target roles match documented automation or CI/CD service accounts in KNOWLEDGE_CONTEXT with consistent source IPs.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1078.004", "T1021.007"]
       },
@@ -88,8 +88,8 @@
             "spl": "index=cloudtrail eventName=AssumeRole earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\"\n| eval session_arn=responseElements.assumedRoleUser.arn\n| eval assumption_ip=sourceIPAddress\n| join session_arn [search index=cloudtrail \"userIdentity.arn\"=\"[assumed_session_arn]\" earliest=\"[time_range_earliest]\" latest=\"[time_range_latest]\" | eval usage_ip=sourceIPAddress | table session_arn usage_ip]\n| where assumption_ip!=usage_ip\n| table _time eventName session_arn assumption_ip usage_ip\n| sort _time"
           }
         },
-        "confirm_criteria": "Same access key ID or assumed-role session ARN used from ≥2 distinct source IPs, where one IP does not match the known principal location in context.json.",
-        "refute_criteria": "All source IPs for the token are consistent with known NAT gateways, VPN egress IPs, or CI/CD runner IPs documented in context.json.",
+        "confirm_criteria": "Same access key ID or assumed-role session ARN used from ≥2 distinct source IPs, where one IP does not match the known principal location in KNOWLEDGE_CONTEXT.",
+        "refute_criteria": "All source IPs for the token are consistent with known NAT gateways, VPN egress IPs, or CI/CD runner IPs documented in KNOWLEDGE_CONTEXT.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1078", "T1078.004"]
       }
@@ -118,7 +118,7 @@
           }
         },
         "confirm_criteria": "GetObject event count from a single principal in a 1-hour window exceeds 2x the 7-day hourly baseline, or GetObject events occur from a source IP with no prior access to the bucket.",
-        "refute_criteria": "GetObject volume matches scheduled backup job or known ETL pipeline source IP documented in context.json.",
+        "refute_criteria": "GetObject volume matches scheduled backup job or known ETL pipeline source IP documented in KNOWLEDGE_CONTEXT.",
         "data_event_caveat": true,
         "mitre_techniques": ["T1530"]
       },
@@ -150,7 +150,7 @@
           }
         },
         "confirm_criteria": "≥1 GetSecretValue or GetParameter call from a principal that is not a known application service account, or bulk reads (≥4 distinct secrets in ≤10 min) regardless of principal.",
-        "refute_criteria": "All GetSecretValue calls match documented service account ARNs in context.json with consistent source IPs and no anomalous timing.",
+        "refute_criteria": "All GetSecretValue calls match documented service account ARNs in KNOWLEDGE_CONTEXT with consistent source IPs and no anomalous timing.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1552", "T1552.005"]
       },
@@ -241,7 +241,7 @@
           }
         },
         "confirm_criteria": "CreateUser event not matching a known provisioning workflow, followed by CreateLoginProfile or CreateAccessKey for that user within 60 min, then API activity from the new user.",
-        "refute_criteria": "CreateUser event matches a documented automated provisioning pipeline service account in context.json with expected timing and policy attachment.",
+        "refute_criteria": "CreateUser event matches a documented automated provisioning pipeline service account in KNOWLEDGE_CONTEXT with expected timing and policy attachment.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1136", "T1098.001"]
       },
@@ -269,7 +269,7 @@
           }
         },
         "confirm_criteria": "UpdateFunctionCode or CreateFunction by a principal that is not a documented CI/CD service account, or new EventBridge rule targeting a Lambda function created in the same time window.",
-        "refute_criteria": "All Lambda code changes match documented deployment pipeline service account ARNs in context.json with expected source IPs.",
+        "refute_criteria": "All Lambda code changes match documented deployment pipeline service account ARNs in KNOWLEDGE_CONTEXT with expected source IPs.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1546", "T1053.007"]
       }
@@ -302,7 +302,7 @@
           }
         },
         "confirm_criteria": "AssumeRole event where userIdentity.accountId != recipientAccountId, with the assuming principal being a recently compromised or anomalous identity, and post-assumption activity in the destination account.",
-        "refute_criteria": "Cross-account assumption matches a documented service integration or CI/CD trust relationship in context.json with expected source IP.",
+        "refute_criteria": "Cross-account assumption matches a documented service integration or CI/CD trust relationship in KNOWLEDGE_CONTEXT with expected source IP.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1021.007", "T1078.004"]
       },
@@ -328,8 +328,8 @@
             "spl": "index=cloudtrail (eventName=SendCommand OR eventName=StartSession) userIdentity.arn=\"[actor_arn]\" earliest=\"[7d_before_event]\" latest=\"[event_time]\"\n| stats count by requestParameters.instanceIds\n| sort -count"
           }
         },
-        "confirm_criteria": "SendCommand or StartSession by a principal with no prior SSM usage in context.json, or SSM commands targeting instances in a different VPC or account than the actor's normal scope.",
-        "refute_criteria": "SSM session matches a documented admin maintenance window or runbook automation service account in context.json.",
+        "confirm_criteria": "SendCommand or StartSession by a principal with no prior SSM usage in KNOWLEDGE_CONTEXT, or SSM commands targeting instances in a different VPC or account than the actor's normal scope.",
+        "refute_criteria": "SSM session matches a documented admin maintenance window or runbook automation service account in KNOWLEDGE_CONTEXT.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1021.007", "T1651"]
       }
@@ -363,7 +363,7 @@
             "spl": "index=cloudtrail eventName=StartLogging (requestParameters.name=\"[trail_name]\" OR requestParameters.trailName=\"[trail_name]\") earliest=\"[modification_time]\" latest=\"[4h_after_modification]\"\n| table _time eventName userIdentity.arn sourceIPAddress\n| sort _time"
           }
         },
-        "confirm_criteria": "StopLogging or DeleteTrail event not matching a documented maintenance change window in context.json, especially when followed by unusual actor activity during the logging gap.",
+        "confirm_criteria": "StopLogging or DeleteTrail event not matching a documented maintenance change window in KNOWLEDGE_CONTEXT, especially when followed by unusual actor activity during the logging gap.",
         "refute_criteria": "StopLogging event is immediately followed by StartLogging within 5 min (testing pattern), or the change matches a documented change management ticket or IaC pipeline activity.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1562.008"]
@@ -392,7 +392,7 @@
           }
         },
         "confirm_criteria": "DeleteDetector or UpdateDetector with enable=false event from a non-security-automation principal, or disassociation of a member account from GuardDuty master account.",
-        "refute_criteria": "GuardDuty change matches a documented security tool migration or region consolidation project documented in context.json, followed by CreateDetector in the same region within 60 min.",
+        "refute_criteria": "GuardDuty change matches a documented security tool migration or region consolidation project documented in KNOWLEDGE_CONTEXT, followed by CreateDetector in the same region within 60 min.",
         "data_event_caveat": false,
         "mitre_techniques": ["T1562.001"]
       },

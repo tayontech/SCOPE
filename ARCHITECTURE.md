@@ -178,11 +178,11 @@ Failures are non-blocking — each step logs warnings but never stops the source
 `scope-verify` is read inline during source agent execution. The caller specifies which XML domain sections to activate:
 
 ```
-  Source Agent (audit / controls / exploit / hunt)
+  Source Agent (audit / controls / exploit / investigate)
        │
        │  inline read with domain spec
        │  e.g., audit: domain-core + domain-aws
-       │         hunt: domain-core + domain-splunk
+       │         investigate: domain-core + domain-splunk
        ▼
   ┌──────────────────────────┐
   │       scope-verify       │
