@@ -41,6 +41,7 @@ def _validate_candidate(
     graph_edges: dict[str, dict[str, Any]],
     principal_policies: dict[str, list[dict[str, Any]]],
 ) -> AttackValidation:
+    chain_failure = _chain_quality_failure(candidate)
     validated_hops: list[str] = []
     conditional_hops: list[str] = []
     failed_hops: list[str] = []
@@ -95,6 +96,24 @@ def _validate_candidate(
 
         current_context = hop.resulting_context
 
+    if chain_failure is not None:
+        failed_hops.extend(
+            hop.id for hop in candidate.hops if hop.id not in failed_hops
+        )
+        return AttackValidation(
+            candidate_id=candidate.id,
+            status="rejected",
+            promotion_decision="drop",
+            reason=f"Candidate failed chain quality gate: {chain_failure}",
+            validated_hops=validated_hops,
+            conditional_hops=conditional_hops,
+            failed_hops=failed_hops,
+            runtime_assumptions=runtime_assumptions,
+            coverage_caveats=coverage_caveats,
+            final_context=current_context,
+            validated_impact=None,
+        )
+
     if failed_hops:
         return AttackValidation(
             candidate_id=candidate.id,
@@ -137,6 +156,72 @@ def _validate_candidate(
         coverage_caveats=[],
         final_context=current_context,
         validated_impact=candidate.impact,
+    )
+
+
+def _chain_quality_failure(candidate: AttackCandidate) -> str | None:
+    hops = candidate.hops
+    if len(hops) == 1 and not _single_hop_reaches_complete_impact(candidate):
+        return "single-hop candidate does not prove complete attacker progression"
+
+    if not _has_attacker_progression(candidate):
+        return "candidate hops do not change attacker context or capability"
+
+    if not _has_impact_hop(candidate):
+        return "candidate does not end in a concrete impact transition"
+
+    return None
+
+
+def _single_hop_reaches_complete_impact(candidate: AttackCandidate) -> bool:
+    hop = candidate.hops[0]
+    starts_from_external_control = (
+        candidate.starting_position.type in {"external", "public_endpoint"}
+        or hop.from_context.startswith("external:")
+    )
+    return (
+        starts_from_external_control
+        and hop.transition in {"resource_policy_access", "data_access", "decrypt", "invoke"}
+        and hop.action == candidate.impact.action
+        and hop.target == candidate.impact.resource
+        and hop.resulting_context != hop.from_context
+    )
+
+
+def _has_attacker_progression(candidate: AttackCandidate) -> bool:
+    return any(
+        hop.resulting_context != hop.from_context
+        or hop.target not in {hop.from_context, hop.resulting_context}
+        or hop.transition
+        in {
+            "invoke",
+            "execute_as",
+            "assume_role",
+            "pass_role",
+            "create_compute",
+            "mutate_policy",
+            "resource_policy_access",
+            "event_injection",
+        }
+        for hop in candidate.hops
+    )
+
+
+def _has_impact_hop(candidate: AttackCandidate) -> bool:
+    impact_transitions = {
+        "data_access",
+        "decrypt",
+        "mutate_policy",
+        "create_compute",
+        "pass_role",
+        "resource_policy_access",
+        "event_injection",
+    }
+    return any(
+        hop.transition in impact_transitions
+        or hop.action == candidate.impact.action
+        or hop.target == candidate.impact.resource
+        for hop in candidate.hops
     )
 
 

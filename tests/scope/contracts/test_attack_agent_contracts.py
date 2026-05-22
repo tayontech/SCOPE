@@ -190,6 +190,10 @@ def test_attack_validate_agent_contract() -> None:
         'for field in ("attack_validation", "attack_paths"):',
         'if key.startswith("attack_"):',
         "Do not perform a second manual validation pass.",
+        "chain quality gate",
+        "single-hop candidate does not prove complete attacker progression",
+        "candidate hops do not change attacker context or capability",
+        "candidate does not end in a concrete impact transition",
     ]:
         assert text in prompt
     assert_matches(prompt, r"modules.+iam.+global\.json")

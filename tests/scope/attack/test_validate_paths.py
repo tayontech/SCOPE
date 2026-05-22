@@ -192,7 +192,13 @@ def test_iam_explicit_empty_from_context_policies_is_conditional_without_fallbac
     payload = {
         "graph": {
             "nodes": [{"id": "role:RoleA"}, {"id": "role:RoleB"}],
-            "edges": [],
+            "edges": [
+                {
+                    "id": "edge:trust:role:RoleA->role:RoleB",
+                    "source": "role:RoleA",
+                    "target": "role:RoleB",
+                }
+            ],
         },
         "candidate_attack_paths": [
             {
@@ -209,6 +215,24 @@ def test_iam_explicit_empty_from_context_policies_is_conditional_without_fallbac
                 "hops": [
                     {
                         "id": "cap-003-hop-001",
+                        "transition": "assume_role",
+                        "from_context": "role:RoleA",
+                        "action": "sts:AssumeRole",
+                        "target": "role:RoleB",
+                        "resulting_context": "role:RoleB",
+                        "capability_gained": "RoleB permissions",
+                        "required": True,
+                        "validation_type": "graph",
+                        "evidence": [
+                            {
+                                "type": "graph_edge",
+                                "id": "edge:trust:role:RoleA->role:RoleB",
+                            }
+                        ],
+                        "assumptions": [],
+                    },
+                    {
+                        "id": "cap-003-hop-002",
                         "transition": "data_access",
                         "from_context": "role:RoleB",
                         "action": "s3:GetObject",
@@ -257,8 +281,8 @@ def test_iam_explicit_empty_from_context_policies_is_conditional_without_fallbac
 
     validation = result["attack_validation"][0]
     assert validation["status"] == "conditional"
-    assert validation["conditional_hops"] == ["cap-003-hop-001"]
-    assert validation["validated_hops"] == []
+    assert validation["conditional_hops"] == ["cap-003-hop-002"]
+    assert validation["validated_hops"] == ["cap-003-hop-001"]
     assert validation["failed_hops"] == []
     assert any("role:RoleB" in caveat for caveat in validation["coverage_caveats"])
     assert any(
@@ -335,6 +359,203 @@ def test_iam_non_empty_selected_policy_implicit_deny_rejects_path() -> None:
     assert result["attack_validation"][0]["status"] == "rejected"
     assert result["attack_validation"][0]["failed_hops"] == ["cap-004-hop-001"]
     assert result["attack_paths"] == []
+
+
+def test_rejects_single_hop_broad_permission_without_attacker_progression() -> None:
+    payload = {
+        "graph": {"nodes": [{"id": "role:RoleB"}], "edges": []},
+        "candidate_attack_paths": [
+            {
+                "id": "cap-005",
+                "name": "RoleB can read sensitive object",
+                "category": "data_exposure",
+                "severity": "high",
+                "starting_position": {
+                    "type": "principal",
+                    "id": "role:RoleB",
+                    "arn": "arn:aws:iam::123456789012:role/RoleB",
+                },
+                "initial_context": {"principal": "role:RoleB", "capabilities": []},
+                "hops": [
+                    {
+                        "id": "cap-005-hop-001",
+                        "transition": "data_access",
+                        "from_context": "role:RoleB",
+                        "action": "s3:GetObject",
+                        "target": "arn:aws:s3:::sensitive/*",
+                        "resulting_context": "role:RoleB",
+                        "capability_gained": "Read sensitive objects",
+                        "required": True,
+                        "validation_type": "iam",
+                        "evidence": [
+                            {
+                                "type": "policy_document",
+                                "id": "role:RoleB:inline:ReadSensitive",
+                            }
+                        ],
+                        "assumptions": [],
+                    }
+                ],
+                "impact": {
+                    "type": "data_access",
+                    "resource": "arn:aws:s3:::sensitive/*",
+                    "action": "s3:GetObject",
+                },
+                "affected_resources": ["arn:aws:s3:::sensitive"],
+                "detection_opportunities": ["GetObject"],
+                "mitre_techniques": [],
+                "remediation": ["Scope S3 access to required objects"],
+            }
+        ],
+    }
+    principal_policies = {
+        "role:RoleB": [
+            {
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "s3:GetObject",
+                        "Resource": "arn:aws:s3:::sensitive/*",
+                    }
+                ]
+            }
+        ]
+    }
+
+    result = validate_candidates(payload, principal_policies=principal_policies)
+
+    validation = result["attack_validation"][0]
+    assert validation["status"] == "rejected"
+    assert validation["failed_hops"] == ["cap-005-hop-001"]
+    assert "chain quality" in validation["reason"]
+    assert result["attack_paths"] == []
+
+
+def test_validates_multi_role_chain_with_data_access_impact() -> None:
+    payload = {
+        "graph": {
+            "nodes": [
+                {"id": "role:RoleA"},
+                {"id": "role:RoleB"},
+                {"id": "role:RoleC"},
+            ],
+            "edges": [
+                {
+                    "id": "edge:trust:role:RoleA->role:RoleB",
+                    "source": "role:RoleA",
+                    "target": "role:RoleB",
+                },
+                {
+                    "id": "edge:trust:role:RoleB->role:RoleC",
+                    "source": "role:RoleB",
+                    "target": "role:RoleC",
+                },
+            ],
+        },
+        "candidate_attack_paths": [
+            {
+                "id": "cap-007",
+                "name": "RoleA chains through RoleB into RoleC for data access",
+                "category": "lateral_movement",
+                "severity": "high",
+                "starting_position": {
+                    "type": "principal",
+                    "id": "role:RoleA",
+                    "arn": "arn:aws:iam::123456789012:role/RoleA",
+                },
+                "initial_context": {"principal": "role:RoleA", "capabilities": []},
+                "hops": [
+                    {
+                        "id": "cap-007-hop-001",
+                        "transition": "assume_role",
+                        "from_context": "role:RoleA",
+                        "action": "sts:AssumeRole",
+                        "target": "role:RoleB",
+                        "resulting_context": "role:RoleB",
+                        "capability_gained": "RoleB permissions",
+                        "required": True,
+                        "validation_type": "graph",
+                        "evidence": [
+                            {
+                                "type": "graph_edge",
+                                "id": "edge:trust:role:RoleA->role:RoleB",
+                            }
+                        ],
+                        "assumptions": [],
+                    },
+                    {
+                        "id": "cap-007-hop-002",
+                        "transition": "assume_role",
+                        "from_context": "role:RoleB",
+                        "action": "sts:AssumeRole",
+                        "target": "role:RoleC",
+                        "resulting_context": "role:RoleC",
+                        "capability_gained": "RoleC permissions",
+                        "required": True,
+                        "validation_type": "graph",
+                        "evidence": [
+                            {
+                                "type": "graph_edge",
+                                "id": "edge:trust:role:RoleB->role:RoleC",
+                            }
+                        ],
+                        "assumptions": [],
+                    },
+                    {
+                        "id": "cap-007-hop-003",
+                        "transition": "data_access",
+                        "from_context": "role:RoleC",
+                        "action": "s3:GetObject",
+                        "target": "arn:aws:s3:::sensitive/*",
+                        "resulting_context": "role:RoleC",
+                        "capability_gained": "Read sensitive objects",
+                        "required": True,
+                        "validation_type": "iam",
+                        "evidence": [
+                            {
+                                "type": "policy_document",
+                                "id": "role:RoleC:inline:ReadSensitive",
+                            }
+                        ],
+                        "assumptions": [],
+                    },
+                ],
+                "impact": {
+                    "type": "data_access",
+                    "resource": "arn:aws:s3:::sensitive/*",
+                    "action": "s3:GetObject",
+                },
+                "affected_resources": ["arn:aws:s3:::sensitive"],
+                "detection_opportunities": ["AssumeRole", "GetObject"],
+                "mitre_techniques": [],
+                "remediation": ["Remove chained trust or RoleC S3 read access"],
+            }
+        ],
+    }
+    principal_policies = {
+        "role:RoleC": [
+            {
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "s3:GetObject",
+                        "Resource": "arn:aws:s3:::sensitive/*",
+                    }
+                ]
+            }
+        ]
+    }
+
+    result = validate_candidates(payload, principal_policies=principal_policies)
+
+    validation = result["attack_validation"][0]
+    assert validation["status"] == "validated"
+    assert validation["validated_hops"] == [
+        "cap-007-hop-001",
+        "cap-007-hop-002",
+        "cap-007-hop-003",
+    ]
+    assert result["attack_paths"][0]["source_candidate_id"] == "cap-007"
 
 
 def test_graph_hop_without_graph_edge_evidence_rejects_path() -> None:
