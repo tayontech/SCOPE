@@ -438,6 +438,25 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         synth,
         r"must not drive report findings, counts, or attack-path narratives",
     )
+    for text in [
+        "latest controls artifacts",
+        "Read these required data files:",
+        "results.json guardrails.md guardrails.json detections.md detections.json policy-replacements.md policy-replacements.json remediation-plan.md validation-report.md",
+        "$CONTROLS_RESULTS_DIR/guardrails.json",
+        "$CONTROLS_RESULTS_DIR/detections.json",
+        "$CONTROLS_RESULTS_DIR/policy-replacements.json",
+        "$CONTROLS_RESULTS_DIR/remediation-plan.md",
+        "$CONTROLS_RESULTS_DIR/validation-report.md",
+        "$CONTROLS_RESULTS_DIR/policies",
+        "Do not parse markdown to invent structured fields.",
+        "Do not call external MCP tools or enrich from the web",
+        "Structured controls fields came from JSON artifacts, not markdown inference",
+        "The audit orchestrator treats synthesizer failure as non-blocking",
+    ]:
+        assert text in synth
+    assert_not_matches(synth, r"Read exactly two files")
+    assert_not_matches(synth, r"## MCP Tool Discovery")
+    assert_not_matches(synth, r"Per the dispatch contract, synthesizer failure is blocking")
 
     exploit = prompts["agents/scope-exploit.md"]
     assert '"attack_paths": [' in exploit
