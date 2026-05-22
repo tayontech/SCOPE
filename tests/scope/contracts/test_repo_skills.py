@@ -27,6 +27,9 @@ def test_repo_attack_pipeline_skills_contract() -> None:
     for text in [
         "candidate_attack_paths[]",
         "entry point -> new execution context -> new permission set -> impact",
+        "Only records with `attack_path_seed: true` can start `starting_position.type: \"public_endpoint\"` candidates.",
+        "Set `starting_position.id` to the exact `public_entrypoints[].id`.",
+        "Public endpoint facts whose only concrete action is invocation, TCP reachability, or DNS resolution.",
         "role chaining",
         "lateral movement",
         "hops[]",

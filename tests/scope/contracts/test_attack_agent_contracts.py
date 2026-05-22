@@ -58,6 +58,18 @@ def test_attack_analyze_agent_contract() -> None:
     assert "public_entrypoints[]" in prompt
     assert "attack_path_seed" in prompt
     assert "do not invent public entrypoints from generic public flags" in prompt
+    assert_matches(
+        prompt,
+        r"<public_entrypoint_handoff>[\s\S]*Only `public_entrypoints\[\]` records with `attack_path_seed: true` can start public-endpoint candidate paths",
+    )
+    assert_matches(
+        prompt,
+        r"starting_position\.type` to `public_endpoint`[\s\S]{0,160}`starting_position\.id` to the exact `public_entrypoints\[\]\.id`",
+    )
+    assert_matches(
+        prompt,
+        r"The candidate still needs a downstream permission or impact transition after the public access transition",
+    )
 
     for field in [
         '"id"',
@@ -163,6 +175,14 @@ def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
     assert_matches(
         prompt,
         r"security_observations\[\][\s\S]{0,240}single broad policy",
+    )
+    assert_matches(
+        prompt,
+        r"attack_path_seed: false[\s\S]{0,220}security_observations\[\]",
+    )
+    assert_matches(
+        prompt,
+        r"only concrete action is `execute-api:Invoke`, `lambda:InvokeFunctionUrl`, a TCP connection, or DNS resolution",
     )
 
 

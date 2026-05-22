@@ -53,11 +53,13 @@ def lint_results_file(path: Path, *, stage: Stage = "auto") -> list[str]:
         "security_observations", observation_payloads, SecurityObservation, errors
     )
 
+    public_entrypoint_seeds = _public_entrypoint_seeds(payload)
     _check_duplicate_candidate_ids(candidates, errors)
     _check_duplicate_validation_candidate_ids(validations, errors)
     _check_duplicate_final_path_ids(final_paths, errors)
     _check_duplicate_hop_ids("candidate_attack_paths", candidates, errors)
     _check_duplicate_hop_ids("attack_paths", final_paths, errors)
+    _check_public_endpoint_candidates(candidates, public_entrypoint_seeds, errors)
     _check_graph_edge_evidence(
         "candidate_attack_paths", candidates, graph_edge_ids, errors
     )
@@ -131,6 +133,19 @@ def _graph_edge_ids(payload: dict[str, Any]) -> set[str]:
     return {edge["id"] for edge in edges if isinstance(edge, dict) and edge.get("id")}
 
 
+def _public_entrypoint_seeds(payload: dict[str, Any]) -> set[str]:
+    entrypoints = payload.get("public_entrypoints", [])
+    if not isinstance(entrypoints, list):
+        return set()
+    return {
+        entrypoint["id"]
+        for entrypoint in entrypoints
+        if isinstance(entrypoint, dict)
+        and isinstance(entrypoint.get("id"), str)
+        and entrypoint.get("attack_path_seed") is True
+    }
+
+
 def _check_duplicate_candidate_ids(
     candidates: list[AttackCandidate], errors: list[str]
 ) -> None:
@@ -174,6 +189,22 @@ def _check_duplicate_hop_ids(
             if hop.id in seen:
                 errors.append(f"{field}: duplicate hop id {hop.id}")
             seen.add(hop.id)
+
+
+def _check_public_endpoint_candidates(
+    candidates: list[AttackCandidate],
+    public_entrypoint_seeds: set[str],
+    errors: list[str],
+) -> None:
+    for candidate in candidates:
+        if candidate.starting_position.type != "public_endpoint":
+            continue
+        if candidate.starting_position.id not in public_entrypoint_seeds:
+            errors.append(
+                "candidate_attack_paths: public_endpoint starting_position "
+                f"{candidate.starting_position.id} must reference a "
+                "public_entrypoints[] item with attack_path_seed true"
+            )
 
 
 def _check_graph_edge_evidence(

@@ -57,6 +57,24 @@ Facts vs inference:
 - Inferences are candidate attack paths and security observations. Label gating conditions clearly when the candidate depends on missing coverage, external control of an identity, data-event logging, or runtime assumptions.
 </analysis_method>
 
+<public_entrypoint_handoff>
+Treat `public_entrypoints[]` as the handoff from `scope-public-exposure-analysis`, not as a duplicate enumeration task.
+
+Rules:
+- Only `public_entrypoints[]` records with `attack_path_seed: true` can start public-endpoint candidate paths.
+- Records with `attack_path_seed: false` remain exposure context. Do not convert them into candidates unless another collected graph, IAM, or resource-policy fact creates a separate attacker-controlled transition.
+- When a candidate starts from a public entrypoint, set `starting_position.type` to `public_endpoint` and `starting_position.id` to the exact `public_entrypoints[].id`.
+- Carry the entrypoint's `auth_type`, `starting_position`, `invokes`, `execution_roles`, and `reachable_resources` into the path reasoning. Do not use those fields as proof by themselves.
+- The first public-entrypoint hop must describe the attacker action and resulting context, such as `invoke`, `event_injection`, or `resource_policy_access`.
+- The candidate still needs a downstream permission or impact transition after the public access transition. Public reachability is the beginning of the path, not the impact.
+
+Reject these public-entrypoint candidates into `security_observations[]`:
+- `attack_path_seed: false` entrypoint with no separate transition evidence belongs in `security_observations[]`.
+- Public endpoint with auth but no observed downstream execution role, resource policy grant, identity issuance, or sensitive-resource reachability.
+- Public resource or network exposure where the only known fact is `public_access: true`.
+- Candidate whose only concrete action is `execute-api:Invoke`, `lambda:InvokeFunctionUrl`, a TCP connection, or DNS resolution.
+</public_entrypoint_handoff>
+
 <red_team_chain_quality>
 Use this quality bar for every candidate:
 
@@ -75,7 +93,7 @@ Candidate decision test:
 4. End with concrete impact on a resource ARN and AWS action.
 
 Prioritize these chain families:
-- Public compute path: public API Gateway or function URL -> Lambda function or compute resource -> execution role -> sensitive action such as `s3:GetObject`, `secretsmanager:GetSecretValue`, or `kms:Decrypt`.
+- Public compute path: `public_entrypoints[]` seed -> public API Gateway or function URL -> Lambda function or compute resource -> execution role -> sensitive action such as `s3:GetObject`, `secretsmanager:GetSecretValue`, or `kms:Decrypt`.
 - Role chaining path: RoleA can assume RoleB -> RoleB can assume RoleC -> RoleC reaches a new reachable account, principal tier, permission set, service control point bypass, or impact action.
 - Pass-role path: principal can `iam:PassRole` -> creates or updates compute with the passed role -> compute gains a stronger permission set -> impact action.
 - Event injection path: attacker can write to an event source -> target function, build, queue consumer, or automation executes -> execution role gains impact.

@@ -99,6 +99,12 @@ def _final_path(candidate_id: str = "cap-001") -> dict[str, object]:
 def _results(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "graph": {"nodes": [], "edges": [{"id": EDGE_ID}]},
+        "public_entrypoints": [
+            {
+                "id": "gateway:apigw:api",
+                "attack_path_seed": True,
+            }
+        ],
         "candidate_attack_paths": [],
         "attack_validation": [],
         "attack_paths": [],
@@ -131,6 +137,44 @@ def test_candidates_stage_accepts_valid_candidate_with_graph_edge_evidence(
     tmp_path: Path,
 ) -> None:
     path = _write_results(tmp_path, _results(candidate_attack_paths=[_candidate()]))
+
+    assert lint_results_file(path, stage="candidates") == []
+
+
+def test_candidates_stage_rejects_public_endpoint_without_seed(
+    tmp_path: Path,
+) -> None:
+    path = _write_results(
+        tmp_path,
+        _results(
+            public_entrypoints=[
+                {
+                    "id": "gateway:apigw:api",
+                    "attack_path_seed": False,
+                }
+            ],
+            candidate_attack_paths=[_candidate()],
+        ),
+    )
+
+    errors = lint_results_file(path, stage="candidates")
+
+    assert any("public_entrypoints[] item with attack_path_seed true" in e for e in errors)
+
+
+def test_candidates_stage_allows_non_public_start_without_public_seed(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    candidate["starting_position"] = {
+        "type": "principal",
+        "id": "arn:aws:iam::123456789012:role/AppRole",
+        "arn": "arn:aws:iam::123456789012:role/AppRole",
+    }
+    path = _write_results(
+        tmp_path,
+        _results(public_entrypoints=[], candidate_attack_paths=[candidate]),
+    )
 
     assert lint_results_file(path, stage="candidates") == []
 
