@@ -25,6 +25,10 @@ Your responsibilities:
 - Operator-invoked via `/scope:defend [run-dir]` (resolves path, extracts account_id from results.json)
 </role>
 
+<downstream_attack_path_contract>
+Consume final attack_paths[] where validation_status is validated or conditional. Preserve runtime_assumptions[] in control mappings. Preserve coverage_caveats[] where present. Do not treat conditional as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
+</downstream_attack_path_contract>
+
 <intake_protocol>
 ## Intake Protocol
 
@@ -43,7 +47,7 @@ Canonicalize before any further use. This resolves relative paths against the sh
 **If no path is provided**, find the most recent audit run:
 
 ```bash
-AUDIT_RUN_DIR=$(ls -dt "$(pwd)"/audit/audit-* 2>/dev/null | head -1)
+AUDIT_RUN_DIR=$(ls -dt "$(pwd)"/runs/audit-* 2>/dev/null | head -1)
 if [ -z "$AUDIT_RUN_DIR" ]; then
   echo "ERROR: No audit runs found — run /scope:audit first or provide a run directory"
   exit 1
@@ -377,6 +381,20 @@ Focus on: new controls deployed, remediation blockers, detection effectiveness.
 
 Read all artifact files from DEFEND_RUN_DIR and assemble results.json. The schema validation hook (T-78-13 mitigation) fires automatically on write.
 
+### Step 0: Read source attack path validation context
+
+Build reusable attack path context from the consumed audit results. Use this as the fallback source mapping for generated controls when a subagent artifact does not provide a narrower mapping.
+
+```bash
+ATTACK_PATH_CONTEXT=$(jq '[.attack_paths[]? | {
+  name,
+  validation_status,
+  runtime_assumptions: (.runtime_assumptions // []),
+  coverage_caveats: (.coverage_caveats // [])
+}]' "$AUDIT_RUN_DIR/results.json")
+ATTACK_PATH_NAMES=$(echo "$ATTACK_PATH_CONTEXT" | jq '[.[].name]')
+```
+
 ### Step 1: Read guardrails artifacts
 
 Verify guardrails.md exists:
@@ -406,20 +424,23 @@ for POLICY_FILE in "$DEFEND_RUN_DIR/policies/"*.json; do
     continue
   fi
   POLICY_JSON=$(jq '.' "$POLICY_FILE")
-  ENTRY=$(jq -n \
-    --arg name "$POLICY_NAME" \
-    --arg type "$POLICY_TYPE" \
-    --arg file "policies/$BASENAME" \
-    --argjson policy_json "$POLICY_JSON" \
-    --arg audit_run_id "$AUDIT_RUN_ID" \
-    '{
-      name: $name,
-      type: $type,
-      file: $file,
-      policy_json: $policy_json,
-      source_attack_paths: [],
-      source_run_ids: [$audit_run_id],
-      impact_analysis: {
+	  ENTRY=$(jq -n \
+	    --arg name "$POLICY_NAME" \
+	    --arg type "$POLICY_TYPE" \
+	    --arg file "policies/$BASENAME" \
+	    --argjson policy_json "$POLICY_JSON" \
+	    --arg audit_run_id "$AUDIT_RUN_ID" \
+	    --argjson source_attack_paths "$ATTACK_PATH_NAMES" \
+	    --argjson source_attack_path_context "$ATTACK_PATH_CONTEXT" \
+	    '{
+	      name: $name,
+	      type: $type,
+	      file: $file,
+	      policy_json: $policy_json,
+	      source_attack_paths: $source_attack_paths,
+	      source_attack_path_context: $source_attack_path_context,
+	      source_run_ids: [$audit_run_id],
+	      impact_analysis: {
         prevents: [],
         blast_radius: "medium",
         affected_services: [],
@@ -455,19 +476,22 @@ for REPL_FILE in "$DEFEND_RUN_DIR/replacements/"*.json; do
   # Extract role name from filename: iam-replacement-{role-name}.json
   ROLE_NAME=$(echo "$BASENAME" | sed 's/^iam-replacement-//' | sed 's/\.json$//')
   REPL_JSON=$(jq '.' "$REPL_FILE")
-  ENTRY=$(jq -n \
-    --arg role_name "$ROLE_NAME" \
-    --arg file "replacements/$BASENAME" \
-    --argjson replacement_policy_json "$REPL_JSON" \
-    --arg audit_run_id "$AUDIT_RUN_ID" \
-    '{
-      role_name: $role_name,
-      file: $file,
-      original_policy_arn: "unknown",
-      replacement_policy_json: $replacement_policy_json,
-      source_attack_paths: [],
-      staleness_reasoning: "See policy-replacements.md for detailed reasoning"
-    }')
+	  ENTRY=$(jq -n \
+	    --arg role_name "$ROLE_NAME" \
+	    --arg file "replacements/$BASENAME" \
+	    --argjson replacement_policy_json "$REPL_JSON" \
+	    --arg audit_run_id "$AUDIT_RUN_ID" \
+	    --argjson source_attack_paths "$ATTACK_PATH_NAMES" \
+	    --argjson source_attack_path_context "$ATTACK_PATH_CONTEXT" \
+	    '{
+	      role_name: $role_name,
+	      file: $file,
+	      original_policy_arn: "unknown",
+	      replacement_policy_json: $replacement_policy_json,
+	      source_attack_paths: $source_attack_paths,
+	      source_attack_path_context: $source_attack_path_context,
+	      staleness_reasoning: "See policy-replacements.md for detailed reasoning"
+	    }')
   POLICY_REPLACEMENTS_ARRAY=$(echo "$POLICY_REPLACEMENTS_ARRAY" | jq --argjson entry "$ENTRY" '. + [$entry]')
 done
 ```

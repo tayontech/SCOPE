@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from scope.runtime.run_context import AccountContext
+from scope.runtime.graph import build_graph_from_run, write_graph
 
 
 def _derive_region(modules: list[dict[str, Any]]) -> str:
@@ -17,18 +17,8 @@ def _derive_region(modules: list[dict[str, Any]]) -> str:
     return "global"
 
 
-def _default_graph_script() -> Path:
-    return Path(__file__).resolve().parents[2] / "bin" / "extract-graph.js"
-
-
 def _empty_graph() -> dict[str, list[Any]]:
     return {"nodes": [], "edges": []}
-
-
-def _write_graph(run_dir: Path, graph: dict[str, Any]) -> Path:
-    path = run_dir / "graph.json"
-    path.write_text(json.dumps(graph, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
 
 
 def _graph_error(message: str, **details: Any) -> dict[str, Any]:
@@ -37,55 +27,27 @@ def _graph_error(message: str, **details: Any) -> dict[str, Any]:
     return error
 
 
-def _is_graph_shape(value: Any) -> bool:
-    return isinstance(value, dict) and isinstance(value.get("nodes"), list) and isinstance(
-        value.get("edges"), list
-    )
-
-
 def build_graph(
     run_dir: Path, graph_script: Path | None = None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    script = graph_script or _default_graph_script()
-
-    try:
-        result = subprocess.run(
-            ["node", str(script), str(run_dir)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
+    if graph_script is not None:
         graph = _empty_graph()
-        _write_graph(run_dir, graph)
-        return graph, [_graph_error("graph builder failed to start", error=str(exc))]
-
-    if result.returncode != 0:
-        graph = _empty_graph()
-        _write_graph(run_dir, graph)
+        write_graph(run_dir, graph)
         return graph, [
             _graph_error(
-                "graph builder failed",
-                returncode=result.returncode,
-                stderr=result.stderr.strip(),
-                stdout=result.stdout.strip(),
+                "external graph scripts are no longer supported",
+                graph_script=str(graph_script),
             )
         ]
 
     try:
-        graph = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
+        graph = build_graph_from_run(run_dir)
+    except Exception as exc:
         graph = _empty_graph()
-        _write_graph(run_dir, graph)
-        return graph, [_graph_error("graph builder emitted invalid JSON", error=str(exc))]
+        write_graph(run_dir, graph)
+        return graph, [_graph_error("python graph builder failed", error=str(exc))]
 
-    if not _is_graph_shape(graph):
-        graph = _empty_graph()
-        _write_graph(run_dir, graph)
-        return graph, [_graph_error("graph builder emitted invalid graph shape")]
-
-    _write_graph(run_dir, graph)
+    write_graph(run_dir, graph)
     return graph, []
 
 
@@ -129,7 +91,10 @@ def build_results(
         },
         "modules": modules,
         "failed_items": summary.get("failed_items", []),
+        "candidate_attack_paths": [],
+        "attack_validation": [],
         "attack_paths": [],
+        "security_observations": [],
         "principals": [],
         "trust_relationships": [],
         "coverage_gaps": [],

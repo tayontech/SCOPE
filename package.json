@@ -2,7 +2,7 @@
   "name": "scope-tooling",
   "version": "1.14.0",
   "private": true,
-  "description": "SCOPE JavaScript utility tests for graph extraction, hooks, and schemas",
+  "description": "SCOPE JavaScript utility test runner for dashboard, report, and installer tooling",
   "engines": {
     "node": ">=18.0.0"
   },

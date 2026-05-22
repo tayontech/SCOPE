@@ -250,6 +250,12 @@ case "$SOURCE" in
         ERRORS+=("attack_paths[].category contains invalid values (must be one of: privilege_escalation, trust_misconfiguration, data_exposure, credential_risk, excessive_permission, network_exposure, persistence, post_exploitation, lateral_movement): $INVALID_CAT")
       fi
     fi
+
+    if [ "$(jq 'has("candidate_attack_paths") or has("attack_validation") or has("security_observations")' "$FILE_PATH")" = "true" ]; then
+      if ! ATTACK_LINTER_OUTPUT=$(uv run python -m scope.attack.lint --results "$FILE_PATH" --stage auto 2>&1); then
+        ERRORS+=("attack linter failed for audit results: ${ATTACK_LINTER_OUTPUT:-no output}")
+      fi
+    fi
     ;;
 
   defend)

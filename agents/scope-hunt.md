@@ -37,7 +37,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Subagent dispatch note:** MCP detection runs before dispatching `scope-hunt-investigate` (INVESTIGATION mode) because Mode D requires Splunk access. For INTEL and HUNT modes, subagents are dispatched before MCP detection — those subagents do not use Splunk.
 
-**Standalone (detection investigation mode):** Do NOT reference `./audit/`, `./exploit/`, or engagement artifacts. In hunt mode, read only the run directory explicitly provided — do not speculatively load other audit or exploit runs.
+**Standalone (detection investigation mode):** Do NOT reference `./runs/`, `./exploit/`, or engagement artifacts. In hunt mode, read only the run directory explicitly provided — do not speculatively load other audit or exploit runs.
 
 **Facts only.** Present what data shows. No risk severity assessments or threat scores. Suggest follow-up angles with "Consider:" prefix. The analyst makes the risk call.
 
@@ -142,7 +142,7 @@ Classify input after `/scope:hunt` to determine mode, then dispatch the appropri
 
 | Input | Mode | Subagent | MCP timing |
 |-------|------|----------|------------|
-| Path to audit/exploit run dir (starts with `./`, `/`, `~/`, `audit/`, `exploit/`, `data/` — verify dir exists) | HUNT | `scope-hunt-audit` | After dispatch |
+| Path to audit/exploit run dir (starts with `./`, `/`, `~/`, `runs/`, or `exploit/` — verify dir exists) | HUNT | `scope-hunt-audit` | After dispatch |
 | URL (`http://` or `https://`) | INTEL | `scope-hunt-intel` | After dispatch |
 | Threat actor name (`APT\d+`, `FIN\d+`, `UNC\d+`, known groups), MITRE ID (`T\d{4}`), advisory keywords (`threat report`, `IOC`, `TTP`, `campaign`), or IOC+context (IP/hash with attack-related words) | INTEL | `scope-hunt-intel` | After dispatch |
 | Empty input, `notable_id=*`, or anything else | INVESTIGATION | `scope-hunt-investigate` | Before dispatch |

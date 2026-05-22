@@ -65,8 +65,8 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 ```
 agents/               Core agents: audit orchestrator, defend, exploit, hunt
 agents/subagents/     Attack analysis, defend subagents, hunt intake, research, synthesizer, verification
-scope/enumerators/          Python boto3 resource inventory modules
-scope.core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
+scope/enumerators/    Python boto3 resource inventory modules
+scope/core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
 scope/runtime/        Audit orchestration, target selection, aggregation, post-processing
 dashboard/            React + D3 interactive dashboard (self-contained HTML output)
 config/               Runtime reference data, lifecycle hooks, schemas, settings templates
@@ -156,7 +156,7 @@ Enumeration is deterministic Python via `python -m scope` and `scope/enumerators
 
 | | |
 |---|---|
-| [PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/PROJECT.md) | Behavioral guidance: reasoning philosophy, operator pace, environmental learning |
+| [PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/PROJECT.md) | Behavioral guidance: reasoning philosophy, operator pace, environmental learning |
 | [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
 | [Hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hook reference |
 | [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, defend, exploit output |

@@ -83,7 +83,10 @@ def test_build_results_includes_summary_graph_modules_and_empty_attack_paths(tmp
     assert payload["graph"] == graph
     assert payload["resources"] == {"jsonl": "resources.jsonl", "count": 2}
     assert payload["modules"] == summary["modules"]
+    assert payload["candidate_attack_paths"] == []
+    assert payload["attack_validation"] == []
     assert payload["attack_paths"] == []
+    assert payload["security_observations"] == []
     assert payload["principals"] == []
     assert payload["trust_relationships"] == []
     assert payload["coverage_gaps"] == []
@@ -173,17 +176,21 @@ def test_build_graph_writes_graph_json_from_nested_modules(tmp_path: Path) -> No
 
     assert errors == []
     assert (tmp_path / "graph.json").exists()
+    assert graph["schema_version"] == "2.0"
+    assert graph["metadata"]["source"] == "scope-runtime"
     assert any(node["id"] == "role:LambdaExecRole" for node in graph["nodes"])
     assert any(edge["target"] == "role:LambdaExecRole" for edge in graph["edges"])
+    assert any(edge["id"].startswith("edge:") for edge in graph["edges"])
     assert json.loads((tmp_path / "graph.json").read_text(encoding="utf-8")) == graph
 
 
-def test_build_graph_records_failure_and_writes_empty_graph(tmp_path: Path) -> None:
-    graph, errors = build_graph(tmp_path, graph_script=tmp_path / "missing-extract-graph.js")
+def test_build_graph_rejects_external_graph_scripts_and_writes_empty_graph(tmp_path: Path) -> None:
+    graph, errors = build_graph(tmp_path, graph_script=tmp_path / "external-graph.js")
 
     assert graph == {"nodes": [], "edges": []}
     assert errors
     assert errors[0]["stage"] == "graph"
+    assert errors[0]["message"] == "external graph scripts are no longer supported"
     assert (tmp_path / "graph.json").exists()
     assert json.loads((tmp_path / "graph.json").read_text(encoding="utf-8")) == {
         "nodes": [],

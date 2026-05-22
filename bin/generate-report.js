@@ -229,7 +229,7 @@ if (existsSync(join(publicDir, "index.json"))) {
 
             const auditRunDir = run.run_id === currentRunId && runDir
               ? runDir
-              : join(dashboardDir, "..", "audit", run.run_id);
+              : join(projectRoot, "runs", run.run_id);
             try {
               const iam = readAuditModule(auditRunDir, "iam");
               if (iam) {

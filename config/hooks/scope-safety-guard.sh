@@ -40,7 +40,7 @@ PATHS=$(echo "$COMMAND" | grep -oE '\./[a-zA-Z0-9_.-]+/' | sort -u) || true
 
 if [ -n "$PATHS" ]; then
   # Allowed output directories (operator-provided run paths land here)
-  ALLOWED_PREFIXES=('./audit/' './exploit/' './hunt/' './data/' './engagements/')
+  ALLOWED_PREFIXES=('./runs/' './exploit/' './hunt/' './engagements/')
 
   # Internal project directories (never block — not operator-provided)
   INTERNAL_PREFIXES=('./config/' './bin/' './agents/' './dashboard/' './tests/' './node_modules/' './.planning/' './.claude/' './.git/' './.codex/' './.gemini/')
@@ -68,7 +68,7 @@ if [ -n "$PATHS" ]; then
     done
 
     if ! $is_allowed; then
-      echo "SCOPE Safety Guard: Blocked — path outside allowed prefixes: '$p'. Allowed: ./audit/, ./exploit/, ./hunt/, ./data/, ./engagements/" >&2
+      echo "SCOPE Safety Guard: Blocked — path outside allowed prefixes: '$p'. Allowed: ./runs/, ./exploit/, ./hunt/, ./engagements/" >&2
       exit 2
     fi
   done <<< "$PATHS"

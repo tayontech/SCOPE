@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[3]
+SCHEMA_PATH = ROOT / "config/schemas/audit.schema.json"
+
+
+def load_schema() -> dict[str, Any]:
+    return json.loads(SCHEMA_PATH.read_text())
+
+
+def resolve_ref(schema: dict[str, Any], value: dict[str, Any]) -> dict[str, Any]:
+    ref = value.get("$ref")
+    if not ref:
+        return value
+    current: Any = schema
+    for part in ref.removeprefix("#/").split("/"):
+        current = current[part]
+    return current
+
+
+def allows_null(schema: dict[str, Any], value: dict[str, Any]) -> bool:
+    resolved = resolve_ref(schema, value)
+    schema_type = resolved.get("type")
+    if schema_type == "null":
+        return True
+    if isinstance(schema_type, list) and "null" in schema_type:
+        return True
+    return any(
+        allows_null(schema, option)
+        for key in ["anyOf", "oneOf"]
+        for option in resolved.get(key, [])
+    )
+
+
+def test_audit_schema_allows_graph_node_types_emitted_by_python_graph_builder() -> None:
+    schema = load_schema()
+    node_types = schema["properties"]["graph"]["properties"]["nodes"]["items"]["properties"]["type"]["enum"]
+    emitted_types = [
+        "user",
+        "role",
+        "group",
+        "external",
+        "data",
+        "compute",
+        "gateway",
+        "messaging",
+        "ai",
+        "idp",
+        "oidc",
+    ]
+
+    missing = [node_type for node_type in emitted_types if node_type not in node_types]
+    assert missing == []
+
+
+def test_audit_schema_allows_graph_edge_types_emitted_by_python_graph_builder() -> None:
+    schema = load_schema()
+    edge_types = schema["properties"]["graph"]["properties"]["edges"]["items"]["properties"]["edge_type"]["enum"]
+    emitted_types = [
+        "trust",
+        "service",
+        "membership",
+        "executes_as",
+        "invokes",
+        "authenticates_to",
+        "resource_policy_allows",
+        "encrypted_by",
+    ]
+
+    missing = [edge_type for edge_type in emitted_types if edge_type not in edge_types]
+    assert missing == []
+
+
+def test_audit_schema_documents_graph_v2_metadata_and_evidence_fields() -> None:
+    schema = load_schema()
+    graph_props = schema["properties"]["graph"]["properties"]
+    node_props = graph_props["nodes"]["items"]["properties"]
+    edge_props = graph_props["edges"]["items"]["properties"]
+
+    for field in ["schema_version", "metadata"]:
+        assert field in graph_props
+    for field in ["resource_type", "arn", "service", "region", "account_id", "source_path", "_source"]:
+        assert field in node_props
+    for field in ["id", "relationship", "service", "region", "account_id", "evidence", "_source"]:
+        assert field in edge_props
+
+
+def test_audit_schema_documents_attack_pipeline_fields() -> None:
+    schema = load_schema()
+    for field in ["candidate_attack_paths", "attack_validation", "security_observations"]:
+        assert schema["properties"][field]["type"] == "array"
+
+    attack_path_props = schema["properties"]["attack_paths"]["items"]["properties"]
+    for field in [
+        "id",
+        "source_candidate_id",
+        "validation_status",
+        "hops",
+        "runtime_assumptions",
+        "coverage_caveats",
+    ]:
+        assert field in attack_path_props
+
+    assert schema["properties"]["candidate_attack_paths"]["items"]["additionalProperties"] is False
+    assert schema["properties"]["attack_validation"]["items"]["additionalProperties"] is False
+    assert schema["properties"]["security_observations"]["items"]["additionalProperties"] is False
+
+    required = schema["properties"]["attack_paths"]["items"]["required"]
+    for field in ["id", "source_candidate_id", "validation_status", "hops"]:
+        assert field in required
+
+    hop = schema["$defs"]["hop"]
+    assert "assume_role" in hop["properties"]["transition"]["enum"]
+    assert "data_access" in hop["properties"]["transition"]["enum"]
+    assert schema["properties"]["candidate_attack_paths"]["items"]["properties"]["hops"]["minItems"] == 1
+    assert schema["properties"]["attack_paths"]["items"]["properties"]["hops"]["minItems"] == 1
+
+    hop_json = json.dumps(hop, separators=(",", ":"))
+    assert '"runtime_assumption"' in hop_json
+    assert '"assumptions":{"minItems":1' in hop_json
+    assert '"evidence":{"minItems":1' in hop_json
+
+    evidence_ref = schema["$defs"]["evidenceRef"]
+    assert "graph_edge" in evidence_ref["properties"]["type"]["enum"]
+    assert allows_null(schema, evidence_ref["properties"]["id"])
+    assert allows_null(schema, schema["$defs"]["attackContext"]["properties"]["principal"])
+    assert allows_null(schema, schema["$defs"]["startingPosition"]["properties"]["arn"])
+    assert allows_null(schema, schema["properties"]["attack_validation"]["items"]["properties"]["validated_impact"])

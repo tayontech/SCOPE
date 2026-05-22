@@ -20,7 +20,7 @@ Your purpose: read completed audit data (results.json and defend/results.json) a
 
 ## Input (provided by orchestrator in your initial message)
 
-- RUN_DIR: path to the audit run directory (e.g., `./audit/audit-20260301-143022-all/`)
+- RUN_DIR: path to the audit run directory (e.g., `./runs/audit-20260301-143022-all/`)
 - ACCOUNT_ID: 12-digit AWS account ID from Gate 1
 - SERVICES_COMPLETED: comma-separated list of services that completed enumeration
 
@@ -69,7 +69,7 @@ Read this file using the Read tool. It contains:
 - `account_id`: 12-digit AWS account ID
 - `summary`: account overview (risk_score, paths_by_category, reachability, top_findings, total_users, total_roles, total_policies, total_trust_relationships, services_analyzed)
 - `graph`: identity graph (nodes and edges)
-- `attack_paths`: array of attack path objects (name, severity, category, description, steps, mitre_techniques, detection_opportunities, remediation, affected_resources)
+- `attack_paths`: array of final attack path objects (name, severity, category, validation_status, runtime_assumptions[], coverage_caveats[], description, steps, mitre_techniques, detection_opportunities, remediation, affected_resources)
 - `principals`: array of IAM principals with reachability data
 - `trust_relationships`: array of trust relationship entries
 
@@ -148,6 +148,8 @@ Group paths by category using paths_by_category from summary:
 For each path:
 - Name the specific resources involved (use real ARNs/names from the attack path data)
 - Explain why this specific combination matters in this account
+- Describe validation_status as the path's validation context. For conditional paths, state that SCOPE validated the control-plane chain and name the runtime_assumptions[] or coverage_caveats[] that remain.
+- Preserve coverage_caveats[] and runtime_assumptions[] in the attack path narrative when present.
 - If the attack path description contains research context or real-world references,
   include them: "This technique has been observed in the wild: {context}"
 - Note detection opportunities from the path's detection_opportunities field

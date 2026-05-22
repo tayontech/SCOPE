@@ -18,9 +18,9 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 2. Show all modules that will run and get batch approval from the operator (Gate 2 — single prompt)
 3. Run `uv run python -m scope audit` for deterministic Python AWS SDK enumeration and post-processing
 4. Present enumeration summary and pause for operator confirmation before attack-paths (Gate 3)
-5. Dispatch the attack analysis subagent with fresh context — it reads from disk and enriches results.json
+5. Dispatch the attack analysis pipeline — candidate generation, candidate lint, validation, validation lint
 6. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
-7. Present attack path findings, await operator approval before defend (Gate 4)
+7. Present validated attack path findings, await operator approval before defend (Gate 4)
 8. Write the three-layer findings.md report to $RUN_DIR/
 9. Auto-chain defend as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
 10. Auto-dispatch synthesizer subagent — it reads results.json and defend/results.json, produces engagement-report.md
@@ -227,34 +227,58 @@ After enumeration completes and before Gate 3, spot-check module JSON under `$RU
 </module_validation>
 
 <attack_paths_dispatch>
-## Attack Path Analysis — Parallel Domain Dispatch
+## Attack Path Analysis — Candidate and Validation Pipeline
 
-Attack path analysis is handled by a single fresh-context subagent. The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, and base `results.json`.
+Attack path analysis uses a candidate generation subagent followed by a validation subagent. The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, and base `results.json`.
 
-### Dispatch
+### Candidate Dispatch
 
 Dispatch `scope-attack-analyze` with:
 - `RUN_DIR`
 - `ACCOUNT_ID`
 - `OWNED_ACCOUNTS`
 
-The subagent reads runtime artifacts from `$RUN_DIR/`, reasons across IAM, graph, resources, and module envelopes, then enriches `$RUN_DIR/results.json`.
+The subagent reads runtime artifacts from `$RUN_DIR/`, reasons across IAM, graph, resources, and module envelopes, then writes candidate attack data to `$RUN_DIR/results.json`.
 
-**Expected return:** STATUS (complete|partial|error), FILE (`$RUN_DIR/results.json`), METRICS (attack_paths and severity counts). If it fails, log the error and proceed to Gate 4 with factual enumeration data only.
+**Expected analyze output:** `candidate_attack_paths[]` and `security_observations[]` in `$RUN_DIR/results.json`.
+
+After analyze returns, run exactly:
+```bash
+uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage candidates
+```
+
+If candidate lint fails, stop before validation and surface linter errors to the operator. Do not dispatch `scope-attack-validate`.
+
+### Validation Dispatch
+
+Dispatch `scope-attack-validate` with:
+- `RUN_DIR`
+- `ACCOUNT_ID`
+
+The subagent reads `candidate_attack_paths[]`, fact-checks candidates against runtime artifacts, writes `attack_validation[]`, and promotes validated or conditional candidates into final `attack_paths[]`.
+
+**Expected validate output:** `attack_validation[]` and promoted `attack_paths[]` in `$RUN_DIR/results.json`.
+
+After validation returns, run exactly:
+```bash
+uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage validation
+```
+
+If validation lint fails, stop before Gate 4 and surface linter errors to the operator.
 </attack_paths_dispatch>
 
 <verification>
 @include agents/shared/verification-protocol.md
 
-**Audit note:** Run verification inline after attack path synthesis completes. Apply domain-core and domain-aws sections. Verify claims in results.json before presenting Gate 4 results.
+**Audit note:** Run verification inline after attack validation completes and validation lint passes. Apply domain-core and domain-aws sections. Verify claims in results.json before presenting Gate 4 results.
 </verification>
 
 <gate_4_results_approval>
 ## Gate 4: Attack Path Results Approval
 
-After attack-paths subagent completes and verification runs, display: attack path count by severity (critical/high/medium/low), speculative paths stripped by verify, top 3 findings (one sentence each).
+After attack validation, validation lint, and verification complete, display: candidates generated, validated paths, conditional paths, rejected paths, final attack path count by severity (critical/high/medium/low), and top 3 validated/conditional paths (one sentence each).
 
-Options: `continue` (export results.json, full output), `skip` (text output only — sets GATE4_SKIP=true, skips results.json/dashboard export), `stop` (end session).
+Options: `continue` (export results.json, full output), `skip` (text output only — sets GATE4_SKIP=true, skips dashboard export, defend, and synthesizer), `stop` (end session).
 
 Wait for operator approval before proceeding.
 </gate_4_results_approval>
@@ -272,7 +296,7 @@ After Gate 4 approval, write `$RUN_DIR/findings.md` — always generated, even w
 
 2. **Layer 2 — Findings by Severity** (`--all`/multi-service: grouped by critical/high/medium/low) **or Effective Permissions** (single ARN: Action | Resource | Effect | Source Policy table).
 
-3. **Layer 3 — Attack Path Narratives:** Ordered by exploitability DESC. Each path includes: name, severity, exploitability, confidence (what was/wasn't verified), MITRE TTPs, narrative paragraph with real policy details, concrete exploit CLI steps (reference only), Splunk detection sketch, remediation actions.
+3. **Layer 3 — Attack Path Narratives:** Ordered by exploitability DESC. Each path includes: name, severity, exploitability, validation status (validated or conditional with caveats), MITRE TTPs, narrative paragraph with real policy details, concrete exploit CLI steps (reference only), Splunk detection sketch, remediation actions.
 
 ### Coverage Gaps subsection
 
@@ -284,7 +308,7 @@ For each module where `status === 'error'`: list the module as completely unanal
 
 Distinguish `partial` from `error` clearly: partial means *some* data was collected, error means *no* data was collected. They have different operational meaning — partial findings are real-but-incomplete; error findings are absent entirely.
 
-Also surface per-finding `<field>_status` annotations when relevant: if a bucket finding has `policy_status: 'access_denied'`, the bucket may have a public policy that the audit didn't see. Cross-reference this against the findings actually reported — if any reported finding's confidence is reduced by access denials on related fields, mention it.
+Also surface per-finding `<field>_status` annotations when relevant: if a bucket finding has `policy_status: 'access_denied'`, the bucket may have a public policy that the audit didn't see. Cross-reference this against the findings actually reported — if any reported finding's validation status or caveats depend on access denials in related fields, mention it.
 
 If all modules have `status === 'complete'` and no per-finding `<field>_status` is `'access_denied'` or `'error'`, write "No coverage gaps — all enumeration succeeded." Don't fabricate gaps to fill the section.
 
@@ -307,7 +331,7 @@ After findings.md is written (and Gate 4 was NOT skipped):
 
 The Python runtime performs this automatically when invoked with `--dashboard-export`. If the export is missing, rerun the runtime command with `--dashboard-export` or copy the run into `dashboard/public/` using the same index shape.
 
-**Gate 4 skip exception:** If GATE4_SKIP=true, skip all exports — only `findings.md` and `agent-log.jsonl` are required.
+**Gate 4 skip exception:** If GATE4_SKIP=true, skip dashboard exports only. `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required.
 </results_export>
 
 <defend_auto_chain>
@@ -321,7 +345,7 @@ After findings.md and results.json are written, automatically dispatch scope-def
 
 **Expected return:** STATUS, DEFEND_RUN_DIR (`{audit_run_dir}/defend/defend-{timestamp}/`), METRICS (scps, rcps, detections). Capture DEFEND_RUN_DIR — needed for pipeline Run 2.
 
-Defend failure is non-blocking — log warning, continue to synthesizer/pipeline.
+Defend failure is non-blocking — log warning and continue to post-processing/dashboard. Do not dispatch synthesizer without defend output.
 
 Announce completion or failure to operator.
 </defend_auto_chain>
@@ -329,13 +353,13 @@ Announce completion or failure to operator.
 <synthesizer_dispatch>
 ## Engagement Synthesis Dispatch
 
-After defend completes (or fails), dispatch the synthesizer subagent automatically.
+After defend completes successfully, dispatch the synthesizer subagent automatically.
 
 **Skip conditions:** Gate 4 was skipped (GATE4_SKIP=true) OR defend failed — synthesizer requires both results.json and defend output. Log skip reason.
 
 **Dispatch:** scope-synthesizer subagent with `RUN_DIR`, `ACCOUNT_ID`, `SERVICES_COMPLETED`. Uses model: sonnet.
 
-**Expected return:** STATUS, FILE ($RUN_DIR/engagement-report.md), METRICS (sections, attack_paths_covered, services_covered), ERRORS. Announce completion or failure to operator. Failure is non-blocking for post-processing — pipeline continues.
+**Expected return:** STATUS, FILE ($RUN_DIR/engagement-report.md), METRICS (sections, attack_paths_covered, services_covered), ERRORS. Announce completion or failure to operator. Synthesizer failure is non-blocking for post-processing and does not make `engagement-report.md` mandatory.
 </synthesizer_dispatch>
 
 <post_processing_pipeline>
@@ -366,7 +390,7 @@ If generation fails: log warning, continue — raw artifacts are still valid. An
 
 Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
 
-**Gate 4 skip exception:** If the operator said "skip" at Gate 4, only `findings.md` and `agent-log.jsonl` are required — `results.json`, dashboard export, and dashboard index are skipped.
+**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Dashboard export, dashboard index, defend output, and synthesizer output are skipped.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|
@@ -376,9 +400,9 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 | 4 | `agent-log.jsonl` | `$RUN_DIR/agent-log.jsonl` | Agent activity log — one JSON line per event |
 | 5 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
 | 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
-| 7 | `engagement-report.md` | `$RUN_DIR/engagement-report.md` | Unified engagement narrative -- cross-phase synthesis |
+| 7 | `engagement-report.md` | `$RUN_DIR/engagement-report.md` | Unified engagement narrative -- required only when synthesizer runs and succeeds |
 
-Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it.
+Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it. Do not require `engagement-report.md` when Gate 4 was skipped, defend failed, or synthesizer failed.
 </mandatory_outputs>
 
 <evidence_protocol>
@@ -401,7 +425,10 @@ Log every subagent dispatch/return and every gate transition. Seed the log after
 | Subagent STATUS: error | Log `[ERROR] {service} — {error}`, continue with remaining modules. |
 | Subagent STATUS: partial | Log `[PARTIAL] {service} — {error}`, continue. |
 | Subagent no output file | Log `[MISSING] {service}.json not written`, report at Gate 3. |
-| Attack-paths failure | Log, continue to Gate 4 with available data. |
+| Attack analyze failure | Log, stop before candidate lint and surface the error. |
+| Candidate lint failure | Stop before validation and surface linter errors. |
+| Attack validation failure | Log, stop before validation lint and surface the error. |
+| Validation lint failure | Stop before Gate 4 and surface linter errors. |
 | Defend / Pipeline / Dashboard failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
 
 Never swallow errors silently — operator must see every non-AccessDenied error. Aggregate error count at Gate 3 summary.
@@ -418,12 +445,12 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 2. **Operator gates honored** — Gate 1 auto-continued. Gates 2, 3, and 4 displayed and operator approval received before proceeding. No step past Gate 1 executed without explicit operator go-ahead.
 3. **Target parsed and routed** — Input correctly identified (ARN, service name, `--all`, `@targets.txt`) and service list resolved. Service list passed to `scope audit`.
 4. **Python runtime dispatched** — `scope audit` ran the approved scope. All modules ran (or were operator-skipped) and per-module JSONs were written under `modules/`.
-5. **Attack analysis dispatched as fresh-context subagent** — Always, regardless of service count. results.json enriched in $RUN_DIR/.
-6. **Verification ran inline** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
+5. **Attack pipeline completed** — scope-attack-analyze dispatched with RUN_DIR, ACCOUNT_ID, OWNED_ACCOUNTS; candidate linter passed; scope-attack-validate dispatched with RUN_DIR and ACCOUNT_ID; validation linter passed.
+6. **Verification ran inline after attack validation** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory under `./runs/` or explicit `--run-dir` created, all artifacts written there, run metadata recorded in `manifest.json` and `summary.json`.
-9. **Defend auto-chained** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. Defend creates its run directory at `$RUN_DIR/defend/defend-{timestamp}/` and returns DEFEND_RUN_DIR in its summary.
-10. **Synthesizer dispatched** — scope-synthesizer dispatched as subagent after defend. engagement-report.md written to $RUN_DIR/. Skipped if Gate 4 was skipped or defend failed.
+9. **Defend handled** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When defend succeeds, it creates `$RUN_DIR/defend/defend-{timestamp}/` and returns DEFEND_RUN_DIR in its summary. Defend failure is logged and remains non-blocking.
+10. **Synthesizer handled** — scope-synthesizer dispatched only after defend succeeds. `engagement-report.md` written to $RUN_DIR/ when synthesizer succeeds. Skipped if Gate 4 was skipped or defend failed; failure is non-blocking.
 11. **Runtime post-processing completed** — `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` exist before attack analysis.
 12. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
 13. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).

@@ -11,6 +11,10 @@ You are an adversarial reviewer of defensive security controls. You assume the w
 You review the actual artifact files written by the four Wave 1 subagents. You do not review summaries or abstractions — you read the real files on disk (D-05).
 </role>
 
+<downstream_attack_path_contract>
+Consume final attack_paths[] where validation_status is validated or conditional. Preserve runtime_assumptions[] in control mappings. Preserve coverage_caveats[] where present. Do not treat conditional as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
+</downstream_attack_path_contract>
+
 <intake>
 ## Input (provided by orchestrator in your initial message)
 
@@ -132,7 +136,7 @@ cat "$DEFEND_RUN_DIR/splunk-detections.md"
 ### Step 2: Read audit results.json for cross-reference
 
 ```bash
-cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, mitre_techniques}'
+cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, validation_status, runtime_assumptions, coverage_caveats, mitre_techniques}'
 ```
 
 **BLOCK criteria:**
@@ -146,7 +150,7 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, mitre
 
 - **WARN** if a detection has `eventName=*` or wildcard matching without additional restrictive filters — high false positive risk
 - **WARN** if a detection has no false positive guidance section
-- **WARN** if a detection covers a `confidence_tier` of `CONDITIONAL` attack path but has no tuning guidance (conditional paths have higher environmental variance)
+- **WARN** if a detection covers a `validation_status=conditional` attack path but has no tuning guidance or coverage caveat note. Conditional paths have validated control-plane chains with runtime variance or missing context.
 
 **Consistency check:**
 

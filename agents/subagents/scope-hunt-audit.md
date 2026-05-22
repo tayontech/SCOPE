@@ -56,14 +56,15 @@ cat "$HUNT_RUN_DIR/results.json"
 
 **For AUDIT runs, extract:**
 - `summary.risk_score`, `summary.top_findings[]`, `summary.paths_by_category`
-- `attack_paths[]` — for each: `name`, `severity`, `category`, `description`, `detection_opportunities[]`, `affected_resources[]`, `mitre_techniques[]`, `steps[]`
+- `attack_paths[]` — for each: `name`, `severity`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `description`, `detection_opportunities[]`, `affected_resources[]`, `mitre_techniques[]`, `steps[]`
 - `principals[]` — for each: `arn`, `reachability.max_privilege`, `reachability.critical_paths[]`
 - `trust_relationships[]` — for each: `role_arn`, `trust_type`, `risk`, `is_wildcard`
 
 **For EXPLOIT runs, extract:**
 - `target_arn`, `summary.risk_score`, `summary.persistence_techniques`, `summary.exfiltration_vectors`, `summary.passrole_chains`
-- `attack_paths[]` — for each: `name`, `category`, `steps[]` (especially `steps[].action` — these are CloudTrail eventNames to hunt), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`, `confidence_tier`
-- Filter: prefer `confidence_tier=GUARANTEED` paths for hunt focus
+- `attack_paths[]` — for each: `name`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `steps[]` (especially `steps[].action` as exploit command/action text and `steps[].visibility` as MGT/DATA/NONE), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`
+- Filter: prefer `validation_status=validated` paths for hunt focus. If none exist, include `validation_status=conditional` paths.
+Do not treat exploit `steps[].action` as a CloudTrail eventName. Derive CloudTrail event candidates from the AWS CLI command or API operation when possible, then fall back to the MITRE mapping below.
 
 ### Step 4: Read Per-Module JSONs (Audit Only)
 
@@ -98,10 +99,11 @@ RUN DIRECTORY LOADED
 
   [EXPLOIT only]
   Target:         [target_arn]
-  Guaranteed paths: [count of confidence_tier=GUARANTEED]
+  Validated paths:  [count of validation_status=validated]
+  Conditional paths: [count of validation_status=conditional]
   Persistence techniques available: [summary.persistence_techniques count]
   Exfiltration vectors available:   [summary.exfiltration_vectors count]
-  CloudTrail eventNames to hunt:    [deduplicated list of steps[].action values from GUARANTEED paths]
+  CloudTrail eventNames to hunt:    [deduplicated derived eventNames from validated paths, or conditional paths when no validated paths exist]
 
   Top findings:
   [summary.top_findings[] — one per line, bulleted]
@@ -117,7 +119,7 @@ After the run summary is displayed, generate hypotheses from the loaded attack p
 
 ### Branch: HUNT_RUN_TYPE=AUDIT (HYPO-02)
 
-**Input:** `attack_paths[]` from results.json, each with `name`, `severity`, `category`, `steps[]`, `mitre_techniques[]`, `detection_opportunities[]`, `affected_resources[]`.
+**Input:** `attack_paths[]` from results.json, each with `name`, `severity`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `steps[]`, `mitre_techniques[]`, `detection_opportunities[]`, `affected_resources[]`.
 
 **Formation logic:**
 
@@ -166,7 +168,7 @@ HYPOTHESIS [N]
   CloudTrail signals:
     - [detection_opportunity 1 → eventName]
     - [detection_opportunity 2 → eventName]
-    - [steps[].action values if structured]
+    - [steps[].action values only when they are AWS event names; otherwise derived eventName candidates from command/API text]
   MITRE:              [mitre_techniques[]]
 ```
 
@@ -176,11 +178,11 @@ When storing `active_hypothesis` for a selected HYPO-02 hypothesis (HYPO-04), po
 
 ### Branch: HUNT_RUN_TYPE=EXPLOIT (HYPO-03)
 
-**Input:** `attack_paths[]` from exploit results.json, each with `name`, `steps[]` (including `steps[].action` and `steps[].visibility`), `confidence_tier`, `noise_score`, `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`. Also `target_arn` at the run level.
+**Input:** `attack_paths[]` from exploit results.json, each with `name`, `steps[]` (including `steps[].action` as exploit command/action text and `steps[].visibility`), `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `noise_score`, `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`. Also `target_arn` at the run level.
 
 **Formation logic:**
 
-1. Filter to `confidence_tier=GUARANTEED` paths first. If none exist, include `confidence_tier=CONDITIONAL` paths.
+1. Filter to `validation_status=validated` paths first. If none exist, include `validation_status=conditional` paths. Do not lower hunt priority only because a path is conditional; use runtime assumptions and coverage caveats to shape the hypothesis.
 2. For each selected path, partition steps by visibility:
    - `visibility=MGT` or `visibility=DATA` → observable steps (produce CloudTrail events — hunt for these)
    - `visibility=NONE` → unobservable steps (no CloudTrail evidence expected — note explicitly)
@@ -194,13 +196,15 @@ When storing `active_hypothesis` for a selected HYPO-02 hypothesis (HYPO-04), po
 ```
 HYPOTHESIS [N]
   Source:           Exploit path — [attack_path.name]
-  Confidence:       [confidence_tier]
+  Validation:       [validation_status]
+  Runtime assumptions: [runtime_assumptions[]]
+  Coverage caveats: [coverage_caveats[]]
   Noise level:      [noise_score / noise_profile]
   Adversary goal:   [derived from category mapping — e.g., Privilege escalation]
   Target:           [target_arn from results.json]
   Statement:        "If [target_arn] executed [attack_path.name], we expect CloudTrail to show [observable_steps_count] observable events. [unobservable_count] steps will leave no CloudTrail trace."
   Observable steps (hunt for these):
-    - [step.description] → eventName: [step.action]  (visibility: MGT/DATA)
+    - [step.description] → command/action: [step.action] → derived eventName candidate: [eventName]  (visibility: MGT/DATA)
   Unobservable steps (no CloudTrail evidence):
     - [step.description]  (visibility: NONE)
   Persistence signals:   [persistence_techniques[].technique where available=true]
@@ -220,9 +224,9 @@ Hunt mode produces multiple hypotheses. Display a numbered list and wait for sel
 HYPOTHESIS SELECTION
 Generated [N] hunt hypotheses from [source — audit run / exploit run].
 
-  1. [Hypothesis 1 name] — [severity/confidence] — [1-line statement]
-  2. [Hypothesis 2 name] — [severity/confidence] — [1-line statement]
-  3. [Hypothesis 3 name] — [severity/confidence] — [1-line statement]
+  1. [Hypothesis 1 name] — [severity/validation_status] — [1-line statement]
+  2. [Hypothesis 2 name] — [severity/validation_status] — [1-line statement]
+  3. [Hypothesis 3 name] — [severity/validation_status] — [1-line statement]
   A. Investigate all (sequential — one at a time, I will propose the first query for each)
   B. Show me more detail on a specific hypothesis before selecting
 
@@ -282,10 +286,11 @@ HUNT_HANDOFF
     module_jsons:        [list of filenames without extension]
     [EXPLOIT only]
     target_arn:          [string]
-    guaranteed_paths:    [number]
+    validated_paths:     [number]
+    conditional_paths:   [number]
     persistence_count:   [number]
     exfiltration_count:  [number]
-    cloudtrail_eventnames: [deduplicated list from GUARANTEED path steps]
+    cloudtrail_eventnames: [deduplicated derived eventNames from validated path steps, or conditional path steps when no validated paths exist]
 
   selected_hypothesis:
     name:              [string]

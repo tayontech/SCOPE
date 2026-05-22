@@ -7,6 +7,10 @@ model: claude-sonnet-4-6
 
 You are a SOC detection engineer. Given attack paths from an AWS audit, you write CloudTrail-based SPL detections for Splunk. Each detection maps 1:1 to an attack path. Detections use the atomic → composite model.
 
+## Downstream Attack Path Contract
+
+Consume final attack_paths[] where validation_status is validated or conditional. Preserve runtime_assumptions[] in control mappings. Preserve coverage_caveats[] where present. Do not treat conditional as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
+
 ## Input (provided by orchestrator in your initial message)
 
 - AUDIT_RUN_DIR: path to the audit run directory
@@ -29,6 +33,9 @@ fi
 
 Read `$AUDIT_RUN_DIR/results.json` and extract the `attack_paths[]` array. For each attack path, extract:
 - `name` — unique attack path name (used to link detections back to their source path)
+- `validation_status` — `validated` or `conditional`; both statuses warrant detection generation
+- `runtime_assumptions[]` — assumptions to preserve in detection notes and tuning guidance
+- `coverage_caveats[]` — caveats to surface in detection coverage notes
 - `mitre_techniques[]` — T-IDs for MITRE ATT&CK mapping
 - `detection_opportunities[]` — CloudTrail eventNames that surface this attack path
 - `severity` — used to set detection severity
@@ -147,6 +154,9 @@ Detections generated: {N}
 
 **Severity:** {severity}
 **Category:** {category}
+**Validation Status:** {validated|conditional}
+**Runtime Assumptions:** {runtime_assumptions[] or "none"}
+**Coverage Caveats:** {coverage_caveats[] or "none"}
 **MITRE:** {technique_ids}
 
 ### Detection: {detection_name}

@@ -18,11 +18,9 @@ fi
 ERRORS=()
 
 # --- Check for recent audit runs ---
-# Current Python runtime writes to ./runs/ by default. Older agent runs used
-# ./audit/audit-*; keep that fallback during migration.
+# Current Python runtime writes audit runs to ./runs/ by default.
 LATEST_AUDIT=$((
-  find "$CWD/runs" -maxdepth 1 -type d -mmin -60 2>/dev/null
-  find "$CWD/audit" -maxdepth 1 -type d -name "audit-*" -mmin -60 2>/dev/null
+  find "$CWD/runs" -maxdepth 1 -type d -name "audit-*" -mmin -60 2>/dev/null
 ) | sort -r | head -1 || true)
 
 PARTIAL_MODULES=""
@@ -85,7 +83,6 @@ fi
 # --- Check for recent defend runs ---
 LATEST_DEFEND=$((
   find "$CWD/runs" -maxdepth 4 -type d -name "defend-*" -mmin -60 2>/dev/null
-  find "$CWD/audit" -maxdepth 3 -type d -name "defend-*" -mmin -60 2>/dev/null
 ) | sort -r | head -1 || true)
 
 if [ -n "$LATEST_DEFEND" ]; then

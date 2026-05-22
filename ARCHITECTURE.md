@@ -19,8 +19,8 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 - `scope.core` owns AWS clients, coverage, envelope models, retry, and region discovery
 
 **Attack path analysis** (fresh-context subagent dispatched by scope-audit):
-- `extract-graph.js` — Deterministic graph extraction from per-module JSON (Node.js, no AI model)
-- `scope-attack-analyze` — Cross-service attack path analysis over `results.json`, `resources.jsonl`, `graph.json`, and module envelopes
+- `scope.runtime.graph` — deterministic graph v2 extraction from per-module JSON (Python, no AI model)
+- `scope-attack-analyze` — cross-service attack path analysis over `results.json`, `resources.jsonl`, `graph.json`, and module envelopes
 
 **Verification agent** (read inline during execution):
 - `scope-verify` — Unified verification: claim ledger, taxonomy, AWS API validation, SPL lints (domain sections dispatched by caller)
@@ -53,10 +53,10 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  └──────────────────────────┘    │
     │                               │       │ writes modules/*/*.json    │
     │                               │       ▼                           │
-    │                               │  Attack Path Analysis:               │
+    │                               │  Runtime graph extraction:             │
     │                               │  ┌──────────────────────────────┐    │
-    │                               │  │ extract-graph.js             │    │
-    │                               │  │ (deterministic)              │    │
+    │                               │  │ scope.runtime.graph          │    │
+    │                               │  │ graph v2 + evidence          │    │
     │                               │  └──────────┬───────────────────┘    │
     │                               │             ▼                         │
     │                               │  ┌──────────────────────────────┐    │

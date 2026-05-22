@@ -177,6 +177,9 @@ def test_audit_writes_graph_and_results_after_aggregation(monkeypatch, tmp_path:
     assert results["summary"]["total_resources"] == 1
     assert any(node["id"] == "role:LambdaExecRole" for node in results["graph"]["nodes"])
     assert results["attack_paths"] == []
+    assert results["candidate_attack_paths"] == []
+    assert results["attack_validation"] == []
+    assert results["security_observations"] == []
 
 
 def test_audit_returns_nonzero_when_envelope_missing(monkeypatch, tmp_path: Path):
