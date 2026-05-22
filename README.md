@@ -64,7 +64,7 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 
 ```
 agents/               Core agents: audit orchestrator, controls, exploit, investigate
-agents/subagents/     Attack analysis, controls subagents, investigation intake, research, synthesizer, verification
+agents/subagents/     Attack analysis, controls subagents, investigation intake, research, verification
 scope/enumerators/    Python boto3 resource inventory modules
 scope/core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
 scope/runtime/        Audit orchestration, target selection, aggregation, post-processing
@@ -138,7 +138,6 @@ SCOPE has two types of agents:
 - `scope-controls-guardrails`, `scope-controls-detections`, `scope-controls-policy`, `scope-controls-remediation`, `scope-controls-validate` — controls subagents
 - `scope-investigate-alert`, `scope-investigate-intel`, `scope-investigate-run` — investigation intake and hypothesis generation
 - `scope-research` — real-world technique research integration
-- `scope-synthesizer` — engagement synthesis and narrative generation
 
 When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains controls on a reasoning model. Scope-investigate dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
@@ -148,7 +147,7 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
-| Reasoning (attack analysis, controls + subagents, investigation intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack analysis, controls + subagents, investigation intake, research) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, investigate) inherit your session model.
 

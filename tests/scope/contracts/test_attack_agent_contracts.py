@@ -280,7 +280,7 @@ def test_audit_orchestrates_attack_pipeline() -> None:
         "final attack path count by severity",
         "top 3 validated/conditional paths",
         "On skip, still write `$RUN_DIR/findings.md`",
-        "Do not dispatch scope-controls or scope-synthesizer",
+        "Do not dispatch scope-controls.",
     ]:
         assert text in gate4_section
     assert_not_matches(gate4_section, r"confidence|confidence tier|confidence tiers")
@@ -288,12 +288,11 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,180}\$RUN_DIR/results\.json[\s\S]{0,120}findings\.md[\s\S]{0,120}remain required")
     assert_not_matches(prompt, r"skips results\.json|results\.json[\s\S]{0,80}skipped")
     assert_not_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,220}Dashboard export, dashboard index")
-    assert_matches(prompt, r"engagement-report\.md[\s\S]{0,140}required only when synthesizer runs and succeeds")
-    assert "Do not require `engagement-report.md` when Gate 4 was skipped, controls failed, or synthesizer failed." in prompt
-    assert_matches(prompt, r"Controls failure is non-blocking[\s\S]{0,140}Do not dispatch synthesizer without controls output\.")
-    assert "After controls completes successfully, dispatch the synthesizer subagent automatically." in prompt
-    assert_matches(prompt, r"Synthesizer failure is non-blocking[\s\S]{0,120}does not make `engagement-report\.md` mandatory\.")
-    assert_matches(prompt, r"Synthesizer handled[\s\S]{0,180}when synthesizer succeeds[\s\S]{0,120}failure is non-blocking")
+    assert_not_matches(prompt, r"scope-synthesizer|synthesizer|engagement-report\.md|Engagement Synthesis")
+    assert_not_matches(prompt, r"Do not require `engagement-report\.md`")
+    assert_not_matches(prompt, r"After controls completes successfully, dispatch the synthesizer subagent automatically\.")
+    assert_not_matches(prompt, r"Synthesizer failure is non-blocking")
+    assert_not_matches(prompt, r"Synthesizer handled")
     assert_matches(prompt, r"Controls handled[\s\S]{0,180}When controls succeeds[\s\S]{0,160}Controls failure is logged and remains non-blocking\.")
     assert_not_matches(prompt, r"Controls creates its run directory[\s\S]{0,80}returns CONTROLS_RUN_DIR")
     assert_not_matches(prompt, r"After controls completes \(or fails\), dispatch the synthesizer")
@@ -347,7 +346,6 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
             "agents/subagents/scope-controls-guardrails.md",
             "agents/subagents/scope-controls-policy.md",
             "agents/subagents/scope-controls-validate.md",
-            "agents/subagents/scope-synthesizer.md",
             "agents/subagents/scope-investigate-run.md",
             "agents/scope-exploit.md",
         ]
@@ -425,38 +423,6 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert_matches(investigate_run, r"Derive CloudTrail event candidates from the AWS CLI command or API operation")
     assert "derived eventName candidate" in investigate_run
     assert_not_matches(investigate_run, r"steps\[\]\.action`? (?:—|-)\s*these are CloudTrail eventNames|eventName: \[step\.action\]")
-
-    synth = prompts["agents/subagents/scope-synthesizer.md"]
-    assert_matches(synth, r"validation_status[\s\S]{0,220}coverage_caveats|coverage_caveats[\s\S]{0,220}validation_status")
-    assert "runtime_assumptions" in synth
-    assert "Use final `attack_paths[]` as the only attack-path source of truth." in synth
-    assert_matches(
-        synth,
-        r"Only include paths where `validation_status` is `validated` or `conditional`",
-    )
-    assert_matches(
-        synth,
-        r"must not drive report findings, counts, or attack-path narratives",
-    )
-    for text in [
-        "latest controls artifacts",
-        "Read these required data files:",
-        "results.json guardrails.md guardrails.json detections.md detections.json policy-replacements.md policy-replacements.json remediation-plan.md validation-report.md",
-        "$CONTROLS_RESULTS_DIR/guardrails.json",
-        "$CONTROLS_RESULTS_DIR/detections.json",
-        "$CONTROLS_RESULTS_DIR/policy-replacements.json",
-        "$CONTROLS_RESULTS_DIR/remediation-plan.md",
-        "$CONTROLS_RESULTS_DIR/validation-report.md",
-        "$CONTROLS_RESULTS_DIR/policies",
-        "Do not parse markdown to invent structured fields.",
-        "Do not call external MCP tools or enrich from the web",
-        "Structured controls fields came from JSON artifacts, not markdown inference",
-        "The audit orchestrator treats synthesizer failure as non-blocking",
-    ]:
-        assert text in synth
-    assert_not_matches(synth, r"Read exactly two files")
-    assert_not_matches(synth, r"## MCP Tool Discovery")
-    assert_not_matches(synth, r"Per the dispatch contract, synthesizer failure is blocking")
 
     exploit = prompts["agents/scope-exploit.md"]
     assert '"attack_paths": [' in exploit

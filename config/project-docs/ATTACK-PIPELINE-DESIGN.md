@@ -17,7 +17,6 @@ scope-audit
   -> scope-verify
   -> findings report skill
   -> scope-controls
-  -> scope-synthesizer
   -> dashboard
 ```
 

@@ -1,6 +1,6 @@
 ---
 name: scope-audit
-description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs Python SCOPE runtime enumeration, chains attack-path reasoning, verification, defensive controls, engagement synthesis, post-processing, and dashboard generation. Invoke with /scope:audit <target>.
+description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs Python SCOPE runtime enumeration, chains attack-path reasoning, verification, defensive controls, post-processing, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
@@ -24,9 +24,8 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 8. Present validated attack path findings, await operator approval before controls (Gate 4)
 9. Write the three-layer findings.md report to $RUN_DIR/
 10. Auto-chain controls as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
-11. Auto-dispatch synthesizer subagent — it reads results.json and controls/results.json, produces engagement-report.md
-12. Use the runtime post-processing artifacts produced by `python -m scope`
-13. Generate the dashboard report inline
+11. Use the runtime post-processing artifacts produced by `python -m scope`
+12. Generate the dashboard report inline
 
 **Operator-in-the-loop:** Pause at Gates 2, 3, and 4 and wait for operator approval before continuing. Gate 1 auto-continues. Never silently chain multiple gates or skip operator input.
 </role>
@@ -306,9 +305,9 @@ Verify claims in `$RUN_DIR/results.json` before presenting Gate 4 results:
 
 After attack validation, validation lint, and verification complete, display: candidates generated, validated paths, conditional paths, rejected paths, final attack path count by severity (critical/high/medium/low), and top 3 validated/conditional paths (one sentence each).
 
-Options: `continue` (full output), `skip` (sets GATE4_SKIP=true, writes findings.md, skips scope-controls, scope-synthesizer, and dashboard HTML generation), `stop` (end session).
+Options: `continue` (full output), `skip` (sets GATE4_SKIP=true, writes findings.md, skips scope-controls and dashboard HTML generation), `stop` (end session).
 
-On skip, still write `$RUN_DIR/findings.md` and keep `$RUN_DIR/results.json` intact. Do not dispatch scope-controls or scope-synthesizer. Do not delete or roll back dashboard export files already written by the Python runtime.
+On skip, still write `$RUN_DIR/findings.md` and keep `$RUN_DIR/results.json` intact. Do not dispatch scope-controls. Do not delete or roll back dashboard export files already written by the Python runtime.
 
 Wait for operator approval before proceeding.
 </gate_4_results_approval>
@@ -371,22 +370,10 @@ After findings.md and results.json are written, automatically dispatch scope-con
 
 **Expected return:** STATUS, CONTROLS_RUN_DIR (`{audit_run_dir}/controls/controls-{timestamp}/`), METRICS (scps, rcps, detections). Capture CONTROLS_RUN_DIR — needed for pipeline Run 2.
 
-Controls failure is non-blocking — log warning and continue to post-processing/dashboard. Do not dispatch synthesizer without controls output.
+Controls failure is non-blocking — log warning and continue to post-processing/dashboard.
 
 Announce completion or failure to operator.
 </controls_auto_chain>
-
-<synthesizer_dispatch>
-## Engagement Synthesis Dispatch
-
-After controls completes successfully, dispatch the synthesizer subagent automatically.
-
-**Skip conditions:** Gate 4 was skipped (GATE4_SKIP=true) OR controls failed — synthesizer requires both results.json and controls output. Log skip reason.
-
-**Dispatch:** scope-synthesizer subagent with `RUN_DIR`, `ACCOUNT_ID`, `SERVICES_COMPLETED`. Uses model: sonnet.
-
-**Expected return:** STATUS, FILE ($RUN_DIR/engagement-report.md), METRICS (sections, attack_paths_covered, services_covered), ERRORS. Announce completion or failure to operator. Synthesizer failure is non-blocking for post-processing and does not make `engagement-report.md` mandatory.
-</synthesizer_dispatch>
 
 <post_processing_pipeline>
 ## Runtime Post-Processing
@@ -416,7 +403,7 @@ If generation fails: log warning, continue — raw artifacts are still valid. An
 
 Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
 
-**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Controls output, synthesizer output, and dashboard HTML generation are skipped. Dashboard export and dashboard index remain acceptable when the Python runtime already created them before Gate 4.
+**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Controls output and dashboard HTML generation are skipped. Dashboard export and dashboard index remain acceptable when the Python runtime already created them before Gate 4.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|
@@ -426,9 +413,7 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 | 4 | `agent-log.jsonl` | `$RUN_DIR/agent-log.jsonl` | Agent activity log — one JSON line per event |
 | 5 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
 | 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
-| 7 | `engagement-report.md` | `$RUN_DIR/engagement-report.md` | Unified engagement narrative -- required only when synthesizer runs and succeeds |
-
-Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it. Do not require `engagement-report.md` when Gate 4 was skipped, controls failed, or synthesizer failed.
+Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it.
 </mandatory_outputs>
 
 <evidence_protocol>
@@ -483,8 +468,7 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory under `./runs/` or explicit `--run-dir` created, all artifacts written there, run metadata recorded in `manifest.json` and `summary.json`.
 9. **Controls handled** — scope-controls dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When controls succeeds, it creates `$RUN_DIR/controls/controls-{timestamp}/` and returns CONTROLS_RUN_DIR in its summary. Controls failure is logged and remains non-blocking.
-10. **Synthesizer handled** — scope-synthesizer dispatched only after controls succeeds. `engagement-report.md` written to $RUN_DIR/ when synthesizer succeeds. Skipped if Gate 4 was skipped or controls failed; failure is non-blocking.
-11. **Runtime post-processing completed** — `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` exist before attack analysis.
-12. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
-13. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
+10. **Runtime post-processing completed** — `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` exist before attack analysis.
+11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
+12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
 </success_criteria>

@@ -69,8 +69,6 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │       │                           │
     │                               │       ▼                           │
     │                               │  scope-controls (auto-chained)      │
-    │                               │  scope-synthesizer                │
-    │                               │  (engagement-report.md)           │
     │                               │  scope-verify (inline)            │
     │                               │  runtime post-processing          │
     │                               └──────────────────────────────────┘
@@ -286,12 +284,11 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs through `scope.runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs `python -m scope audit` + scope-attack-analyze + controls + synthesizer |
+| **audit** | `/scope:audit` | AWS APIs through `scope.runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs `python -m scope audit` + scope-attack-analyze + controls |
 | **controls** | orchestrator dispatch or `/scope:controls [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./runs/` (all runs, manual) | `results.json`, `guardrails.json`, `detections.json`, `policy-replacements.json`, `remediation-plan.md`, `validation-report.md`, `policies/{scp,rcp}-*.json`, `agent-log.jsonl` | scope-verify |
 | **exploit** | `/scope:exploit` | `./runs/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **investigate** | `/scope:investigate [input]` | Run-guided mode: `$SOURCE_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, bounded knowledge context, Splunk MCP (optional). Investigation mode: bounded knowledge context, Splunk MCP. Intel mode: bounded knowledge context, WebFetch (URL) or NL parse, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), durable knowledge updates through `scope-knowledge-update` only after approval | scope-verify (no post-processing pipeline in any mode) |
 | **scope-research** | Dispatched by exploit and attack-paths | WebSearch, external technique references | Research findings (in-memory, consumed by caller) | — |
-| **scope-synthesizer** | Dispatched by audit after controls | `$RUN_DIR/`, controls artifacts | `$RUN_DIR/engagement-report.md` | — |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
 
 ## Enforcement Layer

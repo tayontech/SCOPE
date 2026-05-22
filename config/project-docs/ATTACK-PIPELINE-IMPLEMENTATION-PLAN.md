@@ -1902,7 +1902,6 @@ git commit -m "feat: add attack pipeline skills"
 - Modify: `agents/subagents/scope-controls-detections.md`
 - Modify: `agents/subagents/scope-controls-remediation.md`
 - Modify: `agents/subagents/scope-controls-guardrails.md`
-- Modify: `agents/subagents/scope-synthesizer.md`
 - Modify: `agents/subagents/scope-hunt-audit.md`
 - Modify: `agents/scope-exploit.md`
 - Create: `tests/js/downstream-validation-status-contract.test.js`
@@ -1919,7 +1918,6 @@ const files = [
   'agents/subagents/scope-controls-detections.md',
   'agents/subagents/scope-controls-remediation.md',
   'agents/subagents/scope-controls-guardrails.md',
-  'agents/subagents/scope-synthesizer.md',
   'agents/subagents/scope-hunt-audit.md',
   'agents/scope-exploit.md',
 ];
@@ -1972,7 +1970,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 12**
 
 ```bash
-git add agents/scope-controls.md agents/subagents/scope-controls-detections.md agents/subagents/scope-controls-remediation.md agents/subagents/scope-controls-guardrails.md agents/subagents/scope-synthesizer.md agents/subagents/scope-hunt-audit.md agents/scope-exploit.md tests/js/downstream-validation-status-contract.test.js
+git add agents/scope-controls.md agents/subagents/scope-controls-detections.md agents/subagents/scope-controls-remediation.md agents/subagents/scope-controls-guardrails.md agents/subagents/scope-hunt-audit.md agents/scope-exploit.md tests/js/downstream-validation-status-contract.test.js
 git commit -m "chore: migrate downstream agents to validation status"
 ```
 

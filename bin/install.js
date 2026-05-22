@@ -516,7 +516,6 @@ function installSubagentsGemini(subagents, scope) {
     'scope-investigate-intel':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file', 'google_web_search', 'web_fetch'] },
     'scope-investigate-alert':   { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-research':           { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'google_web_search', 'web_fetch'] },
-    'scope-synthesizer':        { max_turns: 40, tools: ['run_shell_command', 'read_file', 'write_file', 'grep_search', 'glob'] },
     'scope-verify':             { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file', 'google_web_search', 'web_fetch'] },
   };
 

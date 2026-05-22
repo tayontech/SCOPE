@@ -102,8 +102,6 @@ def test_runtime_path_contracts_use_runs_directory() -> None:
     assert_not_contains("agents/scope-controls.md", "/audit/audit-*")
     assert_contains("agents/scope-investigate.md", "`runs/`")
     assert_not_contains("agents/scope-investigate.md", "`audit/`")
-    assert_contains("agents/subagents/scope-synthesizer.md", "./runs/audit-20260301-143022-all/")
-    assert_not_contains("agents/subagents/scope-synthesizer.md", "./audit/audit-20260301-143022-all/")
     assert_not_contains("config/scps/README.md", "./audit/audit-*")
     assert_contains("config/scps/README.md", "./runs/audit-*/controls/controls-*/policies/scp-deny-root.json")
     assert_contains("config/hooks/scope-agent-logger.sh", '"$CWD/runs/audit-"*')
