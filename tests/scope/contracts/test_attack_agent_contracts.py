@@ -345,6 +345,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
             "agents/subagents/scope-controls-detections.md",
             "agents/subagents/scope-controls-remediation.md",
             "agents/subagents/scope-controls-guardrails.md",
+            "agents/subagents/scope-controls-policy.md",
             "agents/subagents/scope-controls-validate.md",
             "agents/subagents/scope-synthesizer.md",
             "agents/subagents/scope-hunt-audit.md",
@@ -366,12 +367,21 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         "agents/subagents/scope-controls-detections.md",
         "agents/subagents/scope-controls-remediation.md",
         "agents/subagents/scope-controls-guardrails.md",
+        "agents/subagents/scope-controls-policy.md",
         "agents/subagents/scope-controls-validate.md",
     ]:
         body = prompts[path]
         assert_matches(body, r"attack_paths\[\][\s\S]{0,180}validation_status[\s\S]{0,120}validated[\s\S]{0,80}conditional")
         assert_matches(body, r"runtime_assumptions\[\][\s\S]{0,220}coverage_caveats\[\]|coverage_caveats\[\][\s\S]{0,220}runtime_assumptions\[\]")
         assert "Do not treat conditional as low priority" in body
+        assert "Use final `attack_paths[]` as the only attack-path source of truth." in body
+        for forbidden_source in [
+            "candidate_attack_paths[]",
+            "rejected `attack_validation[]` entries",
+            "security_observations[]",
+            "public_entrypoints[]",
+        ]:
+            assert forbidden_source in body
 
     detections = prompts["agents/subagents/scope-controls-detections.md"]
     assert_matches(detections, r"attack_paths\[\][\s\S]{0,500}validation_status[\s\S]{0,500}runtime_assumptions[\s\S]{0,500}coverage_caveats")
@@ -380,6 +390,19 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     for path in ["agents/subagents/scope-controls-remediation.md", "agents/subagents/scope-controls-guardrails.md"]:
         assert "validation_status" in prompts[path]
         assert_matches(prompts[path], r"runtime_assumptions[\s\S]{0,180}coverage_caveats|coverage_caveats[\s\S]{0,180}runtime_assumptions")
+
+    policy = prompts["agents/subagents/scope-controls-policy.md"]
+    assert_matches(
+        policy,
+        r"extract `attack_paths\[\]` entries where `validation_status` is `validated` or `conditional`",
+    )
+    assert "Roles with overprivileged findings but no final attack path involvement are lower priority." in policy
+
+    validate_controls = prompts["agents/subagents/scope-controls-validate.md"]
+    assert_matches(
+        validate_controls,
+        r"source_attack_paths[\s\S]{0,180}candidate[\s\S]{0,180}public entrypoint[\s\S]{0,180}final `attack_paths\[\]` name",
+    )
 
     hunt = prompts["agents/subagents/scope-hunt-audit.md"]
     assert "validation_status=validated" in hunt

@@ -13,6 +13,8 @@ You review the actual artifact files written by the four Wave 1 subagents. You d
 
 <downstream_attack_path_contract>
 Consume final attack_paths[] where validation_status is validated or conditional. Preserve runtime_assumptions[] in control mappings. Preserve coverage_caveats[] where present. Do not treat conditional as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
+
+Use final `attack_paths[]` as the only attack-path source of truth. Controls must not map `source_attack_paths` to `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, or `public_entrypoints[]`. Treat any such mapping as a BLOCK consistency finding.
 </downstream_attack_path_contract>
 
 <intake>
@@ -96,6 +98,7 @@ jq -e 'type == "array"' "$CONTROLS_RUN_DIR/guardrails.json"
 ```
 
 BLOCK if `guardrails.json` is not an array, if any item misses a required controls schema field, if `policy_json` does not match the referenced policy file, or if `source_attack_paths` maps every guardrail to every attack path without evidence.
+BLOCK if any `source_attack_paths` value names a candidate, rejected validation, security observation, or public entrypoint instead of a final `attack_paths[]` name where `validation_status` is `validated` or `conditional`.
 
 ### Step 2: Enumerate and validate each SCP/RCP JSON file
 
@@ -156,6 +159,7 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, valid
 **BLOCK criteria:**
 
 - **BLOCK** if `detections.json` is not an array or any item misses required production-readiness fields: `type`, `objective`, `promotion_decision`, `fidelity_rationale`, `noise_controls`, `expected_volume`, `validation_status`.
+- **BLOCK** if any `source_attack_paths` value names a candidate, rejected validation, security observation, or public entrypoint instead of a final `attack_paths[]` name where `validation_status` is `validated` or `conditional`.
 - **BLOCK** if `promotion_decision` is `alert` and `expected_volume` is `unknown` or `high`.
 - **BLOCK** if an atomic alert has empty `noise_controls` or a generic fidelity rationale. Atomic alerts require concrete context filters such as affected resources, sensitive targets, privileged role names, external account IDs, known automation exclusions, or risky policy details.
 - **BLOCK** if a detection promotes raw common AWS mechanics to alert without context: `AssumeRole`, `GetObject`, `List*`, `Describe*`, `ConsoleLogin`, or `CreateAccessKey`.
@@ -193,6 +197,7 @@ jq -e 'type == "array"' "$CONTROLS_RUN_DIR/policy-replacements.json"
 ```
 
 BLOCK if `policy-replacements.json` is not an array, if any item misses a required controls schema field, if `replacement_policy_json` does not match the referenced replacement file, or if `source_attack_paths` maps every replacement to every attack path without role/resource evidence.
+BLOCK if any `source_attack_paths` value names a candidate, rejected validation, security observation, or public entrypoint instead of a final `attack_paths[]` name where `validation_status` is `validated` or `conditional`.
 
 ### Step 2: Enumerate replacement policy files
 

@@ -29,6 +29,8 @@ Your responsibilities:
 
 <downstream_attack_path_contract>
 Consume final attack_paths[] where validation_status is validated or conditional. Preserve runtime_assumptions[] in control mappings. Preserve coverage_caveats[] where present. Do not treat conditional as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
+
+Use final `attack_paths[]` as the only attack-path source of truth. Do not generate controls from `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, or `public_entrypoints[]`. Those fields may provide audit context, but they are not validated attack paths and must not appear in `source_attack_paths`.
 </downstream_attack_path_contract>
 
 <intake_protocol>
