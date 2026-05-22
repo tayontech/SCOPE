@@ -24,6 +24,20 @@ SCOPE is an AI agent suite for AWS purple team security operations. Agents handl
 - Operator controls what gets probed, what gets written to disk, and what paths are included or excluded
 - Explain every step before execution — the operator should never be surprised by what an agent does
 
+## AWS Safety
+
+- Standard SCOPE workflows are read-only. Before any destructive AWS operation, show an approval block and wait for explicit per-step approval
+- Exploit workflows may generate playbooks with write commands, but they must not execute them
+- Do not deploy or mutate AWS resources from SCOPE agents. Never invoke commands such as `aws organizations create-policy`, `aws cloudformation deploy`, `aws cloudformation create-stack`, or equivalent mutation/deployment commands. Write review artifacts only
+- Use the `external:*` node ID prefix for cross-account principals, anonymous actors, public actors, and federated identities. Examples: `external:anonymous`, `external:public`, `external:<account-id>`
+- Use lowercase severity labels in JSON and findings: `critical`, `high`, `medium`, `low`
+
+## Session Isolation
+
+- Treat every agent invocation as a fresh session. Create a unique run directory for artifacts
+- Do not reference, carry over, or mix data from previous runs unless the operator explicitly provides that run directory
+- Resource identifiers are session-scoped. Do not write ARNs, account IDs, bucket names, role names, key IDs, or access key IDs to persistent memory files
+
 ## Environmental Learning
 
 Read `config/observations.md` at session start if it exists. This file accumulates patterns across audit runs.

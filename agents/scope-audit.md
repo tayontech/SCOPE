@@ -31,8 +31,6 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 </role>
 
 <project_context>
-@include agents/shared/agent-preamble.md
-
 **Runtime artifact hierarchy:** Downstream agents consume upstream output in priority order:
 1. `$RUN_DIR/results.json` — runtime inventory plus attack analysis
 2. `$RUN_DIR/summary.json` and `$RUN_DIR/resources.jsonl` — structured resource and coverage facts
