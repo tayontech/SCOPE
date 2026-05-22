@@ -108,6 +108,8 @@ If `$RUN_DIR/results.json` or `$RUN_DIR/graph.json` is missing, return `STATUS: 
 - `conditional`: collected artifacts support the control-plane chain, but runtime behavior or missing context remains.
 - `rejected`: a required hop failed. Never promote rejected candidates.
 - The Python helper enforces a chain quality gate before promotion. It rejects candidates when a single-hop candidate does not prove complete attacker progression, candidate hops do not change attacker context or capability, or the candidate does not end in a concrete impact transition.
+- Public endpoint candidates must reference a `public_entrypoints[]` record with `attack_path_seed: true`; otherwise reject them before promotion.
+- Public endpoint candidates whose only concrete action is `execute-api:Invoke`, `lambda:InvokeFunctionUrl`, a TCP connection, or DNS resolution must remain rejected. Public reachability alone is not a validated attack path.
 - Promote only `validated` and `conditional` paths into `attack_paths[]`.
 - Do not run AWS IAM Policy Simulator by default.
 - Missing AWS-managed policy documents, missing SCP visibility, unsupported policy conditions, access-denied module coverage, or runtime code behavior create conditional caveats when the chain remains structurally supported.

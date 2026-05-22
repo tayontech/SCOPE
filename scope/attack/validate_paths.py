@@ -15,6 +15,7 @@ def validate_candidates(
 ) -> dict[str, Any]:
     policies_by_principal = principal_policies or {}
     graph_edges = graph_edges_by_id(payload.get("graph") or {})
+    public_entrypoint_seeds = _public_entrypoint_seeds(payload)
     validations: list[dict[str, Any]] = []
     final_paths: list[dict[str, Any]] = []
 
@@ -24,6 +25,7 @@ def validate_candidates(
             candidate,
             graph_edges=graph_edges,
             principal_policies=policies_by_principal,
+            public_entrypoint_seeds=public_entrypoint_seeds,
         )
         validations.append(validation.model_dump(mode="json"))
         if validation.promotion_decision == "promote":
@@ -40,8 +42,12 @@ def _validate_candidate(
     *,
     graph_edges: dict[str, dict[str, Any]],
     principal_policies: dict[str, list[dict[str, Any]]],
+    public_entrypoint_seeds: set[str],
 ) -> AttackValidation:
-    chain_failure = _chain_quality_failure(candidate)
+    chain_failure = _chain_quality_failure(
+        candidate,
+        public_entrypoint_seeds=public_entrypoint_seeds,
+    )
     validated_hops: list[str] = []
     conditional_hops: list[str] = []
     failed_hops: list[str] = []
@@ -159,8 +165,24 @@ def _validate_candidate(
     )
 
 
-def _chain_quality_failure(candidate: AttackCandidate) -> str | None:
+def _chain_quality_failure(
+    candidate: AttackCandidate,
+    *,
+    public_entrypoint_seeds: set[str],
+) -> str | None:
     hops = candidate.hops
+    if (
+        candidate.starting_position.type == "public_endpoint"
+        and candidate.starting_position.id not in public_entrypoint_seeds
+    ):
+        return (
+            "public endpoint candidate does not reference a public_entrypoints[] "
+            "seed with attack_path_seed true"
+        )
+
+    if _public_endpoint_only_reachability(candidate):
+        return "public endpoint candidate only proves reachability or invocation"
+
     if len(hops) == 1 and not _single_hop_reaches_complete_impact(candidate):
         return "single-hop candidate does not prove complete attacker progression"
 
@@ -171,6 +193,35 @@ def _chain_quality_failure(candidate: AttackCandidate) -> str | None:
         return "candidate does not end in a concrete impact transition"
 
     return None
+
+
+def _public_entrypoint_seeds(payload: dict[str, Any]) -> set[str]:
+    entrypoints = payload.get("public_entrypoints", [])
+    if not isinstance(entrypoints, list):
+        return set()
+    return {
+        entrypoint["id"]
+        for entrypoint in entrypoints
+        if isinstance(entrypoint, dict)
+        and isinstance(entrypoint.get("id"), str)
+        and entrypoint.get("attack_path_seed") is True
+    }
+
+
+def _public_endpoint_only_reachability(candidate: AttackCandidate) -> bool:
+    if candidate.starting_position.type != "public_endpoint":
+        return False
+
+    weak_actions = {
+        "execute-api:Invoke",
+        "lambda:InvokeFunctionUrl",
+        "tcp:Connect",
+        "dns:Resolve",
+    }
+    return all(
+        hop.transition == "invoke" or hop.action in weak_actions
+        for hop in candidate.hops
+    )
 
 
 def _single_hop_reaches_complete_impact(candidate: AttackCandidate) -> bool:

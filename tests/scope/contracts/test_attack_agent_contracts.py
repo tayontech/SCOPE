@@ -217,6 +217,8 @@ def test_attack_validate_agent_contract() -> None:
         "single-hop candidate does not prove complete attacker progression",
         "candidate hops do not change attacker context or capability",
         "candidate does not end in a concrete impact transition",
+        "Public endpoint candidates must reference a `public_entrypoints[]` record with `attack_path_seed: true`",
+        "Public reachability alone is not a validated attack path.",
     ]:
         assert text in prompt
     assert_matches(prompt, r"modules.+iam.+global\.json")

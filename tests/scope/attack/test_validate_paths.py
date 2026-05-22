@@ -1,6 +1,81 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from scope.attack.validate_paths import validate_candidates
+
+
+def _public_entrypoint(seed: bool = True) -> dict[str, object]:
+    return {
+        "id": "gateway:apigw:api",
+        "service": "apigateway",
+        "resource": "api-id/prod/GET/payments",
+        "public_access": True,
+        "auth_type": "NONE",
+        "starting_position": "external_unauthenticated",
+        "attack_path_seed": seed,
+        "risk": "high",
+        "evidence": [{"type": "module_resource", "id": "api-id"}],
+    }
+
+
+def _public_api_runtime_candidate() -> dict[str, object]:
+    return {
+        "id": "cap-002",
+        "name": "Public API triggers Lambda",
+        "category": "data_exposure",
+        "severity": "high",
+        "starting_position": {
+            "type": "public_endpoint",
+            "id": "gateway:apigw:api",
+            "arn": None,
+        },
+        "initial_context": {"principal": None, "capabilities": []},
+        "hops": [
+            {
+                "id": "cap-002-hop-001",
+                "transition": "invoke",
+                "from_context": "external:*",
+                "action": "execute-api:Invoke",
+                "target": "compute:lambda:handler",
+                "resulting_context": "compute:lambda:handler",
+                "capability_gained": "Trigger Lambda",
+                "required": True,
+                "validation_type": "graph",
+                "evidence": [
+                    {
+                        "type": "graph_edge",
+                        "id": "edge:invokes:gateway:apigw:api->compute:lambda:handler",
+                    }
+                ],
+                "assumptions": [],
+            },
+            {
+                "id": "cap-002-hop-002",
+                "transition": "data_access",
+                "from_context": "compute:lambda:handler",
+                "action": "s3:GetObject",
+                "target": "arn:aws:s3:::sensitive/*",
+                "resulting_context": "role:LambdaRole",
+                "capability_gained": "Return sensitive object",
+                "required": True,
+                "validation_type": "runtime_assumption",
+                "evidence": [],
+                "assumptions": [
+                    "Lambda code must read the target object and return it."
+                ],
+            },
+        ],
+        "impact": {
+            "type": "data_access",
+            "resource": "arn:aws:s3:::sensitive/*",
+            "action": "s3:GetObject",
+        },
+        "affected_resources": ["arn:aws:s3:::sensitive"],
+        "detection_opportunities": ["Invoke", "GetObject"],
+        "mitre_techniques": [],
+        "remediation": ["Restrict public invocation or remove role data access"],
+    }
 
 
 def test_validates_role_chain_and_promotes_final_path() -> None:
@@ -115,6 +190,7 @@ def test_marks_runtime_assumption_as_conditional_and_promotes_path() -> None:
                 }
             ],
         },
+        "public_entrypoints": [_public_entrypoint()],
         "candidate_attack_paths": [
             {
                 "id": "cap-002",
@@ -186,6 +262,61 @@ def test_marks_runtime_assumption_as_conditional_and_promotes_path() -> None:
     assert result["attack_paths"][0]["runtime_assumptions"] == [
         "Lambda code must read the target object and return it."
     ]
+
+
+def test_rejects_public_endpoint_candidate_without_seed() -> None:
+    payload = {
+        "graph": {
+            "nodes": [],
+            "edges": [
+                {
+                    "id": "edge:invokes:gateway:apigw:api->compute:lambda:handler",
+                    "source": "gateway:apigw:api",
+                    "target": "compute:lambda:handler",
+                }
+            ],
+        },
+        "public_entrypoints": [_public_entrypoint(seed=False)],
+        "candidate_attack_paths": [_public_api_runtime_candidate()],
+    }
+
+    result = validate_candidates(payload, principal_policies={})
+
+    validation = result["attack_validation"][0]
+    assert validation["status"] == "rejected"
+    assert "public_entrypoints[] seed" in validation["reason"]
+    assert result["attack_paths"] == []
+
+
+def test_rejects_public_endpoint_candidate_with_only_invocation() -> None:
+    candidate = _public_api_runtime_candidate()
+    candidate["hops"] = [deepcopy(candidate["hops"][0])]
+    candidate["impact"] = {
+        "type": "lateral_movement",
+        "resource": "compute:lambda:handler",
+        "action": "execute-api:Invoke",
+    }
+    payload = {
+        "graph": {
+            "nodes": [],
+            "edges": [
+                {
+                    "id": "edge:invokes:gateway:apigw:api->compute:lambda:handler",
+                    "source": "gateway:apigw:api",
+                    "target": "compute:lambda:handler",
+                }
+            ],
+        },
+        "public_entrypoints": [_public_entrypoint()],
+        "candidate_attack_paths": [candidate],
+    }
+
+    result = validate_candidates(payload, principal_policies={})
+
+    validation = result["attack_validation"][0]
+    assert validation["status"] == "rejected"
+    assert "only proves reachability or invocation" in validation["reason"]
+    assert result["attack_paths"] == []
 
 
 def test_iam_explicit_empty_from_context_policies_is_conditional_without_fallback() -> None:
