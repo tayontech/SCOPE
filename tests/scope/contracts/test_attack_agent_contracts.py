@@ -118,6 +118,51 @@ def test_attack_analyze_agent_contract() -> None:
     assert "ERRORS: []" in prompt
 
 
+def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
+    prompt = read("agents/subagents/scope-attack-analyze.md")
+
+    for text in [
+        "entry point -> new execution context -> new permission set -> impact",
+        "single-hop candidate",
+        "Do not create a candidate from a lone permission, lone trust relationship, lone public flag, or lone sensitive resource.",
+        "public API Gateway or function URL",
+        "Lambda function or compute resource",
+        "execution role",
+        "s3:GetObject",
+        "secretsmanager:GetSecretValue",
+        "kms:Decrypt",
+        "RoleA can assume RoleB",
+        "RoleB can assume RoleC",
+        "new reachable account, principal tier, permission set, service control point bypass, or impact action",
+    ]:
+        assert text in prompt
+
+    assert_matches(
+        prompt,
+        r"Candidate decision test:[\s\S]{0,500}initial attacker control[\s\S]{0,500}transition[\s\S]{0,500}new capability[\s\S]{0,500}impact",
+    )
+    assert_matches(
+        prompt,
+        r"Minimum chain bar:[\s\S]{0,220}two attacker progress transitions[\s\S]{0,220}impact hop",
+    )
+    assert_matches(
+        prompt,
+        r"resource_policy_access[\s\S]{0,180}execute_as[\s\S]{0,180}data_access",
+    )
+    assert_matches(
+        prompt,
+        r"assume_role[\s\S]{0,220}assume_role[\s\S]{0,220}data_access",
+    )
+    assert_matches(
+        prompt,
+        r"evidence[\s\S]{0,220}graph_edge[\s\S]{0,220}policy_document",
+    )
+    assert_matches(
+        prompt,
+        r"security_observations\[\][\s\S]{0,240}single broad policy",
+    )
+
+
 def test_attack_validate_agent_contract() -> None:
     prompt = read("agents/subagents/scope-attack-validate.md")
 

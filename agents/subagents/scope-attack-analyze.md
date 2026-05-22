@@ -56,6 +56,43 @@ Facts vs inference:
 - Inferences are candidate attack paths and security observations. Label gating conditions clearly when the candidate depends on missing coverage, external control of an identity, data-event logging, or runtime assumptions.
 </analysis_method>
 
+<red_team_chain_quality>
+Use this quality bar for every candidate:
+
+`entry point -> new execution context -> new permission set -> impact`
+
+Minimum chain bar:
+- A candidate needs at least two attacker progress transitions plus an impact hop unless one graph-backed transition directly changes both execution context and permission set.
+- Each hop must change attacker position, principal context, execution context, permission set, reachable account, reachable resource, or impact capability.
+- Do not create a candidate from a lone permission, lone trust relationship, lone public flag, or lone sensitive resource.
+- Do not create a single-hop candidate unless the hop itself proves a complete exploit path from attacker-controlled start to concrete impact. Most single-hop facts belong in `security_observations[]`.
+
+Candidate decision test:
+1. Define the initial attacker control, such as external web access, a compromised principal, federated identity control, write access to an event source, or resource-policy access.
+2. Name the transition that changes context, such as `invoke`, `execute_as`, `assume_role`, `pass_role`, `create_compute`, `resource_policy_access`, or `event_injection`.
+3. Name the new capability and why the prior context did not already have it.
+4. End with concrete impact on a resource ARN and AWS action.
+
+Prioritize these chain families:
+- Public compute path: public API Gateway or function URL -> Lambda function or compute resource -> execution role -> sensitive action such as `s3:GetObject`, `secretsmanager:GetSecretValue`, or `kms:Decrypt`.
+- Role chaining path: RoleA can assume RoleB -> RoleB can assume RoleC -> RoleC reaches a new reachable account, principal tier, permission set, service control point bypass, or impact action.
+- Pass-role path: principal can `iam:PassRole` -> creates or updates compute with the passed role -> compute gains a stronger permission set -> impact action.
+- Event injection path: attacker can write to an event source -> target function, build, queue consumer, or automation executes -> execution role gains impact.
+- Resource policy execution path: external or cross-account principal gets `resource_policy_access` -> service invocation reaches `execute_as` context -> `data_access`, `decrypt`, invocation, or persistence impact.
+- Role-chain data path: `assume_role` into an intermediate role -> `assume_role` into a stronger role -> `data_access`, admin, or persistence impact.
+
+Evidence requirements:
+- Prefer `graph_edge` evidence for relationship hops and `policy_document` evidence for IAM/resource-policy authorization hops.
+- Multi-hop candidates should combine graph relationship evidence with IAM or resource policy evidence when both exist.
+- A candidate with only `module_resource` evidence needs an explicit runtime assumption or coverage caveat that explains the missing relationship or policy edge.
+
+Send these to `security_observations[]` unless they connect into a chain:
+- A single broad policy with no reachable starting context.
+- A public resource flag with no invokable action or principal transition.
+- A trust relationship with no controlled source principal.
+- A sensitive bucket, key, secret, queue, or table with no actor and AWS action.
+</red_team_chain_quality>
+
 <coverage_semantics>
 Module envelopes may include `status`, `coverage[]`, `errors[]`, and resource-level `<field>_status` values.
 
