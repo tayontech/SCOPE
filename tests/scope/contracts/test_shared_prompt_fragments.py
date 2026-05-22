@@ -17,7 +17,7 @@ def test_stale_shared_evidence_and_verification_fragments_are_removed() -> None:
 
     for path in [
         "agents/scope-audit.md",
-        "agents/scope-hunt.md",
+        "agents/scope-investigate.md",
         "agents/scope-exploit.md",
     ]:
         body = read(path)

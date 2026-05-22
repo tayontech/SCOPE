@@ -2,7 +2,7 @@
 
 ## Overview
 
-**What this enables:** SCOPE agents (`scope-hunt`, `scope-controls-detections`) read this document before generating SPL queries. It establishes the command selection rules, behavioral patterns, and anti-patterns that govern every query the agents write. Following these patterns produces queries that run correctly at scale, avoid common performance traps, and return accurate results across any data source.
+**What this enables:** SCOPE agents (`scope-investigate`, `scope-controls-detections`) read this document before generating SPL queries. It establishes the command selection rules, behavioral patterns, and anti-patterns that govern every query the agents write. Following these patterns produces queries that run correctly at scale, avoid common performance traps, and return accurate results across any data source.
 
 **When to consult this document:** Before writing any SPL query — at the beginning of an investigation session, when selecting between `tstats`, `stats`, or `streamstats`, and when generating composite detection rules.
 
@@ -265,7 +265,7 @@ When `config/index.json` does not exist, the agent enumerates available Splunk i
 
 **`main` index handling:** The `main` index is not automatically excluded — operators may route security data there. Flag it to the operator: "The 'main' index appears to contain data. Would you like to include it in a group?" Do not silently include or exclude it.
 
-**ES internal indexes in SPL are always valid.** The `scope-spl-lint.sh` index allowlist check must skip ES internal indexes (notably `index=notable` used by `scope-hunt-investigate.md`). These are correct uses, not allowlist violations.
+**ES internal indexes in SPL are always valid.** The `scope-spl-lint.sh` index allowlist check must skip ES internal indexes (notably `index=notable` used by `scope-investigate-alert.md`). These are correct uses, not allowlist violations.
 
 ---
 
@@ -291,7 +291,7 @@ Validates SPL syntax before execution. Use before running complex or expensive q
 
 Splunk's own SPL optimizer. Optional — useful for complex queries, not required for routine detection queries. The optimizer knows the target instance's configuration and can improve query performance based on actual index structure. Use for multi-stage pipelines or queries with high expected result counts.
 
-**Primary query execution:** Use `search_oneshot` or `search_splunk` for all actual query execution. The existing 4-tool probe sequence in `scope-hunt.md` already determines which tool to use based on connectivity.
+**Primary query execution:** Use `search_oneshot` or `search_splunk` for all actual query execution. The existing 4-tool probe sequence in `scope-investigate.md` already determines which tool to use based on connectivity.
 
 ---
 
@@ -317,4 +317,4 @@ Lazy field sampling with bounded fallback:
 index=<target_index> earliest=-30d latest=now | head 1
 ```
 
-**Exception:** The `index=notable` query in `scope-hunt-investigate.md` operates without explicit time bounds by design — the notable index is always queried for recent unresolved findings, and Splunk ES manages its own retention. This is the only acceptable exception.
+**Exception:** The `index=notable` query in `scope-investigate-alert.md` operates without explicit time bounds by design — the notable index is always queried for recent unresolved findings, and Splunk ES manages its own retention. This is the only acceptable exception.

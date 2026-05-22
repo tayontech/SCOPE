@@ -242,7 +242,7 @@ const INSTALLABLE_AGENTS = new Set([
   'scope-audit',
   'scope-controls',
   'scope-exploit',
-  'scope-hunt',
+  'scope-investigate',
 ]);
 
 // Agents from agents/ (top-level) that must also be deployed as subagents.
@@ -512,9 +512,9 @@ function installSubagentsGemini(subagents, scope) {
     'scope-controls-remediation': { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-controls-detections':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-controls-validate':    { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-hunt-audit':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-hunt-intel':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file', 'google_web_search', 'web_fetch'] },
-    'scope-hunt-investigate':   { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-investigate-run':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-investigate-intel':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file', 'google_web_search', 'web_fetch'] },
+    'scope-investigate-alert':   { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-research':           { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'google_web_search', 'web_fetch'] },
     'scope-synthesizer':        { max_turns: 40, tools: ['run_shell_command', 'read_file', 'write_file', 'grep_search', 'glob'] },
     'scope-verify':             { max_turns: 30, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file', 'google_web_search', 'web_fetch'] },
@@ -884,9 +884,9 @@ Options:
   --help      Print this usage message
 
 What gets installed:
-  Skills      Operator-invoked slash commands (scope-audit, scope-controls, scope-exploit, scope-hunt)
+  Skills      Operator-invoked slash commands (scope-audit, scope-controls, scope-exploit, scope-investigate)
               -> .claude/skills/ (Claude Code) or .agents/skills/ (Gemini/Codex)
-  Subagents   Orchestrator-dispatched workers (attack analysis, controls, hunt, research, synthesis)
+  Subagents   Orchestrator-dispatched workers (attack analysis, controls, investigation, research, synthesis)
               -> .claude/agents/ (Claude Code)
               -> .gemini/agents/ (Gemini CLI) — requires experimental.enableAgents: true
               -> .codex/agents/ + .codex/config.toml (Codex)
@@ -1090,7 +1090,7 @@ function checkLegacyGeminiSkills(scope) {
   // (leftover from when Gemini also wrote here)
   if (!fs.existsSync(legacyBase)) return;
 
-  const scopeSkills = ['scope-audit', 'scope-controls', 'scope-exploit', 'scope-hunt'];
+  const scopeSkills = ['scope-audit', 'scope-controls', 'scope-exploit', 'scope-investigate'];
   const found = scopeSkills.filter(s => fs.existsSync(path.join(legacyBase, s)));
 
   // If Codex is not being installed but .agents/skills/ has SCOPE skills, warn

@@ -91,7 +91,7 @@ def test_top_level_agents_use_knowledge_skills() -> None:
         "agents/scope-audit.md",
         "agents/scope-controls.md",
         "agents/scope-exploit.md",
-        "agents/scope-hunt.md",
+        "agents/scope-investigate.md",
     ]
     stale_fragments = [
         "Load environment observations",
@@ -109,17 +109,18 @@ def test_top_level_agents_use_knowledge_skills() -> None:
         for fragment in stale_fragments:
             assert fragment not in body, f"{path} contains stale fragment {fragment!r}"
 
-    hunt = read("agents/scope-hunt.md")
-    assert "AGENT=scope-investigate" in hunt
-    assert "Only run this step if the analyst chose to save artifacts" in hunt
-    assert "status=skipped" in hunt
+    investigate = read("agents/scope-investigate.md")
+    assert "AGENT=scope-investigate" in investigate
+    assert "skills/scope-investigation-report/SKILL.md" in investigate
+    assert "Only run this step if the analyst chose to save artifacts" in investigate
+    assert "status=skipped" in investigate
 
 
-def test_hunt_subagents_do_not_write_durable_knowledge() -> None:
+def test_investigate_subagents_do_not_write_durable_knowledge() -> None:
     for path in [
-        "agents/subagents/scope-hunt-audit.md",
-        "agents/subagents/scope-hunt-investigate.md",
-        "agents/subagents/scope-hunt-intel.md",
+        "agents/subagents/scope-investigate-run.md",
+        "agents/subagents/scope-investigate-alert.md",
+        "agents/subagents/scope-investigate-intel.md",
     ]:
         body = read(path)
         assert "Write durable knowledge or memory files" in body

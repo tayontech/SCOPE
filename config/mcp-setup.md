@@ -2,7 +2,7 @@
 
 ## Overview
 
-SCOPE's `scope-hunt` agent can execute SIEM queries live via MCP. When connected, the agent runs queries directly with analyst approval. Without MCP, it falls back to MANUAL mode (generates queries for copy-paste).
+SCOPE's `scope-investigate` agent can execute SIEM queries live via MCP. When connected, the agent runs queries directly with analyst approval. Without MCP, it falls back to MANUAL mode (generates queries for copy-paste).
 
 **Default configuration uses Splunk Cloud's MCP Server app (Splunkbase app 7931, v1.0.2+).** You can substitute any SIEM MCP server that exposes search tools — see [Using a Different SIEM](#using-a-different-siem) below.
 
@@ -84,7 +84,7 @@ SPLUNK_TOKEN = "$SPLUNK_TOKEN"
 ## Verify
 
 1. Start your CLI tool in the SCOPE project directory
-2. Run `/scope:hunt`
+2. Run `/scope:investigate`
 3. The agent probes for MCP connectivity at startup
 
 **Connected:** `Splunk MCP connected via search_oneshot -> https://your-endpoint`
@@ -96,7 +96,7 @@ SPLUNK_TOKEN = "$SPLUNK_TOKEN"
 
 SCOPE's MCP configuration is not locked to Splunk. If your SIEM provides an MCP server (Elastic, Sentinel, QRadar, etc.), replace the `mcpServers` block with your SIEM's MCP server command and credentials.
 
-The `scope-hunt` agent probes for available search tools at startup. If it finds a working search tool exposed by your MCP server, it enters CONNECTED mode. If no recognized tool responds, it falls back to MANUAL mode where it generates queries for you to run externally.
+The `scope-investigate` agent probes for available search tools at startup. If it finds a working search tool exposed by your MCP server, it enters CONNECTED mode. If no recognized tool responds, it falls back to MANUAL mode where it generates queries for you to run externally.
 
 To use a different SIEM MCP server:
 1. Replace the `splunk-mcp-server` entry in your platform's config with your SIEM's MCP server definition

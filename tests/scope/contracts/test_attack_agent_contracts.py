@@ -348,7 +348,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
             "agents/subagents/scope-controls-policy.md",
             "agents/subagents/scope-controls-validate.md",
             "agents/subagents/scope-synthesizer.md",
-            "agents/subagents/scope-hunt-audit.md",
+            "agents/subagents/scope-investigate-run.md",
             "agents/scope-exploit.md",
         ]
     }
@@ -404,27 +404,27 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         r"source_attack_paths[\s\S]{0,180}candidate[\s\S]{0,180}public entrypoint[\s\S]{0,180}final `attack_paths\[\]` name",
     )
 
-    hunt = prompts["agents/subagents/scope-hunt-audit.md"]
-    assert "validation_status=validated" in hunt
-    assert "validation_status=conditional" in hunt
-    assert "Use final `attack_paths[]` as the only attack-path source of truth for audit and exploit hunt mode." in hunt
+    investigate_run = prompts["agents/subagents/scope-investigate-run.md"]
+    assert "validation_status=validated" in investigate_run
+    assert "validation_status=conditional" in investigate_run
+    assert "Use final `attack_paths[]` as the only attack-path source of truth for audit and exploit run-guided mode." in investigate_run
     assert_matches(
-        hunt,
+        investigate_run,
         r"Do not generate hypotheses from `candidate_attack_paths\[\]`, rejected `attack_validation\[\]` entries, `security_observations\[\]`, or `public_entrypoints\[\]`",
     )
     assert_matches(
-        hunt,
-        r"Branch: HUNT_RUN_TYPE=AUDIT[\s\S]{0,500}Filter to `validation_status=validated` paths first[\s\S]{0,180}`validation_status=conditional`",
+        investigate_run,
+        r"Branch: SOURCE_RUN_TYPE=AUDIT[\s\S]{0,500}Filter to `validation_status=validated` paths first[\s\S]{0,180}`validation_status=conditional`",
     )
-    assert_matches(hunt, r"For AUDIT runs, extract:[\s\S]{0,260}validation_status[\s\S]{0,120}runtime_assumptions\[\][\s\S]{0,120}coverage_caveats\[\]")
-    assert_matches(hunt, r"HUNT_RUN_TYPE=AUDIT[\s\S]{0,260}validation_status[\s\S]{0,120}runtime_assumptions\[\][\s\S]{0,120}coverage_caveats\[\]")
-    assert not re.search(r"GUARANTEED|CONDITIONAL", hunt), "hunt audit must not use old uppercase confidence tier values"
-    assert_not_matches(hunt, r"severity/confidence|Confidence:")
-    assert_matches(hunt, r"steps\[\]\.action` as exploit command/action text")
-    assert_matches(hunt, r"steps\[\]\.visibility` as MGT/DATA/NONE")
-    assert_matches(hunt, r"Derive CloudTrail event candidates from the AWS CLI command or API operation")
-    assert "derived eventName candidate" in hunt
-    assert_not_matches(hunt, r"steps\[\]\.action`? (?:—|-)\s*these are CloudTrail eventNames|eventName: \[step\.action\]")
+    assert_matches(investigate_run, r"For AUDIT runs, extract:[\s\S]{0,260}validation_status[\s\S]{0,120}runtime_assumptions\[\][\s\S]{0,120}coverage_caveats\[\]")
+    assert_matches(investigate_run, r"SOURCE_RUN_TYPE=AUDIT[\s\S]{0,260}validation_status[\s\S]{0,120}runtime_assumptions\[\][\s\S]{0,120}coverage_caveats\[\]")
+    assert not re.search(r"GUARANTEED|CONDITIONAL", investigate_run), "investigation run intake must not use old uppercase confidence tier values"
+    assert_not_matches(investigate_run, r"severity/confidence|Confidence:")
+    assert_matches(investigate_run, r"steps\[\]\.action` as exploit command/action text")
+    assert_matches(investigate_run, r"steps\[\]\.visibility` as MGT/DATA/NONE")
+    assert_matches(investigate_run, r"Derive CloudTrail event candidates from the AWS CLI command or API operation")
+    assert "derived eventName candidate" in investigate_run
+    assert_not_matches(investigate_run, r"steps\[\]\.action`? (?:—|-)\s*these are CloudTrail eventNames|eventName: \[step\.action\]")
 
     synth = prompts["agents/subagents/scope-synthesizer.md"]
     assert_matches(synth, r"validation_status[\s\S]{0,220}coverage_caveats|coverage_caveats[\s\S]{0,220}validation_status")
@@ -447,7 +447,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert '"coverage_caveats": []' in exploit
     assert "Exploit results must expose final paths in `attack_paths[]`, not `paths[]`" in exploit
     assert "Exploit results must not expose `candidate_attack_paths[]`, `attack_validation[]`, `security_observations[]`, or `public_entrypoints[]`." in exploit
-    assert "Downstream hunt and reporting agents treat `attack_paths[]` as the only attack-path source of truth." in exploit
+    assert "Downstream investigation and reporting agents treat `attack_paths[]` as the only attack-path source of truth." in exploit
 
     controls = prompts["agents/scope-controls.md"]
     assert "subagent-owned structured JSON artifacts" in controls

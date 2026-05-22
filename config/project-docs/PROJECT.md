@@ -1,12 +1,12 @@
 # SCOPE
 
-SCOPE is an AI agent suite for AWS purple team security operations. Agents handle audit, exploit, controls, and hunt workflows. Run `node bin/install.js` to set up your platform.
+SCOPE is an AI agent suite for AWS purple team security operations. Agents handle audit, exploit, controls, and investigation workflows. Run `node bin/install.js` to set up your platform.
 
 ## Reasoning Philosophy
 
 - Creative reasoning over checklists — config files and technique catalogs are starting points for discovery, not exhaustive boundaries
 - Reason from the actual environment — real ARNs, real account IDs, real resource names in every finding. Generic output is bad output
-- Present facts with severity labels (critical/high/medium/low) — no confidence percentages, no scoring formulas, no mechanical gates on what gets reported. Exception: hunt mode presents facts without severity labels — the analyst interprets data in context
+- Present facts with severity labels (critical/high/medium/low) except in `scope-investigate`, where the analyst interprets the data in context
 - Chain permissions creatively — a red teamer understands what permissions mean and chains them. Novel paths discovered from the environment are as valid as published techniques
 - Every finding should explain why THIS account's specific combination of resources and permissions matters
 

@@ -53,7 +53,7 @@ export AWS_PROFILE=your-profile
 /scope:exploit
 
 # Hunt a SOC alert
-/scope:hunt
+/scope:investigate
 ```
 
 The installer presents an interactive selector — pick your runtime (Claude Code, Gemini, Codex, or all) and install scope (local project or global).
@@ -131,16 +131,16 @@ SCOPE has two types of agents:
 - `scope-audit` — orchestrator, dispatches subagents
 - `scope-controls` — defensive controls orchestrator, dispatches 5 subagents
 - `scope-exploit` — standalone red team playbook generator
-- `scope-hunt` — standalone SOC investigation assistant
+- `scope-investigate` — standalone SOC investigation assistant
 
 **Subagents** — dispatched with their own pinned model:
 - `scope-attack-analyze` — attack path analysis over Python runtime inventory, graph, and IAM policy context
 - `scope-controls-guardrails`, `scope-controls-detections`, `scope-controls-policy`, `scope-controls-remediation`, `scope-controls-validate` — controls subagents
-- `scope-hunt-investigate`, `scope-hunt-intel`, `scope-hunt-audit` — hunt mode intake and hypothesis generation
+- `scope-investigate-alert`, `scope-investigate-intel`, `scope-investigate-run` — investigation intake and hypothesis generation
 - `scope-research` — real-world technique research integration
 - `scope-synthesizer` — engagement synthesis and narrative generation
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains controls on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains controls on a reasoning model. Scope-investigate dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
 ### Model Routing
 

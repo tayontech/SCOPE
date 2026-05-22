@@ -100,8 +100,8 @@ def test_runtime_path_contracts_use_runs_directory() -> None:
     assert_not_contains("README.md", "blob/main/PROJECT.md")
     assert_contains("agents/scope-controls.md", "/runs/audit-*")
     assert_not_contains("agents/scope-controls.md", "/audit/audit-*")
-    assert_contains("agents/scope-hunt.md", "`runs/`")
-    assert_not_contains("agents/scope-hunt.md", "`audit/`")
+    assert_contains("agents/scope-investigate.md", "`runs/`")
+    assert_not_contains("agents/scope-investigate.md", "`audit/`")
     assert_contains("agents/subagents/scope-synthesizer.md", "./runs/audit-20260301-143022-all/")
     assert_not_contains("agents/subagents/scope-synthesizer.md", "./audit/audit-20260301-143022-all/")
     assert_not_contains("config/scps/README.md", "./audit/audit-*")
@@ -111,7 +111,43 @@ def test_runtime_path_contracts_use_runs_directory() -> None:
     assert_contains("config/hooks/scope-artifact-check.sh", 'find "$CWD/runs" -maxdepth 1 -type d -name "audit-*"')
     assert_not_contains("config/hooks/scope-artifact-check.sh", 'find "$CWD/audit"')
     assert_contains("config/hooks/scope-safety-guard.sh", "'./runs/'")
+    assert_contains("config/hooks/scope-safety-guard.sh", "'./investigations/'")
     assert_not_contains("config/hooks/scope-safety-guard.sh", "'./audit/'")
+    assert_not_contains("config/hooks/scope-safety-guard.sh", "'./hunt/'")
     assert_not_contains("config/hooks/scope-safety-guard.sh", "'./data/'")
+    assert_contains("config/hooks/scope-agent-logger.sh", '"$CWD/investigations/investigate-"*')
     assert_contains("bin/generate-report.js", 'join(projectRoot, "runs", run.run_id)')
     assert_not_contains("bin/generate-report.js", 'join(dashboardDir, "..", "audit", run.run_id)')
+
+
+def test_investigate_command_replaces_scope_hunt() -> None:
+    expected_paths = [
+        "agents/scope-investigate.md",
+        "agents/subagents/scope-investigate-alert.md",
+        "agents/subagents/scope-investigate-intel.md",
+        "agents/subagents/scope-investigate-run.md",
+        "skills/scope-investigation-report/SKILL.md",
+    ]
+    removed_paths = [
+        "agents/scope-hunt.md",
+        "agents/subagents/scope-hunt-investigate.md",
+        "agents/subagents/scope-hunt-intel.md",
+        "agents/subagents/scope-hunt-audit.md",
+    ]
+    for relative_path in expected_paths:
+        assert (ROOT / relative_path).exists(), f"{relative_path} should exist"
+    for relative_path in removed_paths:
+        assert not (ROOT / relative_path).exists(), f"{relative_path} should be removed"
+
+    for relative_path in [
+        "bin/install.js",
+        "README.md",
+        "ARCHITECTURE.md",
+        "config/mcp-setup.md",
+        "config/splunk-patterns.md",
+        "agents/scope-investigate.md",
+    ]:
+        body = read_repo_file(relative_path)
+        assert "scope-investigate" in body, f"{relative_path} should use scope-investigate"
+        assert "scope-hunt" not in body, f"{relative_path} should not reference scope-hunt"
+        assert "scope:hunt" not in body, f"{relative_path} should not expose /scope:hunt"

@@ -1,6 +1,6 @@
 {
   "version": "2026-03",
-  "description": "Hunt technique patterns for scope-hunt hypothesis-driven investigations. Five adversary behavior categories. Each pattern is hypothesis-anchored: starts from 'did this happen?' rather than a confirmed event. Referenced by <hunt_technique_patterns> in scope-hunt.md. Follows config/escalation-catalogue.json convention: versioned root, category-grouped arrays of objects.",
+  "description": "Hunt technique patterns for scope-investigate hypothesis-driven investigations. Five adversary behavior categories. Each pattern is hypothesis-anchored: starts from 'did this happen?' rather than a confirmed event. Referenced by <hunt_technique_patterns> in scope-investigate.md. Follows config/escalation-catalogue.json convention: versioned root, category-grouped arrays of objects.",
   "categories": {
     "credential_abuse": [
       {

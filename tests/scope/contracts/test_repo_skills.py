@@ -90,3 +90,26 @@ def test_repo_attack_pipeline_skills_contract() -> None:
     listed = {value.strip("`") for value in re.findall(r"`([^`]+)`", line.group(1))}
     assert listed == allowed
     assert "arn" not in listed
+
+
+def test_repo_investigation_report_skill_contract() -> None:
+    report = read("skills/scope-investigation-report/SKILL.md")
+
+    assert_frontmatter(report, "scope-investigation-report")
+
+    for text in [
+        "INVESTIGATION_REPORT",
+        "`MODE`: `INVESTIGATION`, `RUN`, or `INTEL`",
+        "`investigation_findings`",
+        "`KNOWLEDGE_CONTEXT`",
+        "Present facts only.",
+        "Do not infer events that no query returned.",
+        "Prefix every follow-up option with `Consider:`.",
+        "Investigation Summary",
+        "Evidence Timeline",
+        "Investigation Gaps",
+        "Environment Context Used",
+        "Queries Run",
+        "knowledge_update_candidates",
+    ]:
+        assert text in report
