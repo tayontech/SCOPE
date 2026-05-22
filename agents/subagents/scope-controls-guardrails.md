@@ -1,6 +1,6 @@
 ---
-name: scope-defend-guardrails
-description: Guardrails subagent — reads audit results.json and per-module JSONs, detects systemic patterns across findings, generates SCPs/RCPs with impact analysis and break-glass conditions. Dispatched by scope-defend orchestrator.
+name: scope-controls-guardrails
+description: Guardrails subagent — reads audit results.json and per-module JSONs, detects systemic patterns across findings, generates SCPs/RCPs with impact analysis and break-glass conditions. Dispatched by scope-controls orchestrator.
 tools: Read, Write, Bash
 model: claude-sonnet-4-6
 ---
@@ -14,7 +14,7 @@ Consume final attack_paths[] where validation_status is validated or conditional
 ## Input (provided by orchestrator in your initial message)
 
 - AUDIT_RUN_DIR: path to the audit run directory
-- DEFEND_RUN_DIR: path to the defend run directory (write artifacts here)
+- CONTROLS_RUN_DIR: path to the controls run directory (write artifacts here)
 - ACCOUNT_ID: 12-digit AWS account ID
 - SERVICES_COMPLETED: comma-separated list of services that completed enumeration
 
@@ -90,7 +90,7 @@ Generate BOTH SCPs and RCPs when the systemic pattern has both a principal-side 
 
 ## Break-Glass Requirement (Mandatory)
 
-**Every SCP MUST include a break-glass condition.** A policy that denies an action without an escape hatch is an operational risk — it can lock out legitimate emergency access. The validator (scope-defend-validate) will flag any SCP without a break-glass condition as a BLOCK finding.
+**Every SCP MUST include a break-glass condition.** A policy that denies an action without an escape hatch is an operational risk — it can lock out legitimate emergency access. The validator (scope-controls-validate) will flag any SCP without a break-glass condition as a BLOCK finding.
 
 Required break-glass pattern:
 ```json
@@ -109,14 +109,14 @@ RCPs do not require break-glass by the same rule, but should include a similar e
 
 ## Output: Write Artifacts
 
-**Create the defend run directory structure if needed:**
+**Create the controls run directory structure if needed:**
 ```bash
-mkdir -p "$DEFEND_RUN_DIR/policies"
+mkdir -p "$CONTROLS_RUN_DIR/policies"
 ```
 
 **Write guardrails.md (narrative):**
 
-Write `$DEFEND_RUN_DIR/guardrails.md` with a section for each systemic pattern:
+Write `$CONTROLS_RUN_DIR/guardrails.md` with a section for each systemic pattern:
 
 ```markdown
 # Guardrails
@@ -145,14 +145,14 @@ Reference each SCP/RCP by its filename. Explain the reasoning behind each policy
 For each SCP:
 ```bash
 # Write compact JSON — no whitespace. Valid AWS SCP structure:
-cat > "$DEFEND_RUN_DIR/policies/scp-{name}.json" << 'POLICY'
+cat > "$CONTROLS_RUN_DIR/policies/scp-{name}.json" << 'POLICY'
 {"Version":"2012-10-17","Statement":[{"Sid":"{descriptive-sid}","Effect":"Deny","Action":["{action}","{action}"],"Resource":"*","Condition":{"ArnNotLike":{"aws:PrincipalArn":"arn:aws:iam::*:role/BreakGlass*"}}}]}
 POLICY
 ```
 
 For each RCP:
 ```bash
-cat > "$DEFEND_RUN_DIR/policies/rcp-{name}.json" << 'POLICY'
+cat > "$CONTROLS_RUN_DIR/policies/rcp-{name}.json" << 'POLICY'
 {"Version":"2012-10-17","Statement":[{"Sid":"{descriptive-sid}","Effect":"Deny","Principal":"*","Action":["{action}"],"Resource":"*","Condition":{"ArnNotLike":{"aws:PrincipalArn":"arn:aws:iam::*:root"}}}]}
 POLICY
 ```
@@ -174,7 +174,7 @@ After writing all artifacts, print the return summary:
 
 ```
 STATUS: complete
-FILE: {defend_run_dir}/guardrails.md
+FILE: {controls_run_dir}/guardrails.md
 METRICS: {scps: N, rcps: N}
 ERRORS: []
 ```

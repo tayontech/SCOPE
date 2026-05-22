@@ -4,7 +4,7 @@
 # Validates required fields using jq against the canonical schemas in config/schemas/.
 # Returns decision: "block" with reason if required fields are missing.
 #
-# Canonical JSON Schema files are in config/schemas/{audit,defend,exploit}.schema.json
+# Canonical JSON Schema files are in config/schemas/{audit,controls,exploit}.schema.json
 # and can be used with any JSON Schema validator (ajv, python jsonschema, etc.) for CI.
 # This hook does lightweight jq-based validation for real-time enforcement.
 
@@ -130,7 +130,7 @@ SOURCE=$(jq -r '.source // empty' "$FILE_PATH")
 if [ -z "$SOURCE" ]; then
   case "$FILE_PATH" in
     *audit*) SOURCE="audit" ;;
-    *defend*) SOURCE="defend" ;;
+    *controls*) SOURCE="controls" ;;
     *exploit*) SOURCE="exploit" ;;
     *) exit 0 ;;  # Can't determine phase — skip validation
   esac
@@ -179,10 +179,10 @@ check_array_item_fields() {
 
 # Common required fields
 check_field "account_id" "12-digit AWS account ID"
-check_field "source" "phase identifier: audit, defend, or exploit"
+check_field "source" "phase identifier: audit, controls, or exploit"
 check_field "timestamp" "ISO8601 timestamp"
 
-# Validate account_id format (12 digits) — allow "unknown" for defend fallback
+# Validate account_id format (12 digits) — allow "unknown" for controls fallback
 ACCOUNT_ID=$(jq -r '.account_id // empty' "$FILE_PATH")
 if [ -n "$ACCOUNT_ID" ] && [ "$ACCOUNT_ID" != "unknown" ]; then
   if ! echo "$ACCOUNT_ID" | grep -qE '^[0-9]{12}$'; then
@@ -258,9 +258,9 @@ case "$SOURCE" in
     fi
     ;;
 
-  defend)
-    check_field "region" "AWS region or 'global' (defend is always 'global')"
-    check_field "summary" "defend summary object"
+  controls)
+    check_field "region" "AWS region or 'global' (controls is always 'global')"
+    check_field "summary" "controls summary object"
     check_field "audit_runs_analyzed" "array of consumed audit run IDs"
     check_field "guardrails" "array of SCP/RCP guardrail policies"
     check_field "detections" "array of SPL detections"
@@ -294,7 +294,7 @@ case "$SOURCE" in
     # policy_replacements items must have role_name, file, original_policy_arn, replacement_policy_json, source_attack_paths, staleness_reasoning
     check_array_item_fields "policy_replacements" "role_name,file,original_policy_arn,replacement_policy_json,source_attack_paths,staleness_reasoning" "policy replacement entries"
 
-    # SCHM-01 (defend): Validate detections[].severity -- lowercase only
+    # SCHM-01 (controls): Validate detections[].severity -- lowercase only
     if [ "$(jq 'has("detections")' "$FILE_PATH")" = "true" ]; then
       INVALID_DET_SEV=$(jq -r '[.detections[] | select(.severity != null) | .severity | select(. != "critical" and . != "high" and . != "medium" and . != "low")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
       if [ -n "$INVALID_DET_SEV" ]; then
@@ -322,7 +322,7 @@ case "$SOURCE" in
       fi
     fi
 
-    # SCHM-05: Validate defend summary counts match actual array lengths
+    # SCHM-05: Validate controls summary counts match actual array lengths
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then
       for PAIR in "detections:detections" "guardrails:guardrails" "policy_replacements:policy_replacements"; do
         SUMMARY_FIELD="${PAIR%%:*}"

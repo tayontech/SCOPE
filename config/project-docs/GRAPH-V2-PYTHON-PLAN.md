@@ -905,7 +905,7 @@ Expected: no whitespace errors. Status shows only intended graph v2 files plus a
 Do not modify:
 
 - `scope-attack-analyze` behavior beyond prompt/docs references.
-- `scope-controls` or defend worker prompts.
+- `scope-controls` or controls worker prompts.
 - dashboard UI components.
 - installer skill semantics.
 - top-level agent naming.

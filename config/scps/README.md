@@ -50,15 +50,15 @@ for id in $(aws organizations list-policies --filter SERVICE_CONTROL_POLICY --qu
 done
 ```
 
-### From scope-defend output
+### From scope-controls output
 
-Wrap defend-generated SCP files with the required schema fields:
+Wrap controls-generated SCP files with the required schema fields:
 
 ```bash
-# defend writes SCPs to ./runs/audit-*/defend/defend-*/policies/scp-*.json
+# controls writes SCPs to ./runs/audit-*/controls/controls-*/policies/scp-*.json
 # Those are raw PolicyDocument objects — wrap them:
-jq '{PolicyId: "p-custom-001", PolicyName: "defend-generated", PolicyDocument: ., Targets: []}' \
-  ./runs/audit-*/defend/defend-*/policies/scp-deny-root.json > config/scps/deny-root.json
+jq '{PolicyId: "p-custom-001", PolicyName: "controls-generated", PolicyDocument: ., Targets: []}' \
+  ./runs/audit-*/controls/controls-*/policies/scp-deny-root.json > config/scps/deny-root.json
 ```
 
 ## Merge Behavior

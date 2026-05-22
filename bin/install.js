@@ -237,20 +237,20 @@ function installCodex(skillName, skillMdContent, targetDir) {
 // ---------------------------------------------------------------------------
 
 // Agents that are user-invocable slash commands.
-// All others (defend) are auto-called internally and should NOT be installed as skills.
+// scope-controls also installs as a subagent because scope-audit dispatches it.
 const INSTALLABLE_AGENTS = new Set([
   'scope-audit',
-  'scope-defend',
+  'scope-controls',
   'scope-exploit',
   'scope-hunt',
 ]);
 
 // Agents from agents/ (top-level) that must also be deployed as subagents.
-// scope-defend: operator-invocable AND dispatched by scope-audit — needs both skill and subagent paths.
-// On Claude Code it is read inline from agents/scope-defend.md via Agent tool path.
+// scope-controls: operator-invocable AND dispatched by scope-audit — needs both skill and subagent paths.
+// On Claude Code it is read inline from agents/scope-controls.md via Agent tool path.
 // On Gemini/Codex it must be deployed to .agents/agents/ so the orchestrator can delegate to it.
 const TOP_LEVEL_SUBAGENTS = new Set([
-  'scope-defend',
+  'scope-controls',
 ]);
 
 /**
@@ -327,12 +327,12 @@ function discoverAgents(agentsDir) {
   }
   if (skipped.length > 0) {
     const asSubagents = skipped.filter(n => TOP_LEVEL_SUBAGENTS.has(n));
-    const truelySkipped = skipped.filter(n => !TOP_LEVEL_SUBAGENTS.has(n));
+    const trulySkipped = skipped.filter(n => !TOP_LEVEL_SUBAGENTS.has(n));
     if (asSubagents.length > 0) {
       console.log(`Skipped ${asSubagents.length} agent(s) from skills (will be deployed as subagents): ${asSubagents.join(', ')}`);
     }
-    if (truelySkipped.length > 0) {
-      console.log(`Skipped ${truelySkipped.length} inline-only agent(s): ${truelySkipped.join(', ')}`);
+    if (trulySkipped.length > 0) {
+      console.log(`Skipped ${trulySkipped.length} inline-only agent(s): ${trulySkipped.join(', ')}`);
     }
   }
   return agents;
@@ -343,7 +343,7 @@ function discoverAgents(agentsDir) {
  * Excludes scope-verify.md — it is read inline at runtime, not deployed as
  * a dispatchable subagent.
  * Also includes agents in TOP_LEVEL_SUBAGENTS from the agents/ root dir
- * (e.g., scope-defend — dispatched by orchestrator on Gemini/Codex).
+ * (e.g., scope-controls — dispatched by orchestrator on Gemini/Codex).
  * Returns array of { name: string, content: string }.
  */
 function discoverSubagents(subagentsDir) {
@@ -505,12 +505,12 @@ function installSubagentsGemini(subagents, scope) {
   // Source frontmatter tools: values are comma-separated strings — Gemini needs YAML arrays.
   const GEMINI_AGENT_CONFIG = {
     'scope-attack-analyze':     { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-defend':             { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-defend-guardrails':  { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-defend-policy':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-defend-remediation': { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-defend-splunk':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
-    'scope-defend-validate':    { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-controls':             { max_turns: 60, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-controls-guardrails':  { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-controls-policy':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-controls-remediation': { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-controls-detections':      { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
+    'scope-controls-validate':    { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-hunt-audit':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
     'scope-hunt-intel':         { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file', 'google_web_search', 'web_fetch'] },
     'scope-hunt-investigate':   { max_turns: 40, tools: ['run_shell_command', 'read_file', 'grep_search', 'write_file'] },
@@ -883,9 +883,9 @@ Options:
   --help      Print this usage message
 
 What gets installed:
-  Skills      Operator-invoked slash commands (scope-audit, scope-defend, scope-exploit, scope-hunt)
+  Skills      Operator-invoked slash commands (scope-audit, scope-controls, scope-exploit, scope-hunt)
               -> .claude/skills/ (Claude Code) or .agents/skills/ (Gemini/Codex)
-  Subagents   Orchestrator-dispatched workers (attack analysis, defend, hunt, research, synthesis)
+  Subagents   Orchestrator-dispatched workers (attack analysis, controls, hunt, research, synthesis)
               -> .claude/agents/ (Claude Code)
               -> .gemini/agents/ (Gemini CLI) — requires experimental.enableAgents: true
               -> .codex/agents/ + .codex/config.toml (Codex)
@@ -1089,7 +1089,7 @@ function checkLegacyGeminiSkills(scope) {
   // (leftover from when Gemini also wrote here)
   if (!fs.existsSync(legacyBase)) return;
 
-  const scopeSkills = ['scope-audit', 'scope-defend', 'scope-exploit', 'scope-hunt'];
+  const scopeSkills = ['scope-audit', 'scope-controls', 'scope-exploit', 'scope-hunt'];
   const found = scopeSkills.filter(s => fs.existsSync(path.join(legacyBase, s)));
 
   // If Codex is not being installed but .agents/skills/ has SCOPE skills, warn

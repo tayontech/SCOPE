@@ -1,6 +1,6 @@
 ---
-name: scope-defend-remediation
-description: Remediation plan subagent — reads audit results.json, produces prioritized remediation-plan.md with dependency mapping showing which fixes eliminate the most findings. Dispatched by scope-defend orchestrator.
+name: scope-controls-remediation
+description: Remediation plan subagent — reads audit results.json, produces prioritized remediation-plan.md with dependency mapping showing which fixes eliminate the most findings. Dispatched by scope-controls orchestrator.
 tools: Read, Write, Bash
 model: claude-sonnet-4-6
 ---
@@ -14,7 +14,7 @@ Consume final attack_paths[] where validation_status is validated or conditional
 ## Input (provided by orchestrator in your initial message)
 
 - AUDIT_RUN_DIR: path to the audit run directory
-- DEFEND_RUN_DIR: path to the defend run directory (write artifacts here)
+- CONTROLS_RUN_DIR: path to the controls run directory (write artifacts here)
 - ACCOUNT_ID: 12-digit AWS account ID
 - SERVICES_COMPLETED: comma-separated list of services that completed enumeration
 
@@ -22,7 +22,7 @@ Consume final attack_paths[] where validation_status is validated or conditional
 
 This subagent reads ONLY from `AUDIT_RUN_DIR/results.json` and module files under `AUDIT_RUN_DIR/modules/{service}/` (or legacy `AUDIT_RUN_DIR/{service}.json` files).
 
-**Do NOT read from DEFEND_RUN_DIR** — all four Wave 1 defend subagents run in parallel. `guardrails.md`, `splunk-detections.md`, and `policy-replacements.md` may not exist yet when this subagent starts. The attack paths in results.json already contain remediation hints and affected resources — that is sufficient input.
+**Do NOT read from CONTROLS_RUN_DIR** — all four Wave 1 controls subagents run in parallel. `guardrails.md`, `detections.md`, and `policy-replacements.md` may not exist yet when this subagent starts. The attack paths in results.json already contain remediation hints and affected resources — that is sufficient input.
 
 ## Pre-flight Validation
 
@@ -101,7 +101,7 @@ For each fix, specify:
 
 ## Output
 
-Write `DEFEND_RUN_DIR/remediation-plan.md`:
+Write `CONTROLS_RUN_DIR/remediation-plan.md`:
 
 ```markdown
 # Remediation Plan
@@ -177,7 +177,7 @@ After completing the remediation plan, output this exact format:
 
 ```
 STATUS: complete
-FILE: {defend_run_dir}/remediation-plan.md
+FILE: {controls_run_dir}/remediation-plan.md
 METRICS: {remediation_items: N}
 ERRORS: []
 ```
@@ -186,7 +186,7 @@ If results.json has no attack paths (clean account), report:
 
 ```
 STATUS: complete
-FILE: {defend_run_dir}/remediation-plan.md
+FILE: {controls_run_dir}/remediation-plan.md
 METRICS: {remediation_items: 0}
 ERRORS: []
 ```
@@ -209,6 +209,6 @@ Stop and report on blocking errors. Do not silently skip or mask failures.
 - If results.json is missing: STATUS error, stop immediately
 - If results.json has no `attack_paths` key: log to ERRORS, write remediation-plan.md with 0 items
 - If a per-module JSON is missing (optional read): log a warning and continue with available data
-- If DEFEND_RUN_DIR is not writable: STATUS error, stop
+- If CONTROLS_RUN_DIR is not writable: STATUS error, stop
 
-Do NOT read from DEFEND_RUN_DIR.
+Do NOT read from CONTROLS_RUN_DIR.

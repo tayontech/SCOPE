@@ -1898,10 +1898,10 @@ git commit -m "feat: add attack pipeline skills"
 ## Task 12: Update Downstream Consumers for Validation Status
 
 **Files:**
-- Modify: `agents/scope-defend.md` or renamed `agents/scope-controls.md` if that migration has happened.
-- Modify: `agents/subagents/scope-defend-splunk.md`
-- Modify: `agents/subagents/scope-defend-remediation.md`
-- Modify: `agents/subagents/scope-defend-guardrails.md`
+- Modify: `agents/scope-controls.md`
+- Modify: `agents/subagents/scope-controls-detections.md`
+- Modify: `agents/subagents/scope-controls-remediation.md`
+- Modify: `agents/subagents/scope-controls-guardrails.md`
 - Modify: `agents/subagents/scope-synthesizer.md`
 - Modify: `agents/subagents/scope-hunt-audit.md`
 - Modify: `agents/scope-exploit.md`
@@ -1916,9 +1916,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 
 const files = [
-  'agents/subagents/scope-defend-splunk.md',
-  'agents/subagents/scope-defend-remediation.md',
-  'agents/subagents/scope-defend-guardrails.md',
+  'agents/subagents/scope-controls-detections.md',
+  'agents/subagents/scope-controls-remediation.md',
+  'agents/subagents/scope-controls-guardrails.md',
   'agents/subagents/scope-synthesizer.md',
   'agents/subagents/scope-hunt-audit.md',
   'agents/scope-exploit.md',
@@ -1929,9 +1929,9 @@ for (const file of files) {
   assert.doesNotMatch(body, /confidence_tier|confidence percentages|confidence_pct/, `${file} must not use confidence tiers`);
 }
 
-const controls = fs.readFileSync('agents/subagents/scope-defend-splunk.md', 'utf8');
-assert.match(controls, /validation_status/, 'defend splunk must consume validation_status');
-assert.match(controls, /runtime_assumptions/, 'defend splunk must preserve runtime assumptions');
+const controls = fs.readFileSync('agents/subagents/scope-controls-detections.md', 'utf8');
+assert.match(controls, /validation_status/, 'controls detections must consume validation_status');
+assert.match(controls, /runtime_assumptions/, 'controls detections must preserve runtime assumptions');
 ```
 
 - [ ] **Step 2: Run downstream test and verify failure**
@@ -1953,7 +1953,7 @@ Make targeted replacements:
 - "confidence" in findings context -> "validation status"
 - detection tuning for conditional paths should reference `runtime_assumptions[]`.
 
-In defend/control prompts, add:
+In controls/control prompts, add:
 
 ```markdown
 Consume final `attack_paths[]` where `validation_status` is `validated` or `conditional`. Preserve `runtime_assumptions[]` in control mappings. Do not treat `conditional` as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
@@ -1972,7 +1972,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 12**
 
 ```bash
-git add agents/scope-defend.md agents/subagents/scope-defend-splunk.md agents/subagents/scope-defend-remediation.md agents/subagents/scope-defend-guardrails.md agents/subagents/scope-synthesizer.md agents/subagents/scope-hunt-audit.md agents/scope-exploit.md tests/js/downstream-validation-status-contract.test.js
+git add agents/scope-controls.md agents/subagents/scope-controls-detections.md agents/subagents/scope-controls-remediation.md agents/subagents/scope-controls-guardrails.md agents/subagents/scope-synthesizer.md agents/subagents/scope-hunt-audit.md agents/scope-exploit.md tests/js/downstream-validation-status-contract.test.js
 git commit -m "chore: migrate downstream agents to validation status"
 ```
 

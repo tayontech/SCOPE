@@ -1,6 +1,6 @@
 # SCOPE
 
-SCOPE is an AI agent suite for AWS purple team security operations. Agents handle audit, exploit, defend, and hunt workflows. Run `node bin/install.js` to set up your platform.
+SCOPE is an AI agent suite for AWS purple team security operations. Agents handle audit, exploit, controls, and hunt workflows. Run `node bin/install.js` to set up your platform.
 
 ## Reasoning Philosophy
 
@@ -44,7 +44,7 @@ Read `config/observations.md` at session start if it exists. This file accumulat
 
 During a run:
 - Note account-specific patterns (naming conventions, role structure, tagging, service usage)
-- Use accumulated context to sharpen downstream reasoning (attack-paths, defend, exploit)
+- Use accumulated context to sharpen downstream reasoning (attack-paths, controls, exploit)
 - Flag when a new finding matches a previously observed recurring gap
 
 After a run completes:

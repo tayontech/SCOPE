@@ -1,5 +1,5 @@
 {
-  "_note": "Example SCP config file. Rename without the _ prefix to activate (e.g., deny-root.json). One JSON file per SCP. Source from: aws organizations describe-policy --policy-id p-xxxx, or wrap scope-defend generated SCPs.",
+  "_note": "Example SCP config file. Rename without the _ prefix to activate (e.g., deny-root.json). One JSON file per SCP. Source from: aws organizations describe-policy --policy-id p-xxxx, or wrap scope-controls generated SCPs.",
   "PolicyId": "p-exampleid",
   "PolicyName": "DenyRootActions",
   "Description": "Prevents root user from performing any actions except billing",

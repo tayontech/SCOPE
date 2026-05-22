@@ -245,7 +245,7 @@ def test_audit_orchestrates_attack_pipeline() -> None:
         "final attack path count by severity",
         "top 3 validated/conditional paths",
         "On skip, still write `$RUN_DIR/findings.md`",
-        "Do not dispatch scope-defend or scope-synthesizer",
+        "Do not dispatch scope-controls or scope-synthesizer",
     ]:
         assert text in gate4_section
     assert_not_matches(gate4_section, r"confidence|confidence tier|confidence tiers")
@@ -254,14 +254,14 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert_not_matches(prompt, r"skips results\.json|results\.json[\s\S]{0,80}skipped")
     assert_not_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,220}Dashboard export, dashboard index")
     assert_matches(prompt, r"engagement-report\.md[\s\S]{0,140}required only when synthesizer runs and succeeds")
-    assert "Do not require `engagement-report.md` when Gate 4 was skipped, defend failed, or synthesizer failed." in prompt
-    assert_matches(prompt, r"Defend failure is non-blocking[\s\S]{0,140}Do not dispatch synthesizer without defend output\.")
-    assert "After defend completes successfully, dispatch the synthesizer subagent automatically." in prompt
+    assert "Do not require `engagement-report.md` when Gate 4 was skipped, controls failed, or synthesizer failed." in prompt
+    assert_matches(prompt, r"Controls failure is non-blocking[\s\S]{0,140}Do not dispatch synthesizer without controls output\.")
+    assert "After controls completes successfully, dispatch the synthesizer subagent automatically." in prompt
     assert_matches(prompt, r"Synthesizer failure is non-blocking[\s\S]{0,120}does not make `engagement-report\.md` mandatory\.")
     assert_matches(prompt, r"Synthesizer handled[\s\S]{0,180}when synthesizer succeeds[\s\S]{0,120}failure is non-blocking")
-    assert_matches(prompt, r"Defend handled[\s\S]{0,180}When defend succeeds[\s\S]{0,160}Defend failure is logged and remains non-blocking\.")
-    assert_not_matches(prompt, r"Defend creates its run directory[\s\S]{0,80}returns DEFEND_RUN_DIR")
-    assert_not_matches(prompt, r"After defend completes \(or fails\), dispatch the synthesizer")
+    assert_matches(prompt, r"Controls handled[\s\S]{0,180}When controls succeeds[\s\S]{0,160}Controls failure is logged and remains non-blocking\.")
+    assert_not_matches(prompt, r"Controls creates its run directory[\s\S]{0,80}returns CONTROLS_RUN_DIR")
+    assert_not_matches(prompt, r"After controls completes \(or fails\), dispatch the synthesizer")
     assert_not_matches(prompt, r"continue to synthesizer/pipeline")
     assert_not_matches(prompt, r"enriches final attack paths|enriches `?attack_paths\[\]`?")
     assert_not_matches(prompt, r"METRICS \(attack_paths and severity counts\)")
@@ -272,11 +272,11 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     prompts = {
         path: read(path)
         for path in [
-            "agents/scope-defend.md",
-            "agents/subagents/scope-defend-splunk.md",
-            "agents/subagents/scope-defend-remediation.md",
-            "agents/subagents/scope-defend-guardrails.md",
-            "agents/subagents/scope-defend-validate.md",
+            "agents/scope-controls.md",
+            "agents/subagents/scope-controls-detections.md",
+            "agents/subagents/scope-controls-remediation.md",
+            "agents/subagents/scope-controls-guardrails.md",
+            "agents/subagents/scope-controls-validate.md",
             "agents/subagents/scope-synthesizer.md",
             "agents/subagents/scope-hunt-audit.md",
             "agents/scope-exploit.md",
@@ -293,22 +293,22 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         assert_not_matches(body, r"conditional (?:paths? )?(?:is|are) low priority|low priority conditional")
 
     for path in [
-        "agents/scope-defend.md",
-        "agents/subagents/scope-defend-splunk.md",
-        "agents/subagents/scope-defend-remediation.md",
-        "agents/subagents/scope-defend-guardrails.md",
-        "agents/subagents/scope-defend-validate.md",
+        "agents/scope-controls.md",
+        "agents/subagents/scope-controls-detections.md",
+        "agents/subagents/scope-controls-remediation.md",
+        "agents/subagents/scope-controls-guardrails.md",
+        "agents/subagents/scope-controls-validate.md",
     ]:
         body = prompts[path]
         assert_matches(body, r"attack_paths\[\][\s\S]{0,180}validation_status[\s\S]{0,120}validated[\s\S]{0,80}conditional")
         assert_matches(body, r"runtime_assumptions\[\][\s\S]{0,220}coverage_caveats\[\]|coverage_caveats\[\][\s\S]{0,220}runtime_assumptions\[\]")
         assert "Do not treat conditional as low priority" in body
 
-    splunk = prompts["agents/subagents/scope-defend-splunk.md"]
-    assert_matches(splunk, r"attack_paths\[\][\s\S]{0,500}validation_status[\s\S]{0,500}runtime_assumptions[\s\S]{0,500}coverage_caveats")
-    assert_matches(splunk, r"Validation Status:[\s\S]{0,300}Runtime Assumptions:[\s\S]{0,300}Coverage Caveats:")
+    detections = prompts["agents/subagents/scope-controls-detections.md"]
+    assert_matches(detections, r"attack_paths\[\][\s\S]{0,500}validation_status[\s\S]{0,500}runtime_assumptions[\s\S]{0,500}coverage_caveats")
+    assert_matches(detections, r"Validation Status:[\s\S]{0,300}Runtime Assumptions:[\s\S]{0,300}Coverage Caveats:")
 
-    for path in ["agents/subagents/scope-defend-remediation.md", "agents/subagents/scope-defend-guardrails.md"]:
+    for path in ["agents/subagents/scope-controls-remediation.md", "agents/subagents/scope-controls-guardrails.md"]:
         assert "validation_status" in prompts[path]
         assert_matches(prompts[path], r"runtime_assumptions[\s\S]{0,180}coverage_caveats|coverage_caveats[\s\S]{0,180}runtime_assumptions")
 
@@ -337,8 +337,8 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert '"coverage_caveats": []' in exploit
     assert "Exploit results must expose final paths in `attack_paths[]`, not `paths[]`" in exploit
 
-    defend = prompts["agents/scope-defend.md"]
-    assert_matches(defend, r"ATTACK_PATH_CONTEXT=\$\(jq '\[\.attack_paths\[\]\? \| \{[\s\S]{0,180}validation_status[\s\S]{0,180}runtime_assumptions[\s\S]{0,180}coverage_caveats")
-    assert "source_attack_paths: $source_attack_paths" in defend
-    assert "source_attack_path_context: $source_attack_path_context" in defend
-    assert "source_attack_paths: []" not in defend
+    controls = prompts["agents/scope-controls.md"]
+    assert_matches(controls, r"ATTACK_PATH_CONTEXT=\$\(jq '\[\.attack_paths\[\]\? \| \{[\s\S]{0,180}validation_status[\s\S]{0,180}runtime_assumptions[\s\S]{0,180}coverage_caveats")
+    assert "source_attack_paths: $source_attack_paths" in controls
+    assert "source_attack_path_context: $source_attack_path_context" in controls
+    assert "source_attack_paths: []" not in controls

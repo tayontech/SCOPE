@@ -1,6 +1,6 @@
 ---
-name: scope-defend-splunk
-description: SPL detections subagent — maps attack paths from results.json to CloudTrail SPL queries with MITRE mappings. Dispatched by scope-defend orchestrator.
+name: scope-controls-detections
+description: SPL detections subagent — maps attack paths from results.json to CloudTrail SPL queries with MITRE mappings. Dispatched by scope-controls orchestrator.
 tools: Read, Write, Bash
 model: claude-sonnet-4-6
 ---
@@ -14,7 +14,7 @@ Consume final attack_paths[] where validation_status is validated or conditional
 ## Input (provided by orchestrator in your initial message)
 
 - AUDIT_RUN_DIR: path to the audit run directory
-- DEFEND_RUN_DIR: path to the defend run directory (write artifacts here)
+- CONTROLS_RUN_DIR: path to the controls run directory (write artifacts here)
 - ACCOUNT_ID: 12-digit AWS account ID
 - SERVICES_COMPLETED: comma-separated list of services that completed enumeration
 
@@ -44,7 +44,7 @@ Read `$AUDIT_RUN_DIR/results.json` and extract the `attack_paths[]` array. For e
 
 No other files are required — results.json contains all the detection context needed.
 
-If results.json has no `attack_paths` array or it is empty, write a placeholder splunk-detections.md explaining that no attack paths are available, and return STATUS: complete with detections: 0.
+If results.json has no `attack_paths` array or it is empty, write a placeholder detections.md explaining that no attack paths are available, and return STATUS: complete with detections: 0.
 
 ## SPL Detection Writing
 
@@ -131,14 +131,14 @@ For each attack path in `attack_paths[]`:
 
 ## Output: Write Artifacts
 
-**Create the defend run directory if needed:**
+**Create the controls run directory if needed:**
 ```bash
-mkdir -p "$DEFEND_RUN_DIR"
+mkdir -p "$CONTROLS_RUN_DIR"
 ```
 
-**Write splunk-detections.md (human-readable artifact):**
+**Write detections.md (human-readable artifact):**
 
-Write `$DEFEND_RUN_DIR/splunk-detections.md` with all detections organized by attack path:
+Write `$CONTROLS_RUN_DIR/detections.md` with all detections organized by attack path:
 
 ```markdown
 # SPL Detections
@@ -182,9 +182,9 @@ index=<aws_api_index> earliest=-24h latest=now
 
 **Write detections.json (structured output for orchestrator):**
 
-Also write `$DEFEND_RUN_DIR/detections.json` — a JSON array consumed directly by the orchestrator during results.json assembly. This avoids markdown parsing and provides machine-readable output.
+Also write `$CONTROLS_RUN_DIR/detections.json` — a JSON array consumed directly by the orchestrator during results.json assembly. This avoids markdown parsing and provides machine-readable output.
 
-Format each detection object to match the defend schema's `detections[]` format:
+Format each detection object to match the controls schema's `detections[]` format:
 
 ```json
 [
@@ -225,7 +225,7 @@ When `config/index.json` is absent, the allowlist check is skipped and any named
 ## Error Handling
 
 - If results.json is missing → stop immediately, report STATUS: error
-- If `attack_paths` is empty → write placeholder splunk-detections.md, return STATUS: complete with detections: 0
+- If `attack_paths` is empty → write placeholder detections.md, return STATUS: complete with detections: 0
 - If a specific attack path has empty `detection_opportunities` → derive events from context rather than skipping
 - Do not silently skip failures — surface every error with context
 
@@ -235,7 +235,7 @@ After writing both artifacts, print the return summary:
 
 ```
 STATUS: complete
-FILE: {defend_run_dir}/splunk-detections.md
+FILE: {controls_run_dir}/detections.md
 METRICS: {detections: N}
 ERRORS: []
 ```

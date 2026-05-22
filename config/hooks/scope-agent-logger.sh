@@ -36,7 +36,7 @@ fi
   # Find most recent run directory across all phases
   RUN_DIR=""
   LATEST_TIME=0
-  for dir_pattern in "$CWD/runs/audit-"* "$CWD/exploit/exploit-"* "$CWD/hunt/hunt-"* "$CWD/runs/audit-"*/defend/defend-*; do
+  for dir_pattern in "$CWD/runs/audit-"* "$CWD/exploit/exploit-"* "$CWD/hunt/hunt-"* "$CWD/runs/audit-"*/controls/controls-*; do
     for d in $dir_pattern; do
       [ -d "$d" ] || continue
       # Check modified within last 30 min

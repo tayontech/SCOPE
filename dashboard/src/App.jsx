@@ -65,14 +65,14 @@ const CATEGORY_CONFIG = {
 const PHASE_CONFIG = {
   audit:       { label: "Audit",       color: "#f59e0b" },
   exploit:     { label: "Exploit",     color: "#ef4444" },
-  defend:      { label: "Defend",      color: "#22c55e" },
+  controls:      { label: "Controls",      color: "#22c55e" },
 };
 
 // ─── Data Normalization ───
-// Handles multiple defend data formats produced by different agents:
+// Handles multiple controls data formats produced by different agents:
 //   1. Rich results.json (per spec: has scps[], rcps[], detections[] with severity/spl, etc.)
 //   2. Thin results.json (summary counts + policies.scp_files + basic detections without spl)
-//   3. Data layer format (fields nested under payload, from data/defend/*.json)
+//   3. Data layer format (fields nested under payload, from data/controls/*.json)
 //   4. Flat policies[] format (policies as single array with type: "SCP"/"RCP", no scps[]/rcps[])
 // Also fixes audit source field: json.source may be service-specific (e.g., "svc:ec2.amazonaws.com")
 function normalizeForDashboard(json, indexSource) {
@@ -86,7 +86,7 @@ function normalizeForDashboard(json, indexSource) {
 
   // Resolve canonical phase key: prefer index.json source over json.source when
   // json.source is not a recognized phase (e.g., "svc:ec2.amazonaws.com" for audit)
-  const VALID_PHASES = ["audit", "exploit", "defend"];
+  const VALID_PHASES = ["audit", "exploit", "controls"];
   const source = (indexSource && VALID_PHASES.includes(indexSource))
     ? indexSource
     : (VALID_PHASES.includes(data.source) ? data.source : (indexSource || "audit"));
@@ -165,8 +165,8 @@ function normalizeForDashboard(json, indexSource) {
     if (s.exfiltration_vectors == null) s.exfiltration_vectors = 0;
   }
 
-  // Defend-specific normalization
-  if (source === "defend") {
+  // Controls-specific normalization
+  if (source === "controls") {
     // Map summary field variants to dashboard-expected names
     if (!data.summary) data.summary = {};
     const s = data.summary;
@@ -176,7 +176,7 @@ function normalizeForDashboard(json, indexSource) {
       data.audit_runs_analyzed = [data.audit_run];
     }
 
-    // New schema (78-defend-rework): guardrails[] array with type: "scp"|"rcp"
+    // New schema (78-controls-rework): guardrails[] array with type: "scp"|"rcp"
     // Derive scps[]/rcps[] from guardrails[] for PolicyViewer compatibility
     if (Array.isArray(data.guardrails) && !data.scps && !data.rcps) {
       const mapGuardrail = (g) => ({
@@ -221,7 +221,7 @@ function normalizeForDashboard(json, indexSource) {
       data.remediationItemCount = data.remediation.items ?? 0;
     }
 
-    // KPI derivation — array lengths ALWAYS win for defend KPIs
+    // KPI derivation — array lengths ALWAYS win for controls KPIs
     // New field names: summary.guardrails, summary.detections, summary.remediation_items
     // Legacy field names preserved as fallbacks for backward compatibility
     s.scps_generated = data.scps?.length ?? 0;
@@ -1780,7 +1780,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ─── DefendView ───
+// ─── ControlsView ───
 // ═══════════════════════════════════════════════════════════════════
 
 function formatJSON(obj) {
@@ -2116,7 +2116,7 @@ function ExecutiveSummaryView({ data }) {
   const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[summary.risk_score] || COLORS.text;
 
   if (!exec) {
-    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No executive summary data available. Re-run defend to generate.</div>;
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No executive summary data available. Re-run controls to generate.</div>;
   }
 
   return (
@@ -2222,7 +2222,7 @@ function ExecutiveSummaryView({ data }) {
 function TechnicalRecommendationsView({ data }) {
   const tech = data?.technical_recommendations;
   if (!tech?.attack_path_bundles?.length) {
-    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No technical recommendations data available. Re-run defend to generate.</div>;
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No technical recommendations data available. Re-run controls to generate.</div>;
   }
 
   return (
@@ -2289,19 +2289,19 @@ function TechnicalRecommendationsView({ data }) {
   );
 }
 
-function DefendView({ data }) {
-  const [defendTab, setDefendTab] = useState(data?.executive_summary ? "executive" : "policies");
+function ControlsView({ data }) {
+  const [controlsTab, setControlsTab] = useState(data?.executive_summary ? "executive" : "policies");
   const summary = data?.summary || {};
 
   return (
     <>
       {/* Stats Row — cards switch to the corresponding tab */}
       <div style={{ display: "flex", gap: 12, padding: "16px 24px", flexWrap: "wrap" }}>
-        <StatCard label="SCPs" value={summary.scps_generated ?? data.scps?.length ?? 0} color={COLORS.high} onClick={() => setDefendTab("policies")} active={defendTab === "policies"} />
-        <StatCard label="RCPs" value={summary.rcps_generated ?? data.rcps?.length ?? 0} color={COLORS.medium} onClick={() => setDefendTab("policies")} active={defendTab === "policies"} />
-        <StatCard label="Detections" value={summary.detections_generated ?? data.detections?.length ?? 0} color={COLORS.detection} onClick={() => setDefendTab("detections")} active={defendTab === "detections"} />
-        <StatCard label="Remediation" value={summary.remediation_items ?? summary.controls_recommended ?? 0} color={COLORS.low} onClick={() => setDefendTab("remediation")} active={defendTab === "remediation"} />
-        <StatCard label="Quick Wins" value={summary.quick_wins ?? 0} color={COLORS.accent} onClick={() => setDefendTab("executive")} active={defendTab === "executive"} />
+        <StatCard label="SCPs" value={summary.scps_generated ?? data.scps?.length ?? 0} color={COLORS.high} onClick={() => setControlsTab("policies")} active={controlsTab === "policies"} />
+        <StatCard label="RCPs" value={summary.rcps_generated ?? data.rcps?.length ?? 0} color={COLORS.medium} onClick={() => setControlsTab("policies")} active={controlsTab === "policies"} />
+        <StatCard label="Detections" value={summary.detections_generated ?? data.detections?.length ?? 0} color={COLORS.detection} onClick={() => setControlsTab("detections")} active={controlsTab === "detections"} />
+        <StatCard label="Remediation" value={summary.remediation_items ?? summary.controls_recommended ?? 0} color={COLORS.low} onClick={() => setControlsTab("remediation")} active={controlsTab === "remediation"} />
+        <StatCard label="Quick Wins" value={summary.quick_wins ?? 0} color={COLORS.accent} onClick={() => setControlsTab("executive")} active={controlsTab === "executive"} />
       </div>
 
       {/* Main Content: Sidebar + Tabbed Center */}
@@ -2321,12 +2321,12 @@ function DefendView({ data }) {
             ].map((t) => (
               <button
                 key={t.key}
-                onClick={() => setDefendTab(t.key)}
+                onClick={() => setControlsTab(t.key)}
                 style={{
                   padding: "6px 14px", borderRadius: 6,
-                  border: `1px solid ${defendTab === t.key ? PHASE_CONFIG.defend.color : COLORS.border}`,
-                  background: defendTab === t.key ? PHASE_CONFIG.defend.color + "18" : "transparent",
-                  color: defendTab === t.key ? PHASE_CONFIG.defend.color : COLORS.textDim,
+                  border: `1px solid ${controlsTab === t.key ? PHASE_CONFIG.controls.color : COLORS.border}`,
+                  background: controlsTab === t.key ? PHASE_CONFIG.controls.color + "18" : "transparent",
+                  color: controlsTab === t.key ? PHASE_CONFIG.controls.color : COLORS.textDim,
                   cursor: "pointer", fontSize: 12, fontWeight: 600, textTransform: "uppercase",
                 }}
               >
@@ -2335,11 +2335,11 @@ function DefendView({ data }) {
             ))}
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {defendTab === "executive" && <ExecutiveSummaryView data={data} />}
-            {defendTab === "technical" && <TechnicalRecommendationsView data={data} />}
-            {defendTab === "policies" && <PolicyViewer scps={data.scps} rcps={data.rcps} />}
-            {defendTab === "detections" && <DetectionRulesList detections={data.detections} />}
-            {defendTab === "remediation" && (
+            {controlsTab === "executive" && <ExecutiveSummaryView data={data} />}
+            {controlsTab === "technical" && <TechnicalRecommendationsView data={data} />}
+            {controlsTab === "policies" && <PolicyViewer scps={data.scps} rcps={data.rcps} />}
+            {controlsTab === "detections" && <DetectionRulesList detections={data.detections} />}
+            {controlsTab === "remediation" && (
               data.prioritization?.length
                 ? <ControlsMatrix controls={data.prioritization} />
                 : data.remediationPlanFile
@@ -2365,7 +2365,7 @@ function DefendView({ data }) {
 // ─── Main Dashboard ───
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
-  const [allData, setAllData] = useState({});  // { audit: {...}, defend: {...}, exploit: {...} }
+  const [allData, setAllData] = useState({});  // { audit: {...}, controls: {...}, exploit: {...} }
   const [selectedPath, setSelectedPath] = useState(null);
   const [tab, setTab] = useState("graph");
   const [selectedNode, setSelectedNode] = useState(null);
@@ -2406,7 +2406,7 @@ export default function App() {
       if ((activePhase === "audit" || activePhase === "exploit") && (allData["audit"] || allData["exploit"])) return;
       if (allData["audit"]) setActivePhase("audit");
       else if (allData["exploit"]) setActivePhase("exploit");
-      else if (allData["defend"]) setActivePhase("defend");
+      else if (allData["controls"]) setActivePhase("controls");
     }
   }, [allData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2667,8 +2667,8 @@ export default function App() {
           activeStatPanel={activeStatPanel}
           handleStatClick={handleStatClick}
         />
-      ) : activePhase === "defend" ? (
-        <DefendView data={data} />
+      ) : activePhase === "controls" ? (
+        <ControlsView data={data} />
       ) : null}
 
     </div>

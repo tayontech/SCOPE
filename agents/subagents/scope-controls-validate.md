@@ -1,6 +1,6 @@
 ---
-name: scope-defend-validate
-description: Validation subagent — adversarial review of all Wave 1 defend artifacts. Checks operational impact, syntax/correctness, and consistency. Returns machine-parseable STATUS/BLOCKS/WARNS for orchestrator loop control. Dispatched by scope-defend orchestrator.
+name: scope-controls-validate
+description: Validation subagent — adversarial review of all Wave 1 controls artifacts. Checks operational impact, syntax/correctness, and consistency. Returns machine-parseable STATUS/BLOCKS/WARNS for orchestrator loop control. Dispatched by scope-controls orchestrator.
 tools: Read, Write, Bash, Grep
 model: claude-sonnet-4-6
 ---
@@ -19,7 +19,7 @@ Consume final attack_paths[] where validation_status is validated or conditional
 ## Input (provided by orchestrator in your initial message)
 
 - AUDIT_RUN_DIR: path to the audit run directory
-- DEFEND_RUN_DIR: path to the defend run directory containing all Wave 1 artifacts
+- CONTROLS_RUN_DIR: path to the controls run directory containing all Wave 1 artifacts
 - ACCOUNT_ID: 12-digit AWS account ID
 - FIX_REQUIRED: block finding text from prior round, or empty for fresh validation run
 </intake>
@@ -31,8 +31,8 @@ Before beginning any review, verify that all 4 required artifact files exist:
 
 ```bash
 MISSING=0
-for ARTIFACT in guardrails.md splunk-detections.md policy-replacements.md remediation-plan.md; do
-  if test -f "$DEFEND_RUN_DIR/$ARTIFACT"; then
+for ARTIFACT in guardrails.md detections.md policy-replacements.md remediation-plan.md; do
+  if test -f "$CONTROLS_RUN_DIR/$ARTIFACT"; then
     echo "$ARTIFACT PRESENT"
   else
     echo "MISSING: $ARTIFACT"
@@ -86,20 +86,20 @@ Three categories cover all failure modes:
 ### Step 1: Read guardrails.md
 
 ```bash
-cat "$DEFEND_RUN_DIR/guardrails.md"
+cat "$CONTROLS_RUN_DIR/guardrails.md"
 ```
 
 ### Step 2: Enumerate and validate each SCP/RCP JSON file
 
 ```bash
-ls "$DEFEND_RUN_DIR/policies/"*.json 2>/dev/null
+ls "$CONTROLS_RUN_DIR/policies/"*.json 2>/dev/null
 ```
 
 For each JSON file:
 
 ```bash
 # Validate JSON syntax
-jq . < "$DEFEND_RUN_DIR/policies/scp-FILENAME.json" > /dev/null 2>&1 && echo "JSON VALID" || echo "JSON INVALID"
+jq . < "$CONTROLS_RUN_DIR/policies/scp-FILENAME.json" > /dev/null 2>&1 && echo "JSON VALID" || echo "JSON INVALID"
 ```
 
 **BLOCK criteria:**
@@ -118,19 +118,19 @@ jq . < "$DEFEND_RUN_DIR/policies/scp-FILENAME.json" > /dev/null 2>&1 && echo "JS
 
 **Consistency check:**
 
-- Verify each policy filename in `DEFEND_RUN_DIR/policies/` is mentioned by name in guardrails.md
+- Verify each policy filename in `CONTROLS_RUN_DIR/policies/` is mentioned by name in guardrails.md
 - WARN on orphaned policy files (file exists in policies/ but not referenced in guardrails.md)
 </review_guardrails>
 
-<review_splunk>
-## Review 2: SPL Detections (splunk-detections.md)
+<review_detections>
+## Review 2: SPL Detections (detections.md)
 
 Note: The `scope-spl-lint.sh` hook already validates SPL syntax (index=cloudtrail, field names, time bounds, composite/transaction rules) on Write. This review focuses on SEMANTIC correctness that the hook cannot check.
 
-### Step 1: Read splunk-detections.md
+### Step 1: Read detections.md
 
 ```bash
-cat "$DEFEND_RUN_DIR/splunk-detections.md"
+cat "$CONTROLS_RUN_DIR/detections.md"
 ```
 
 ### Step 2: Read audit results.json for cross-reference
@@ -154,9 +154,9 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, valid
 
 **Consistency check:**
 
-- For each attack path in `AUDIT_RUN_DIR/results.json`, check if at least one detection in splunk-detections.md maps to it (by name reference or MITRE technique overlap)
+- For each attack path in `AUDIT_RUN_DIR/results.json`, check if at least one detection in detections.md maps to it (by name reference or MITRE technique overlap)
 - **WARN** on each attack path that has zero mapped detections — this is a coverage gap
-</review_splunk>
+</review_detections>
 
 <review_policy_replacements>
 ## Review 3: Policy Replacements (policy-replacements.md + replacements/*.json)
@@ -164,13 +164,13 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, valid
 ### Step 1: Read policy-replacements.md
 
 ```bash
-cat "$DEFEND_RUN_DIR/policy-replacements.md"
+cat "$CONTROLS_RUN_DIR/policy-replacements.md"
 ```
 
 ### Step 2: Enumerate replacement policy files
 
 ```bash
-ls "$DEFEND_RUN_DIR/replacements/"*.json 2>/dev/null
+ls "$CONTROLS_RUN_DIR/replacements/"*.json 2>/dev/null
 ```
 
 ### Step 3: Validate each replacement policy
@@ -179,7 +179,7 @@ For each `iam-replacement-*.json`:
 
 ```bash
 # Validate JSON syntax
-jq . < "$DEFEND_RUN_DIR/replacements/iam-replacement-FILENAME.json" > /dev/null 2>&1 && echo "JSON VALID" || echo "JSON INVALID"
+jq . < "$CONTROLS_RUN_DIR/replacements/iam-replacement-FILENAME.json" > /dev/null 2>&1 && echo "JSON VALID" || echo "JSON INVALID"
 ```
 
 **BLOCK criteria:**
@@ -205,7 +205,7 @@ Verify replacement policy JSON is syntactically valid. Check filenames correspon
 ### Step 1: Read remediation-plan.md
 
 ```bash
-cat "$DEFEND_RUN_DIR/remediation-plan.md"
+cat "$CONTROLS_RUN_DIR/remediation-plan.md"
 ```
 
 **WARN criteria:**
@@ -235,7 +235,7 @@ jq -r '.attack_paths[].name' "$AUDIT_RUN_DIR/results.json"
 
 For each attack path name, verify at least ONE of the following is true:
 1. A guardrail (SCP or RCP) in guardrails.md explicitly addresses it
-2. A detection in splunk-detections.md maps to it
+2. A detection in detections.md maps to it
 3. A remediation item in remediation-plan.md addresses it
 
 **WARN** for each attack path with zero defensive controls mapped across all three artifacts. This is a coverage gap — an attack vector with no detection, no prevention, and no remediation.
@@ -266,7 +266,7 @@ Note in the validation report that this is Round 2 and which findings from FIX_R
 <output_format>
 ## Output: Write validation-report.md
 
-Write the validation report to `$DEFEND_RUN_DIR/validation-report.md`:
+Write the validation report to `$CONTROLS_RUN_DIR/validation-report.md`:
 
 ```markdown
 # Validation Report
@@ -276,7 +276,7 @@ Round: 1|2
 
 ## Block Findings (N)
 
-### BLOCK-01: {subagent: guardrails|splunk|policy|remediation} — {description}
+### BLOCK-01: {subagent: guardrails|detections|policy|remediation} — {description}
 **Artifact:** {filename}
 **Category:** {operational_impact|syntax_correctness|consistency}
 **Issue:** {what is wrong — specific, actionable}
@@ -325,7 +325,7 @@ After writing validation-report.md, print this block as the LAST output. The orc
 STATUS: pass|partial|fail
 BLOCKS: N
 WARNS: N
-FILE: {defend_run_dir}/validation-report.md
+FILE: {controls_run_dir}/validation-report.md
 ```
 
 **Status mapping:**

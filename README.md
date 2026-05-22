@@ -25,7 +25,7 @@ The orchestrator runs the Python AWS SDK runtime across 16 AWS services, feeds f
 |-------|-------------|
 | **Audit** | Python enumerators inventory IAM, STS, S3, KMS, Secrets Manager, Lambda, EC2, RDS, API Gateway, SNS, SQS, CodeBuild, Bedrock, Cognito, DynamoDB, SSM |
 | **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
-| **Defend** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
+| **Controls** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
 | **Exploit** | Produces stealth-ordered playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
 | **Hunt** | SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing — three modes: investigation, hunt (from audit data), and intel (from URLs/descriptions) |
 
@@ -63,8 +63,8 @@ The installer presents an interactive selector — pick your runtime (Claude Cod
 ## Architecture
 
 ```
-agents/               Core agents: audit orchestrator, defend, exploit, hunt
-agents/subagents/     Attack analysis, defend subagents, hunt intake, research, synthesizer, verification
+agents/               Core agents: audit orchestrator, controls, exploit, hunt
+agents/subagents/     Attack analysis, controls subagents, hunt intake, research, synthesizer, verification
 scope/enumerators/    Python boto3 resource inventory modules
 scope/core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
 scope/runtime/        Audit orchestration, target selection, aggregation, post-processing
@@ -129,18 +129,18 @@ SCOPE has two types of agents:
 
 **Skills** — run in your session, inherit your model:
 - `scope-audit` — orchestrator, dispatches subagents
-- `scope-defend` — defensive controls orchestrator, dispatches 5 subagents
+- `scope-controls` — defensive controls orchestrator, dispatches 5 subagents
 - `scope-exploit` — standalone red team playbook generator
 - `scope-hunt` — standalone SOC investigation assistant
 
 **Subagents** — dispatched with their own pinned model:
 - `scope-attack-analyze` — attack path analysis over Python runtime inventory, graph, and IAM policy context
-- `scope-defend-guardrails`, `scope-defend-splunk`, `scope-defend-policy`, `scope-defend-remediation`, `scope-defend-validate` — defend subagents
+- `scope-controls-guardrails`, `scope-controls-detections`, `scope-controls-policy`, `scope-controls-remediation`, `scope-controls-validate` — controls subagents
 - `scope-hunt-investigate`, `scope-hunt-intel`, `scope-hunt-audit` — hunt mode intake and hypothesis generation
 - `scope-research` — real-world technique research integration
 - `scope-synthesizer` — engagement synthesis and narrative generation
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains defend on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains controls on a reasoning model. Hunt dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
 ### Model Routing
 
@@ -148,7 +148,7 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
-| Reasoning (attack analysis, defend + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack analysis, controls + subagents, hunt intake, research, synthesizer) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, hunt) inherit your session model.
 
@@ -159,7 +159,7 @@ Enumeration is deterministic Python via `python -m scope` and `scope/enumerators
 | [PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/PROJECT.md) | Behavioral guidance: reasoning philosophy, operator pace, environmental learning |
 | [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
 | [Hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hook reference |
-| [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, defend, exploit output |
+| [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, controls, exploit output |
 
 ## Community
 
@@ -170,4 +170,4 @@ Enumeration is deterministic Python via `python -m scope` and `scope/enumerators
 
 Created by **Tayvion Payton**
 
-*Enumerate. Reason. Defend. One command, full loop.*
+*Enumerate. Reason. Controls. One command, full loop.*

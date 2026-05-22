@@ -10,7 +10,7 @@ Apply the full verification protocol to all technical claims before they reach t
 
 **Domain dispatch:**
 - **audit**: shared preamble + `<domain-aws>` + (if SPL present) `<domain-splunk>`
-- **defend**: shared preamble + `<domain-aws>` + `<domain-splunk>`
+- **controls**: shared preamble + `<domain-aws>` + `<domain-splunk>`
 - **exploit**: shared preamble + `<domain-aws>`
 - **hunt**: shared preamble + `<domain-splunk>` (no domain-aws)
 </role>
@@ -67,7 +67,7 @@ Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy
 
 - eventName is case-sensitive, must exactly match API action. `eventSource` must match service endpoint (e.g., `iam.amazonaws.com`).
 - Distinguish: `AssumeRole` vs `AssumeRoleWithSAML` vs `AssumeRoleWithWebIdentity`; `CreateUser` vs `CreateLoginProfile`; read (`Get*`/`List*`/`Describe*`) vs write; management vs data events (S3 `GetObject` = data, `CreateBucket` = management)
-- **Cross-agent check** — defend SPL eventNames must match audit/exploit API calls (single verification pass, no cross-run state)
+- **Cross-agent check** — controls SPL eventNames must match audit/exploit API calls (single verification pass, no cross-run state)
 - On mismatch: silent correction if known, strip if uncertain
 </cloudtrail_validation>
 

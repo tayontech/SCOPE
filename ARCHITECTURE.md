@@ -5,14 +5,14 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 ## Agent Overview
 
 **Orchestrator agent** (slash command — operator-triggered):
-- `scope-audit` — AWS resource enumeration orchestrator: runs `python -m scope audit`, dispatches attack-path analysis, auto-chains defend
+- `scope-audit` — AWS resource enumeration orchestrator: runs `python -m scope audit`, dispatches attack-path analysis, auto-chains controls
 
 **Standalone agents** (slash commands — operator-triggered):
 - `scope-exploit` — Privilege escalation playbooks, persistence analysis, exfiltration mapping
 - `scope-hunt` — SOC alert investigation, hypothesis-driven threat hunting, and threat intel parsing (tri-mode: investigation, hunt, intel)
 
 **Operator-invoked or orchestrator-dispatched:**
-- `scope-defend` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:defend [run-dir]`
+- `scope-controls` — Defensive controls generation — dispatched automatically by scope-audit after Gate 4, or invoked by operator via `/scope:controls [run-dir]`
 
 **Enumeration runtime** (invoked by scope-audit, model: none — deterministic Python):
 - `scope audit` orchestrates Python boto3 enumerators from `scope/enumerators/`
@@ -65,10 +65,10 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  └──────────────────────────────┘    │
     │                               │       │                           │
     │                               │  Gate 3: results                  │
-    │                               │  Gate 4: scope-defend approval    │
+    │                               │  Gate 4: scope-controls approval    │
     │                               │       │                           │
     │                               │       ▼                           │
-    │                               │  scope-defend (auto-chained)      │
+    │                               │  scope-controls (auto-chained)      │
     │                               │  scope-synthesizer                │
     │                               │  (engagement-report.md)           │
     │                               │  scope-verify (inline)            │
@@ -86,19 +86,19 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │  5. Write artifacts               │
     │                               └──────────────────────────────────┘
     │
-    ├── /scope:defend [run-dir] ───►┌──────────────────────────────────┐
-    │   (operator-invoked after     │  scope-defend                     │
+    ├── /scope:controls [run-dir] ───►┌──────────────────────────────────┐
+    │   (operator-invoked after     │  scope-controls                     │
     │    audit completes)           │  Reads audit run                  │
     │                               │                                   │
     │                               │  Wave 1 (parallel):               │
-    │                               │  ├─ scope-defend-guardrails       │
-    │                               │  ├─ scope-defend-splunk           │
-    │                               │  ├─ scope-defend-policy           │
-    │                               │  └─ scope-defend-remediation      │
+    │                               │  ├─ scope-controls-guardrails       │
+    │                               │  ├─ scope-controls-detections           │
+    │                               │  ├─ scope-controls-policy           │
+    │                               │  └─ scope-controls-remediation      │
     │                               │       │                           │
     │                               │       ▼                           │
     │                               │  Wave 2:                          │
-    │                               │  └─ scope-defend-validate         │
+    │                               │  └─ scope-controls-validate         │
     │                               │     (reviews Wave 1 output)       │
     │                               │       │                           │
     │                               │       ▼                           │
@@ -178,7 +178,7 @@ Failures are non-blocking — each step logs warnings but never stops the source
 `scope-verify` is read inline during source agent execution. The caller specifies which XML domain sections to activate:
 
 ```
-  Source Agent (audit / defend / exploit / hunt)
+  Source Agent (audit / controls / exploit / hunt)
        │
        │  inline read with domain spec
        │  e.g., audit: domain-core + domain-aws
@@ -229,7 +229,7 @@ Verification results are in-memory — scope-verify returns corrections to the c
               │               │               │
               ▼               ▼               │
   ┌───────────────┐ ┌────────────────┐        │
-  │ scope-defend  │ │ scope-exploit  │        │
+  │ scope-controls  │ │ scope-exploit  │        │
   │               │ │                │        │
   │reads specified│ │reads audit data│        │
   │audit run dir  │ │(optional, skip │        │
@@ -286,12 +286,12 @@ Downstream agents consume upstream output in this priority order:
 
 | Agent | Trigger | Reads | Writes | Calls |
 |-------|---------|-------|--------|-------|
-| **audit** | `/scope:audit` | AWS APIs through `scope.runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs `python -m scope audit` + scope-attack-analyze + defend + synthesizer |
-| **defend** | orchestrator dispatch or `/scope:defend [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./runs/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify |
+| **audit** | `/scope:audit` | AWS APIs through `scope.runtime` | `$RUN_DIR/findings.md`, `results.json`, `summary.json`, `resources.jsonl`, `graph.json`, per-module JSON | runs `python -m scope audit` + scope-attack-analyze + controls + synthesizer |
+| **controls** | orchestrator dispatch or `/scope:controls [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./runs/` (all runs, manual) | `$RUN_DIR/executive-summary.md`, `technical-remediation.md`, `policies/{scp,rcp}-*.json`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **exploit** | `/scope:exploit` | `./runs/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **hunt** | `/scope:hunt [input]` | Hunt mode: `$HUNT_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, `./hunt/context.json`, Splunk MCP (optional). Investigation mode: Splunk MCP, `./hunt/context.json`. Intel mode: WebFetch (URL) or NL parse, `./hunt/context.json`, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), `./hunt/context.json` | scope-verify (no post-processing pipeline in any mode) |
 | **scope-research** | Dispatched by exploit and attack-paths | WebSearch, external technique references | Research findings (in-memory, consumed by caller) | — |
-| **scope-synthesizer** | Dispatched by audit after defend | `$RUN_DIR/`, defend artifacts | `$RUN_DIR/engagement-report.md` | — |
+| **scope-synthesizer** | Dispatched by audit after controls | `$RUN_DIR/`, controls artifacts | `$RUN_DIR/engagement-report.md` | — |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
 
 ## Enforcement Layer
@@ -308,7 +308,7 @@ config/hooks/
 
 config/schemas/
   audit.schema.json          Required fields for audit results.json
-  defend.schema.json         Required fields for defend results.json
+  controls.schema.json         Required fields for controls results.json
   exploit.schema.json        Required fields for exploit results.json
 ```
 

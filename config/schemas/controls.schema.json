@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "scope-defend-results",
-  "title": "SCOPE Defend Results",
-  "description": "Schema for defend phase results.json — 5-subagent architecture. Validated by scope-schema-validate hook.",
+  "$id": "scope-controls-results",
+  "title": "SCOPE Controls Results",
+  "description": "Schema for controls phase results.json — 5-subagent architecture. Validated by scope-schema-validate hook.",
   "type": "object",
   "required": ["account_id", "source", "region", "timestamp", "summary", "audit_runs_analyzed", "guardrails", "detections", "policy_replacements", "remediation", "validation"],
   "properties": {
@@ -17,10 +17,10 @@
         "type": "string",
         "pattern": "^\\d{12}$"
       },
-      "description": "All AWS account IDs analyzed in this defend run — present only when multi-run mode spans multiple accounts"
+      "description": "All AWS account IDs analyzed in this controls run — present only when multi-run mode spans multiple accounts"
     },
     "source": {
-      "const": "defend"
+      "const": "controls"
     },
     "region": {
       "type": "string"
@@ -33,7 +33,7 @@
       "type": "array",
       "minItems": 1,
       "items": { "type": "string" },
-      "description": "Run IDs of audit runs consumed by this defend run"
+      "description": "Run IDs of audit runs consumed by this controls run"
     },
     "summary": {
       "type": "object",

@@ -12,4 +12,4 @@
 <!-- Hunt-specific: principal behavior baselines, known FP patterns -->
 
 ## Deployed Controls
-<!-- Defend-specific: SCPs/detections deployed, effectiveness notes -->
+<!-- Controls-specific: SCPs/detections deployed, effectiveness notes -->

@@ -2,7 +2,7 @@
 
 ## Overview
 
-**What this enables:** SCOPE agents (`scope-hunt`, `scope-defend-splunk`) read this document before generating SPL queries. It establishes the command selection rules, behavioral patterns, and anti-patterns that govern every query the agents write. Following these patterns produces queries that run correctly at scale, avoid common performance traps, and return accurate results across any data source.
+**What this enables:** SCOPE agents (`scope-hunt`, `scope-controls-detections`) read this document before generating SPL queries. It establishes the command selection rules, behavioral patterns, and anti-patterns that govern every query the agents write. Following these patterns produces queries that run correctly at scale, avoid common performance traps, and return accurate results across any data source.
 
 **When to consult this document:** Before writing any SPL query — at the beginning of an investigation session, when selecting between `tstats`, `stats`, or `streamstats`, and when generating composite detection rules.
 

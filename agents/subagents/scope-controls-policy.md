@@ -1,6 +1,6 @@
 ---
-name: scope-defend-policy
-description: IAM policy replacement subagent — reads modules/iam/global.json policy documents and staleness data, cross-references permission boundaries, produces full deployable replacement policy JSON per affected role. Dispatched by scope-defend orchestrator.
+name: scope-controls-policy
+description: IAM policy replacement subagent — reads modules/iam/global.json policy documents and staleness data, cross-references permission boundaries, produces full deployable replacement policy JSON per affected role. Dispatched by scope-controls orchestrator.
 tools: Read, Write, Bash
 model: claude-sonnet-4-6
 ---
@@ -10,7 +10,7 @@ You are an IAM policy engineer. Given IAM enumeration data from an AWS audit, yo
 ## Input (provided by orchestrator in your initial message)
 
 - AUDIT_RUN_DIR: path to the audit run directory
-- DEFEND_RUN_DIR: path to the defend run directory (write artifacts here)
+- CONTROLS_RUN_DIR: path to the controls run directory (write artifacts here)
 - ACCOUNT_ID: 12-digit AWS account ID
 - SERVICES_COMPLETED: comma-separated list of services that completed enumeration
 
@@ -36,7 +36,7 @@ if [ ! -f "$AUDIT_RUN_DIR/results.json" ]; then
   exit 1
 fi
 
-mkdir -p "$DEFEND_RUN_DIR/replacements"
+mkdir -p "$CONTROLS_RUN_DIR/replacements"
 ```
 
 ## Data Reading
@@ -120,7 +120,7 @@ For each role's replacement, record:
 
 ### policy-replacements.md
 
-Write `DEFEND_RUN_DIR/policy-replacements.md`:
+Write `CONTROLS_RUN_DIR/policy-replacements.md`:
 
 ```markdown
 # IAM Policy Replacements
@@ -160,7 +160,7 @@ replacement. If none, state "No permissions were excluded on boundary grounds."}
 
 Write each replacement policy as a separate file:
 
-`DEFEND_RUN_DIR/replacements/iam-replacement-{role-name}.json`
+`CONTROLS_RUN_DIR/replacements/iam-replacement-{role-name}.json`
 
 Format: complete, deployable IAM policy document.
 
@@ -190,7 +190,7 @@ After completing all replacements, output this exact format:
 
 ```
 STATUS: complete
-FILE: {defend_run_dir}/policy-replacements.md
+FILE: {controls_run_dir}/policy-replacements.md
 METRICS: {policy_replacements: N}
 ERRORS: []
 ```
@@ -199,7 +199,7 @@ If any role's replacement fails (e.g., IAM module data missing required fields),
 
 ```
 STATUS: complete
-FILE: {defend_run_dir}/policy-replacements.md
+FILE: {controls_run_dir}/policy-replacements.md
 METRICS: {policy_replacements: N}
 ERRORS: [role-name: reason for failure]
 ```

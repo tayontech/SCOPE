@@ -13,13 +13,13 @@ INPUT=$(cat /dev/stdin)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
-# Only lint files in defend/ directories or files with splunk/spl/detection in the name
+# Only lint files in controls/ directories or files with splunk/spl/detection in the name
 if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
 case "$FILE_PATH" in
-  */defend/*|*detection*|*splunk*|*.spl)
+  */controls/*|*detection*|*splunk*|*.spl)
     ;;
   *)
     exit 0

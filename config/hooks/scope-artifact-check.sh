@@ -1,7 +1,7 @@
 #!/bin/bash
 # SCOPE Artifact Completeness Check — Stop / AfterAgent hook
 # Before the agent finishes, verify that mandatory artifacts exist.
-# Checks both audit and defend run directories.
+# Checks both audit and controls run directories.
 #
 # For Claude Code: fires on Stop event, exit 2 prevents stopping.
 # For Gemini CLI: fires on AfterAgent event, exit 2 blocks completion.
@@ -80,20 +80,20 @@ if [ -n "$LATEST_AUDIT" ]; then
   fi
 fi
 
-# --- Check for recent defend runs ---
-LATEST_DEFEND=$((
-  find "$CWD/runs" -maxdepth 4 -type d -name "defend-*" -mmin -60 2>/dev/null
+# --- Check for recent controls runs ---
+LATEST_CONTROLS=$((
+  find "$CWD/runs" -maxdepth 4 -type d -name "controls-*" -mmin -60 2>/dev/null
 ) | sort -r | head -1 || true)
 
-if [ -n "$LATEST_DEFEND" ]; then
-  if [ ! -f "$LATEST_DEFEND/executive-summary.md" ]; then
-    ERRORS+=("MISSING: $LATEST_DEFEND/executive-summary.md (mandatory defend artifact)")
+if [ -n "$LATEST_CONTROLS" ]; then
+  if [ ! -f "$LATEST_CONTROLS/executive-summary.md" ]; then
+    ERRORS+=("MISSING: $LATEST_CONTROLS/executive-summary.md (mandatory controls artifact)")
   fi
-  if [ ! -f "$LATEST_DEFEND/technical-remediation.md" ]; then
-    ERRORS+=("MISSING: $LATEST_DEFEND/technical-remediation.md (mandatory defend artifact)")
+  if [ ! -f "$LATEST_CONTROLS/technical-remediation.md" ]; then
+    ERRORS+=("MISSING: $LATEST_CONTROLS/technical-remediation.md (mandatory controls artifact)")
   fi
-  if [ ! -d "$LATEST_DEFEND/policies" ]; then
-    ERRORS+=("MISSING: $LATEST_DEFEND/policies/ directory (mandatory defend artifact — SCP/RCP JSON files)")
+  if [ ! -d "$LATEST_CONTROLS/policies" ]; then
+    ERRORS+=("MISSING: $LATEST_CONTROLS/policies/ directory (mandatory controls artifact — SCP/RCP JSON files)")
   fi
 fi
 
@@ -129,7 +129,7 @@ fi
 # --- Report results ---
 
 # If no recent runs found, nothing to check
-if [ -z "$LATEST_AUDIT" ] && [ -z "$LATEST_DEFEND" ] && [ -z "$LATEST_EXPLOIT" ]; then
+if [ -z "$LATEST_AUDIT" ] && [ -z "$LATEST_CONTROLS" ] && [ -z "$LATEST_EXPLOIT" ]; then
   exit 0
 fi
 

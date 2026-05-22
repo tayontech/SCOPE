@@ -20,10 +20,10 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 4. Present enumeration summary and pause for operator confirmation before attack-paths (Gate 3)
 5. Dispatch the attack analysis pipeline — candidate generation, candidate lint, validation, validation lint
 6. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
-7. Present validated attack path findings, await operator approval before defend (Gate 4)
+7. Present validated attack path findings, await operator approval before controls (Gate 4)
 8. Write the three-layer findings.md report to $RUN_DIR/
-9. Auto-chain defend as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
-10. Auto-dispatch synthesizer subagent — it reads results.json and defend/results.json, produces engagement-report.md
+9. Auto-chain controls as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
+10. Auto-dispatch synthesizer subagent — it reads results.json and controls/results.json, produces engagement-report.md
 11. Use the runtime post-processing artifacts produced by `python -m scope`
 12. Generate the dashboard report inline
 
@@ -280,9 +280,9 @@ Verify claims in `$RUN_DIR/results.json` before presenting Gate 4 results:
 
 After attack validation, validation lint, and verification complete, display: candidates generated, validated paths, conditional paths, rejected paths, final attack path count by severity (critical/high/medium/low), and top 3 validated/conditional paths (one sentence each).
 
-Options: `continue` (full output), `skip` (sets GATE4_SKIP=true, writes findings.md, skips scope-defend, scope-synthesizer, and dashboard HTML generation), `stop` (end session).
+Options: `continue` (full output), `skip` (sets GATE4_SKIP=true, writes findings.md, skips scope-controls, scope-synthesizer, and dashboard HTML generation), `stop` (end session).
 
-On skip, still write `$RUN_DIR/findings.md` and keep `$RUN_DIR/results.json` intact. Do not dispatch scope-defend or scope-synthesizer. Do not delete or roll back dashboard export files already written by the Python runtime.
+On skip, still write `$RUN_DIR/findings.md` and keep `$RUN_DIR/results.json` intact. Do not dispatch scope-controls or scope-synthesizer. Do not delete or roll back dashboard export files already written by the Python runtime.
 
 Wait for operator approval before proceeding.
 </gate_4_results_approval>
@@ -316,7 +316,7 @@ Also surface per-finding `<field>_status` annotations when relevant: if a bucket
 
 If all modules have `status === 'complete'` and no per-finding `<field>_status` is `'access_denied'` or `'error'`, write "No coverage gaps — all enumeration succeeded." Don't fabricate gaps to fill the section.
 
-**Rules:** Use REAL ARNs and resource names throughout — never placeholders. End with RECOMMENDED NEXT ACTION referencing defend artifacts and available follow-up commands (`/scope:exploit`, `/scope:audit`, dashboard link).
+**Rules:** Use REAL ARNs and resource names throughout — never placeholders. End with RECOMMENDED NEXT ACTION referencing controls artifacts and available follow-up commands (`/scope:exploit`, `/scope:audit`, dashboard link).
 </findings_md>
 
 **Update environment observations:** Before finishing, append up to 5 concise observations to `config/observations.md`. If the file does not exist, create it using the structure from `config/observations.example.md`. Write to the `## Account: <ACCOUNT_ID>` section — substitute the real account ID (e.g., `## Account: 123456789012`), not the literal placeholder. Create the section if missing, with subsections: Naming & Structure, Recurring Gaps, Known-Good Trusts. Prefix each entry with today's date (YYYY-MM-DD). Never delete or overwrite existing entries.
@@ -338,28 +338,28 @@ The Python runtime performs this automatically when invoked with `--dashboard-ex
 **Gate 4 skip exception:** If GATE4_SKIP=true, do not create or update dashboard export files after Gate 4. Keep any dashboard export files the Python runtime already wrote. `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required.
 </results_export>
 
-<defend_auto_chain>
-## Defend Auto-Chain
+<controls_auto_chain>
+## Controls Auto-Chain
 
-After findings.md and results.json are written, automatically dispatch scope-defend as a subagent.
+After findings.md and results.json are written, automatically dispatch scope-controls as a subagent.
 
-**Gate 4 skip exception:** If GATE4_SKIP=true, do not dispatch. Log skip and advise `/scope:defend` for later use.
+**Gate 4 skip exception:** If GATE4_SKIP=true, do not dispatch. Log skip and advise `/scope:controls` for later use.
 
-**Dispatch:** scope-defend subagent with `AUDIT_RUN_DIR` and `ACCOUNT_ID`. Note: defend dispatches 5 subagents internally, so it must run as a subagent (not inline) to allow nesting.
+**Dispatch:** scope-controls subagent with `AUDIT_RUN_DIR` and `ACCOUNT_ID`. Note: controls dispatches 5 subagents internally, so it must run as a subagent (not inline) to allow nesting.
 
-**Expected return:** STATUS, DEFEND_RUN_DIR (`{audit_run_dir}/defend/defend-{timestamp}/`), METRICS (scps, rcps, detections). Capture DEFEND_RUN_DIR — needed for pipeline Run 2.
+**Expected return:** STATUS, CONTROLS_RUN_DIR (`{audit_run_dir}/controls/controls-{timestamp}/`), METRICS (scps, rcps, detections). Capture CONTROLS_RUN_DIR — needed for pipeline Run 2.
 
-Defend failure is non-blocking — log warning and continue to post-processing/dashboard. Do not dispatch synthesizer without defend output.
+Controls failure is non-blocking — log warning and continue to post-processing/dashboard. Do not dispatch synthesizer without controls output.
 
 Announce completion or failure to operator.
-</defend_auto_chain>
+</controls_auto_chain>
 
 <synthesizer_dispatch>
 ## Engagement Synthesis Dispatch
 
-After defend completes successfully, dispatch the synthesizer subagent automatically.
+After controls completes successfully, dispatch the synthesizer subagent automatically.
 
-**Skip conditions:** Gate 4 was skipped (GATE4_SKIP=true) OR defend failed — synthesizer requires both results.json and defend output. Log skip reason.
+**Skip conditions:** Gate 4 was skipped (GATE4_SKIP=true) OR controls failed — synthesizer requires both results.json and controls output. Log skip reason.
 
 **Dispatch:** scope-synthesizer subagent with `RUN_DIR`, `ACCOUNT_ID`, `SERVICES_COMPLETED`. Uses model: sonnet.
 
@@ -394,7 +394,7 @@ If generation fails: log warning, continue — raw artifacts are still valid. An
 
 Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
 
-**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Defend output, synthesizer output, and dashboard HTML generation are skipped. Dashboard export and dashboard index remain acceptable when the Python runtime already created them before Gate 4.
+**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Controls output, synthesizer output, and dashboard HTML generation are skipped. Dashboard export and dashboard index remain acceptable when the Python runtime already created them before Gate 4.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|
@@ -406,7 +406,7 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 | 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
 | 7 | `engagement-report.md` | `$RUN_DIR/engagement-report.md` | Unified engagement narrative -- required only when synthesizer runs and succeeds |
 
-Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it. Do not require `engagement-report.md` when Gate 4 was skipped, defend failed, or synthesizer failed.
+Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it. Do not require `engagement-report.md` when Gate 4 was skipped, controls failed, or synthesizer failed.
 </mandatory_outputs>
 
 <evidence_protocol>
@@ -440,7 +440,7 @@ Log every subagent dispatch/return and every gate transition. Seed the log after
 | Candidate lint failure | Stop before validation and surface linter errors. |
 | Attack validation failure | Log, stop before validation lint and surface the error. |
 | Validation lint failure | Stop before Gate 4 and surface linter errors. |
-| Defend / Pipeline / Dashboard failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
+| Controls / Pipeline / Dashboard failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
 
 Never swallow errors silently — operator must see every non-AccessDenied error. Aggregate error count at Gate 3 summary.
 </error_handling>
@@ -460,8 +460,8 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 6. **Verification ran inline after attack validation** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory under `./runs/` or explicit `--run-dir` created, all artifacts written there, run metadata recorded in `manifest.json` and `summary.json`.
-9. **Defend handled** — scope-defend dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When defend succeeds, it creates `$RUN_DIR/defend/defend-{timestamp}/` and returns DEFEND_RUN_DIR in its summary. Defend failure is logged and remains non-blocking.
-10. **Synthesizer handled** — scope-synthesizer dispatched only after defend succeeds. `engagement-report.md` written to $RUN_DIR/ when synthesizer succeeds. Skipped if Gate 4 was skipped or defend failed; failure is non-blocking.
+9. **Controls handled** — scope-controls dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When controls succeeds, it creates `$RUN_DIR/controls/controls-{timestamp}/` and returns CONTROLS_RUN_DIR in its summary. Controls failure is logged and remains non-blocking.
+10. **Synthesizer handled** — scope-synthesizer dispatched only after controls succeeds. `engagement-report.md` written to $RUN_DIR/ when synthesizer succeeds. Skipped if Gate 4 was skipped or controls failed; failure is non-blocking.
 11. **Runtime post-processing completed** — `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` exist before attack analysis.
 12. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
 13. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
