@@ -338,7 +338,55 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert "Exploit results must expose final paths in `attack_paths[]`, not `paths[]`" in exploit
 
     controls = prompts["agents/scope-controls.md"]
-    assert_matches(controls, r"ATTACK_PATH_CONTEXT=\$\(jq '\[\.attack_paths\[\]\? \| \{[\s\S]{0,180}validation_status[\s\S]{0,180}runtime_assumptions[\s\S]{0,180}coverage_caveats")
-    assert "source_attack_paths: $source_attack_paths" in controls
-    assert "source_attack_path_context: $source_attack_path_context" in controls
+    assert "subagent-owned structured JSON artifacts" in controls
+    assert "guardrails.json" in controls
+    assert "detections.json" in controls
+    assert "policy-replacements.json" in controls
+    assert "Do not infer guardrail mappings" in controls
+    assert "The orchestrator does not parse markdown to invent results fields." in controls
+    assert "ATTACK_PATH_CONTEXT=" not in controls
+    assert "source_attack_paths: $source_attack_paths" not in controls
+    assert "source_attack_path_context" not in controls
     assert "source_attack_paths: []" not in controls
+
+
+def test_controls_workers_own_structured_output_for_assembly() -> None:
+    controls = read("agents/scope-controls.md")
+    guardrails = read("agents/subagents/scope-controls-guardrails.md")
+    policy = read("agents/subagents/scope-controls-policy.md")
+    validate = read("agents/subagents/scope-controls-validate.md")
+
+    assert_matches(
+        controls,
+        r"scope-controls-guardrails[\s\S]{0,120}`guardrails\.json`[\s\S]{0,120}`guardrails\[\]`",
+    )
+    assert_matches(
+        controls,
+        r"scope-controls-policy[\s\S]{0,120}`policy-replacements\.json`[\s\S]{0,120}`policy_replacements\[\]`",
+    )
+    assert_matches(controls, r"jq -e 'type == \"array\"' \"\$CONTROLS_RUN_DIR/guardrails\.json\"")
+    assert_matches(controls, r"jq -e 'type == \"array\"' \"\$CONTROLS_RUN_DIR/policy-replacements\.json\"")
+    assert_not_matches(controls, r"Build guardrails array from policy JSON files")
+    assert_not_matches(controls, r"Build policy_replacements array from")
+    assert_not_matches(controls, r"original_policy_arn: \"unknown\"")
+    assert_not_matches(controls, r"See policy-replacements\.md for detailed reasoning")
+
+    for text in [
+        "Write guardrails.json",
+        "`source_attack_paths` must include only the attack paths this guardrail addresses",
+        "`impact_analysis` must contain the actual reasoning",
+        "STRUCTURED_FILE: {controls_run_dir}/guardrails.json",
+    ]:
+        assert text in guardrails
+
+    for text in [
+        "policy-replacements.json",
+        "`source_attack_paths` must include only attack paths involving this role or policy",
+        "`staleness_reasoning` and `boundary_considerations` must contain the actual reasoning",
+        "STRUCTURED_FILE: {controls_run_dir}/policy-replacements.json",
+    ]:
+        assert text in policy
+
+    assert "guardrails.md guardrails.json detections.md detections.json policy-replacements.md policy-replacements.json remediation-plan.md" in validate
+    assert "source_attack_paths` maps every guardrail to every attack path without evidence" in validate
+    assert "source_attack_paths` maps every replacement to every attack path without role/resource evidence" in validate

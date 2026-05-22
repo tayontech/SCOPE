@@ -184,6 +184,36 @@ Each file must be valid JSON, directly deployable via `aws iam create-policy` or
 
 Before writing each replacement policy, verify it is NOT more permissive than the original. Compare the replacement against the source policy document in the IAM module data — the replacement must not add actions, expand resource scope, or remove conditions that were present in the original. If a replacement would be more permissive, revise it before writing.
 
+### policy-replacements.json
+
+Also write `CONTROLS_RUN_DIR/policy-replacements.json` as a JSON array consumed directly by the orchestrator during results.json assembly. Do not rely on the orchestrator to infer role metadata from filenames.
+
+Each object must match the controls schema's `policy_replacements[]` format:
+
+```json
+[
+  {
+    "role_name": "ExampleRole",
+    "file": "replacements/iam-replacement-ExampleRole.json",
+    "original_policy_arn": "arn:aws:iam::123456789012:policy/OriginalPolicy",
+    "replacement_policy_json": {
+      "Version": "2012-10-17",
+      "Statement": []
+    },
+    "source_attack_paths": ["Attack path involving ExampleRole"],
+    "staleness_reasoning": "Specific reasoning for removed, retained, narrowed, and skipped permissions.",
+    "boundary_considerations": "Permission boundary and SCP context considered before restricting effective permissions."
+  }
+]
+```
+
+Rules:
+- `replacement_policy_json` must exactly match the corresponding file in `replacements/`.
+- `source_attack_paths` must include only attack paths involving this role or policy, not every path in the audit.
+- `original_policy_arn` must be the real source policy ARN when available. Use `"inline:{role_name}"` for inline policies. Use `"unknown"` only when the IAM module lacks the source identifier and explain the gap in `staleness_reasoning`.
+- `staleness_reasoning` and `boundary_considerations` must contain the actual reasoning. Do not use placeholders.
+- If no roles qualify for replacement, write `[]`.
+
 ## Return Summary
 
 After completing all replacements, output this exact format:
@@ -191,6 +221,7 @@ After completing all replacements, output this exact format:
 ```
 STATUS: complete
 FILE: {controls_run_dir}/policy-replacements.md
+STRUCTURED_FILE: {controls_run_dir}/policy-replacements.json
 METRICS: {policy_replacements: N}
 ERRORS: []
 ```
@@ -200,6 +231,7 @@ If any role's replacement fails (e.g., IAM module data missing required fields),
 ```
 STATUS: complete
 FILE: {controls_run_dir}/policy-replacements.md
+STRUCTURED_FILE: {controls_run_dir}/policy-replacements.json
 METRICS: {policy_replacements: N}
 ERRORS: [role-name: reason for failure]
 ```
@@ -209,6 +241,7 @@ If IAM module data is unreadable or results.json is missing entirely, report err
 ```
 STATUS: error
 FILE: none
+STRUCTURED_FILE: none
 METRICS: {}
 ERRORS: [description of blocking issue]
 ```

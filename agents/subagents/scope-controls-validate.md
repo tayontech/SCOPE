@@ -27,11 +27,11 @@ Consume final attack_paths[] where validation_status is validated or conditional
 <pre_flight>
 ## Pre-Flight: Verify All Wave 1 Artifacts Exist
 
-Before beginning any review, verify that all 4 required artifact files exist:
+Before beginning any review, verify that all required Wave 1 artifacts exist:
 
 ```bash
 MISSING=0
-for ARTIFACT in guardrails.md detections.md policy-replacements.md remediation-plan.md; do
+for ARTIFACT in guardrails.md guardrails.json detections.md detections.json policy-replacements.md policy-replacements.json remediation-plan.md; do
   if test -f "$CONTROLS_RUN_DIR/$ARTIFACT"; then
     echo "$ARTIFACT PRESENT"
   else
@@ -88,6 +88,14 @@ Three categories cover all failure modes:
 ```bash
 cat "$CONTROLS_RUN_DIR/guardrails.md"
 ```
+
+Read and validate the structured guardrails array:
+
+```bash
+jq -e 'type == "array"' "$CONTROLS_RUN_DIR/guardrails.json"
+```
+
+BLOCK if `guardrails.json` is not an array, if any item misses a required controls schema field, if `policy_json` does not match the referenced policy file, or if `source_attack_paths` maps every guardrail to every attack path without evidence.
 
 ### Step 2: Enumerate and validate each SCP/RCP JSON file
 
@@ -159,13 +167,21 @@ cat "$AUDIT_RUN_DIR/results.json" | jq '.attack_paths[] | {name, severity, valid
 </review_detections>
 
 <review_policy_replacements>
-## Review 3: Policy Replacements (policy-replacements.md + replacements/*.json)
+## Review 3: Policy Replacements (policy-replacements.md + policy-replacements.json + replacements/*.json)
 
 ### Step 1: Read policy-replacements.md
 
 ```bash
 cat "$CONTROLS_RUN_DIR/policy-replacements.md"
 ```
+
+Read and validate the structured policy replacement array:
+
+```bash
+jq -e 'type == "array"' "$CONTROLS_RUN_DIR/policy-replacements.json"
+```
+
+BLOCK if `policy-replacements.json` is not an array, if any item misses a required controls schema field, if `replacement_policy_json` does not match the referenced replacement file, or if `source_attack_paths` maps every replacement to every attack path without role/resource evidence.
 
 ### Step 2: Enumerate replacement policy files
 

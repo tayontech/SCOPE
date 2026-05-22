@@ -161,6 +161,41 @@ Naming convention:
 - SCP files: `scp-{kebab-case-policy-name}.json` (e.g., `scp-deny-imds-v1.json`)
 - RCP files: `rcp-{kebab-case-policy-name}.json` (e.g., `rcp-deny-public-s3-access.json`)
 
+**Write guardrails.json (structured output for orchestrator):**
+
+Also write `$CONTROLS_RUN_DIR/guardrails.json` as a JSON array consumed directly by the orchestrator during results.json assembly. Do not rely on the orchestrator to infer mappings from markdown or policy filenames.
+
+Each guardrail object must match the controls schema's `guardrails[]` format:
+
+```json
+[
+  {
+    "name": "scp-deny-imds-v1",
+    "type": "scp",
+    "file": "policies/scp-deny-imds-v1.json",
+    "policy_json": {
+      "Version": "2012-10-17",
+      "Statement": []
+    },
+    "source_attack_paths": ["Attack path name"],
+    "source_run_ids": ["audit-20260301-143022-all"],
+    "impact_analysis": {
+      "prevents": ["Launching EC2 instances without IMDSv2"],
+      "blast_radius": "medium",
+      "affected_services": ["ec2"],
+      "break_glass": "ArnNotLike aws:PrincipalArn arn:aws:iam::*:role/BreakGlass*"
+    }
+  }
+]
+```
+
+Rules:
+- `policy_json` must exactly match the deployable policy file contents.
+- `source_attack_paths` must include only the attack paths this guardrail addresses, not every path in the audit.
+- `source_run_ids` must include the consumed audit run ID from `results.json.run_id` or the audit directory basename.
+- `impact_analysis` must contain the actual reasoning for this guardrail. Do not use placeholders.
+- If no systemic patterns are found, write `[]`.
+
 ## Error Handling
 
 - If results.json is missing → stop immediately, report STATUS: error
@@ -175,6 +210,7 @@ After writing all artifacts, print the return summary:
 ```
 STATUS: complete
 FILE: {controls_run_dir}/guardrails.md
+STRUCTURED_FILE: {controls_run_dir}/guardrails.json
 METRICS: {scps: N, rcps: N}
 ERRORS: []
 ```
@@ -183,6 +219,7 @@ If an error prevented completion:
 ```
 STATUS: error
 FILE:
+STRUCTURED_FILE:
 METRICS: {scps: 0, rcps: 0}
 ERRORS: [description of what went wrong]
 ```
