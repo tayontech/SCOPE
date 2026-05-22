@@ -213,7 +213,7 @@ AUDIT_RUN_ID=$(jq -r '.audit_runs_analyzed[0] // "unknown"' "$AUDIT_RUN_DIR/resu
 
 ## SPL Lint Hook
 
-The `scope-spl-lint.sh` hook fires automatically after every Write to files matching `*splunk*`. You do NOT need to manually invoke it. If the hook rejects a write, read the lint error, fix the SPL, and rewrite the file. The hook enforces:
+The `scope-spl-lint.sh` hook fires automatically after every Write to files under a `controls/` run directory, files with `detection` or `splunk` in the name, and `.spl` files. It covers `$CONTROLS_RUN_DIR/detections.md` and `$CONTROLS_RUN_DIR/detections.json`. You do NOT need to manually invoke it. If the hook rejects a write, read the lint error, fix the SPL, and rewrite the file. The hook enforces:
 - `streamstats` (not `transaction`) in composite detections
 - Time bounds (`earliest` and `latest`) on all index queries
 - Index names present in `config/index.json` allowlist (when `config/index.json` exists) — unknown indexes are blocked
