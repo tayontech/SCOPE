@@ -517,32 +517,22 @@ Verify the file was written:
 test -f "$CONTROLS_RUN_DIR/results.json" && echo "results.json WRITTEN" || echo "ERROR: results.json not written"
 ```
 
-### Step 6: Generate executive-summary.md
+### Step 6: Generate summary artifacts
 
-After results.json is assembled, write `$CONTROLS_RUN_DIR/executive-summary.md` — a concise narrative for stakeholders. Read results.json and the subagent artifacts to synthesize:
+After results.json is assembled, use `skills/scope-controls-summary/SKILL.md` with `ACCOUNT_ID`, `AUDIT_RUN_DIR`, `CONTROLS_RUN_DIR`, `VALIDATION_STATUS`, `$CONTROLS_RUN_DIR/results.json`, audit module envelopes, and subagent artifacts.
 
-- Account ID and audit run context
-- Overall risk posture (severity from audit results)
-- **Audit Coverage Caveats** (place after risk posture, before key findings): Read the module envelopes from the consumed audit run(s) listed in `audit_runs_analyzed`. For each module with `status === 'partial'` or `status === 'error'`, note the gap. Recommendations in this controls run cover only the attack surface that the audit actually saw — if `s3.list_buckets` returned AccessDenied during the audit, no s3 guardrails or detections were generated because no buckets were enumerated. State this explicitly so the operator knows recommendations may be incomplete and may not cover unseen surface area. If all consumed audit runs had `status === 'complete'` end-to-end with no per-finding `<field>_status` denials, write "Audit coverage was complete — no blind spots identified" instead. Don't fabricate gaps to fill space.
-- Key findings count: attack paths analyzed, guardrails generated, detections created, policies replaced, remediation items
-- Top 3-5 most critical attack paths (name + one-sentence impact)
-- Defensive coverage summary: what percentage of attack paths have at least one control (guardrail, detection, or remediation)
-- Validation status and any outstanding warnings
+The skill writes:
+- `$CONTROLS_RUN_DIR/executive-summary.md`
+- `$CONTROLS_RUN_DIR/technical-remediation.md`
 
-Keep it under 2 pages. Write in past tense. Use real resource names and account IDs from the data.
+The top-level orchestrator does not synthesize these sections inline. It verifies both files exist before completion:
 
-### Step 7: Generate technical-remediation.md
+```bash
+test -f "$CONTROLS_RUN_DIR/executive-summary.md" || { echo "ERROR: executive-summary.md not written"; exit 1; }
+test -f "$CONTROLS_RUN_DIR/technical-remediation.md" || { echo "ERROR: technical-remediation.md not written"; exit 1; }
+```
 
-Write `$CONTROLS_RUN_DIR/technical-remediation.md` — a prioritized technical action plan. Read remediation-plan.md, guardrails.md, and policy-replacements.md to synthesize:
-
-- Prioritized fix list (from remediation-plan.md priority tiers)
-- For each fix: what to do, which resources are affected, which attack paths it closes
-- SCP/RCP deployment instructions (reference policy files in policies/ directory)
-- IAM policy replacement instructions (reference files in replacements/ directory)
-- Detection deployment guidance (reference detections.md)
-- Dependency map: which fixes should be applied first because they unblock others
-
-This is the operator's action checklist. Every item must be specific and actionable — real ARNs, real policy names, real commands.
+If the skill returns `status: error`, stop with STATUS: error because these are required controls artifacts.
 </results_assembly>
 
 <dashboard_export>

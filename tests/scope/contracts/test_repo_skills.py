@@ -135,3 +135,28 @@ def test_repo_exploit_playbook_skill_contract() -> None:
         "IAM Policy Document",
     ]:
         assert text in playbook
+
+
+def test_repo_controls_summary_skill_contract() -> None:
+    summary = read("skills/scope-controls-summary/SKILL.md")
+
+    assert_frontmatter(summary, "scope-controls-summary")
+
+    for text in [
+        "CONTROLS_SUMMARY",
+        "$CONTROLS_RUN_DIR/executive-summary.md",
+        "$CONTROLS_RUN_DIR/technical-remediation.md",
+        "$CONTROLS_RUN_DIR/results.json",
+        "$CONTROLS_RUN_DIR/guardrails.json",
+        "$CONTROLS_RUN_DIR/detections.json",
+        "$CONTROLS_RUN_DIR/policy-replacements.json",
+        "$CONTROLS_RUN_DIR/validation-report.md",
+        "Audit Coverage Caveats",
+        "Do not infer structured fields from markdown.",
+        "Preserve validation_status, runtime_assumptions, and coverage_caveats.",
+        "Do not claim controls cover resources that the audit did not enumerate.",
+        "Treat `validation_status: conditional` as actionable with caveats.",
+        "Keep recommendations tied to final `attack_paths[]`",
+        "If a required input is missing, return `status: error` and write no partial summary.",
+    ]:
+        assert text in summary
