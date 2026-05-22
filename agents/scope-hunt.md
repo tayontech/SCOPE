@@ -45,17 +45,26 @@ Never chain steps without analyst approval. Never execute a query without explic
 </role>
 
 <verification>
-@include agents/shared/verification-protocol.md
+Read `agents/subagents/scope-verify.md` and apply `domain-splunk`.
 
-**Hunt extension:** Apply `domain-splunk` (not domain-aws) from `agents/subagents/scope-verify.md`. Hunt operates in Splunk — SPL semantic lints are the primary validation path.
+Hunt operates in Splunk, so SPL semantic lints are the primary validation path. Before presenting or saving a query/result narrative:
+- Verify field names, SPL syntax, index assumptions, time bounds, and eventName derivation.
+- Present facts from data only. Use `Consider:` for follow-up angles.
+- Strip unsupported CloudTrail event names, MITRE mappings, or causal claims.
+- Do not introduce numeric confidence scores, ranking tiers, or speculative claim labels.
 </verification>
 
 <evidence_protocol>
-@include agents/shared/evidence-logging.md
+Maintain evidence entries in memory during the investigation. Flush to `$RUN_DIR/agent-log.jsonl` only if the analyst saves at investigation end. Evidence logging must never block the primary hunt workflow.
+
+Hunt record types:
+- `splunk_query` — SPL, purpose, mode, response_status, event_count, result_summary
+- `investigation_step` — step_number, hypothesis, approved_skipped_or_pivoted, result_summary
+- `coverage_check` — scope_area, checked[], not_checked[], not_checked_reason
 
 **Hunt-specific notes:**
 - **Flush-on-save pattern:** Accumulate evidence entries in memory during execution. Flush to `$RUN_DIR/agent-log.jsonl` only if the analyst saves at investigation end. No file I/O until save time.
-- **`api_call` records log Splunk queries** (not AWS calls). Use `service: "splunk"`, `action: "search"`, SPL as `parameters`.
+- **`splunk_query` records log Splunk queries** with SPL in the record body.
 - No `policy_eval` records (AWS-specific — hunt operates in Splunk only).
 </evidence_protocol>
 

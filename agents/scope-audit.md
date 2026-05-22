@@ -268,9 +268,13 @@ If validation lint fails, stop before Gate 4 and surface linter errors to the op
 </attack_paths_dispatch>
 
 <verification>
-@include agents/shared/verification-protocol.md
+Read `agents/subagents/scope-verify.md` and apply domain-core and domain-aws sections after attack validation completes and validation lint passes.
 
-**Audit note:** Run verification inline after attack validation completes and validation lint passes. Apply domain-core and domain-aws sections. Verify claims in results.json before presenting Gate 4 results.
+Verify claims in `$RUN_DIR/results.json` before presenting Gate 4 results:
+- Keep final attack path status grounded in `validation_status`, `runtime_assumptions[]`, and `coverage_caveats[]`.
+- Strip or rewrite unsupported AWS API names, IAM policy syntax, SCP/RCP structures, remediation claims, and attack path logic.
+- Do not introduce numeric confidence scores, ranking tiers, or speculative claim labels.
+- Do not block the audit run for narrative issues. Strip unsupported claims and continue with reproducible output.
 </verification>
 
 <gate_4_results_approval>
@@ -408,9 +412,16 @@ Before reporting completion, verify all mandatory files exist. If ANY is missing
 </mandatory_outputs>
 
 <evidence_protocol>
-@include agents/shared/evidence-logging.md
+Maintain `$RUN_DIR/agent-log.jsonl` with one JSON object per line. Evidence logging must never block the primary audit workflow. On write failure, log a warning and continue.
 
-**Audit-specific record types:** `subagent_dispatch` (name, initial_message, timestamp), `subagent_return` (name, STATUS, METRICS, ERRORS, timestamp), `gate_transition` (gate, decision, timestamp).
+Use `skills/scope-evidence-logging/SKILL.md` for schema-valid evidence handles in attack candidates, observations, assumptions, and caveats.
+
+Audit record types:
+- `command` — command, purpose, response_status, response_summary, duration_ms
+- `coverage_check` — scope_area, checked[], not_checked[], not_checked_reason
+- `subagent_dispatch` — name, initial_message, timestamp
+- `subagent_return` — name, STATUS, METRICS, ERRORS, timestamp
+- `gate_transition` — gate, decision, timestamp
 
 Log every subagent dispatch/return and every gate transition. Seed the log after Gate 1 with the `get-caller-identity` call and Gate 1 transition. Use `jq -c` or `printf` to append — do NOT use heredocs.
 </evidence_protocol>
