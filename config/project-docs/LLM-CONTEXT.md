@@ -23,7 +23,9 @@ Primary docs:
 
 - `README.md`: product overview, commands, install model, and high-level architecture.
 - `ARCHITECTURE.md`: pipeline flow, data dependencies, verification flow, and hook layer.
-- `config/project-docs/*.md`: project design and implementation plans.
+- `config/project-docs/PROJECT.md`: installed platform guidance.
+- `config/project-docs/LLM-CONTEXT.md`: current reviewer and implementation-agent context.
+- Other `config/project-docs/*.md` files: design records or historical implementation plans. Do not treat old task steps as current source of truth.
 
 Core runtime:
 

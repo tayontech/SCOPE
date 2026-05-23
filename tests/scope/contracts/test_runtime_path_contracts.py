@@ -223,11 +223,16 @@ def test_investigate_prompt_uses_investigation_terminology() -> None:
 
 def test_investigate_prompt_uses_declared_splunk_tools_for_index_discovery() -> None:
     body = read_repo_file("agents/scope-investigate.md")
+    splunk_patterns = read_repo_file("config/splunk-patterns.md")
+    mcp_setup = read_repo_file("config/mcp-setup.md")
 
     assert "get_indexes" not in body
     assert "| rest /services/data/indexes" in body
     assert "using `working_tool`" in body
     assert "For RUN and INTEL modes, run this probe after subagent handoff" in body
+    assert "get_indexes MCP tool" not in splunk_patterns
+    assert "| rest /services/data/indexes | fields title" in splunk_patterns
+    assert "SCOPE does not depend on this tool" in mcp_setup
 
 
 def test_investigate_intel_prompt_uses_investigation_terminology() -> None:

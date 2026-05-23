@@ -127,7 +127,7 @@ All Splunk MCP Server tools (app 7931, v1.0.2) are Splunk-scoped. None accept AW
 | validate_spl | Validate SPL before execution |
 | search_oneshot | Execute blocking SPL search |
 | search_export | Stream large result sets |
-| get_indexes | List Splunk indexes |
+| get_indexes | List Splunk indexes when the MCP server exposes it. SCOPE does not depend on this tool; current index discovery uses `\| rest /services/data/indexes` through the selected search tool. |
 | get_saved_searches | List saved searches |
 | run_saved_search | Execute a saved search |
 | saia_generate_spl | Natural language to SPL |
