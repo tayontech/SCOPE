@@ -256,7 +256,7 @@ If no category match: fall back to curated reasoning notes in `<reasoning_framew
 
 When a matching category is found, select the most specific pattern by `id` based on the hypothesis statement. Use the pattern fields as follows:
 
-- **`cloudtrail_signals`** — Prioritize these eventNames when selecting queries. Each signal's `confirm_refute` field tells you whether finding the event confirms or refutes the hypothesis. Use this to populate the PURPOSE label in the investigation loop (see `<investigation_loop>` step 3.5).
+- **`cloudtrail_signals`** — Prioritize these events when selecting queries. Each signal's `confirm_refute` field tells you whether finding the event confirms or refutes the hypothesis. Use this to populate the PURPOSE label in the investigation loop (see `<investigation_loop>` step 3.5). Normalize `cloudtrail_signals[].event` before writing SPL: split service-qualified values like `iam:CreateAccessKey` into `service=iam` and `action=CreateAccessKey`; query CloudTrail with `eventName=CreateAccessKey`; use the service context only for `eventSource` filtering when needed or for explanation.
 - **`spl_templates`** — Use the named SPL blocks as starting points. Adapt field values from `investigation_context` or `active_hypothesis.affected_resources`. Each template's `purpose` field (`confirm` or `refute`) maps directly to the PURPOSE label.
 - **`confirm_criteria`** — Cite this verbatim in the HYPOTHESIS CHECK line at step 6 when result matches.
 - **`refute_criteria`** — Cite this verbatim in the HYPOTHESIS CHECK line at step 6 when result refutes.
@@ -327,13 +327,14 @@ REASONING:
   Alert context:         [What the alert tells us — key fields, event type, urgency signals]
   Environment knowledge: [What KNOWLEDGE_CONTEXT tells us about entities involved — cite specific
                           entries by label/value, or "no context entries match" if none]
-  Reference pattern:     [Which former playbook pattern this draws from, if any — e.g.,
-                          "CreateAccessKey pattern Step 1: Anchor event", or "none — novel approach"]
+  Reasoning source:      [Cite the `hunt-techniques.json` pattern ID, `HUNT_REASONING_NOTES`,
+                          or "independent reasoning" as the source for this step]
   Hypothesis test:       [How this query tests the active hypothesis — "This confirms step 3 of
                           the exploit path is observable" / "This refutes the hypothesis if
                           [eventName] is absent" / "This is context-gathering before testing
                           the hypothesis directly" / "No active hypothesis — general investigation"]
-  Independent reasoning: [Why THIS query is the logical next step given the above three inputs.
+  Independent reasoning: [Why THIS query is the logical next step given the context, hypothesis,
+                          and reasoning source.
                           What we expect to find. How it connects to previous step findings.]
 ```
 
@@ -346,7 +347,7 @@ Show the complete SPL query, pre-formatted, copy-pasteable:
 
 **3.5. PURPOSE Label (when active_hypothesis is set)**
 
-Before presenting the gate, state the query's hypothesis role. Derive this from the active investigation technique pattern's `cloudtrail_signals[].confirm_refute` field for the primary event in this query. In MODE=INVESTIGATION with no pattern loaded, omit this label.
+Before presenting the gate, state the query's hypothesis role. Derive this from the active investigation technique pattern's `cloudtrail_signals[].confirm_refute` field for the primary event in this query. Normalize service-qualified `cloudtrail_signals[].event` values before citing or querying them: for `service:Action`, query `eventName=Action` and use `service` only as service context. In MODE=INVESTIGATION with no pattern loaded, omit this label.
 
 ```
 PURPOSE: This query is designed to [confirm / refute] the hypothesis by checking for
