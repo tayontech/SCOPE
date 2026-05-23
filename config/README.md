@@ -10,10 +10,9 @@ This directory contains runtime reference data, installer templates, safety hook
 - `scps/`: optional organization SCP context read by audit, controls policy, and verification flows.
 - `project-docs/PROJECT.md`: source for generated `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`.
 - `project-docs/LLM-CONTEXT.md`: current reviewer and implementation-agent orientation.
-- `cloudtrail-classes.json`: exploit step visibility classification.
-- `techniques.json`: exploit seed technique knowledge.
-- `hunt-techniques.json`: investigation technique catalogue.
-- `hunt-reference-patterns.json`: investigation reference pattern catalogue.
+- `exploit-reasoning-notes.md`: curated expert notes for complex exploit reasoning.
+- `hunt-techniques.json`: structured RUN-mode investigation hypothesis catalogue.
+- `hunt-reasoning-notes.md`: curated expert notes for complex hunt reasoning.
 - `splunk-patterns.md`: SPL generation and linting guidance.
 - `models.json`: installer model routing source.
 - `accounts.example.json`, `index.example.json`, `observations.example.md`: operator templates for local configuration.

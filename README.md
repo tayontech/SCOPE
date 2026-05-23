@@ -78,7 +78,7 @@ bin/                  Tooling: installer, report generator, graph extractor
 The exploit agent uses creative reasoning to discover abuse paths — not just a static checklist. It analyzes a principal's actual permissions and reasons about what attack chains are possible, using known escalation families as a floor, not a ceiling.
 
 - **Permission auto-discovery** — self-target mode discovers caller identity, reads own policies, falls back to targeted probes
-- **Visibility tagging** — CloudTrail classification tags each step as management event, data event, or not logged without turning the playbook into detection guidance
+- **Focused exploit output** — exploit playbooks avoid detection and CloudTrail visibility guidance; controls and investigate own detection engineering, dashboards, and telemetry caveats
 - **Creative reasoning** — LLM reasons about unconventional service chain abuse beyond the standard catalogue
 - **PassRole attack surface** — maps composable role-passing chains across 10+ AWS services
 
