@@ -7,8 +7,8 @@ Knowledge is context, not ground truth. Agents must verify stored knowledge agai
 ## Files
 
 - `environment.md`: SIEM, cloud, identity, account, and data-source context.
-- `observables.jsonl`: structured entities and indicators observed during investigations, audits, controls, and exploit runs.
-- `baselines.json`: known-normal behavior and expected relationships.
+- `observables.jsonl`: generalized indicators and TTP patterns observed during investigations, audits, controls, and exploit runs.
+- `baselines.json`: known-normal behavior classes and expected relationship patterns.
 - `coverage-gaps.md`: telemetry, index, field, and AWS collection gaps.
 - `investigations/`: completed investigation records.
 - `research/`: threat-intel and news research records.

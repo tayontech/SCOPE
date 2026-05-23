@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
-  "principals": [],
-  "role_chains": [],
-  "source_ips": [],
-  "user_agents": [],
+  "behavior_classes": [],
+  "trust_patterns": [],
+  "network_patterns": [],
+  "user_agent_families": [],
   "event_volumes": [],
   "automation": []
 }

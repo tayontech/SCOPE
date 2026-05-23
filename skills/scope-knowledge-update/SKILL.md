@@ -52,6 +52,8 @@ Every durable update must use one of:
 - Dedupe before appending.
 - Every update must cite evidence: run directory, report path, query ID, event ID, finding ID, or analyst-approved note.
 - Generalize resource-specific evidence before persistence. Use service names, control categories, event patterns, and behavior classes instead of exact identifiers.
+- Before writing, scan candidate entries for exact identifier patterns: `arn:aws:`, 12-digit account IDs, access key IDs, key IDs, role names, user names, bucket names, and secret names. Redact or generalize the value. If the value cannot be generalized without losing meaning, skip it and report the skip reason.
+- Evidence citations may point to run directories, reports, query IDs, event IDs, or finding IDs. Do not copy raw resource identifiers into the durable knowledge entry.
 - Use dates in `YYYY-MM-DD` format.
 
 ## Routing Rules

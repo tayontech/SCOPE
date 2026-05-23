@@ -4,8 +4,8 @@ Record missing telemetry, unavailable indexes, missing fields, access-denied AWS
 
 ## Active Gaps
 
-<!-- YYYY-MM-DD [account/source] gap, impact, evidence, owner/status -->
+<!-- YYYY-MM-DD [source/group] gap, impact, evidence, owner/status -->
 
 ## Resolved Gaps
 
-<!-- YYYY-MM-DD [account/source] gap resolved, evidence -->
+<!-- YYYY-MM-DD [source/group] gap resolved, evidence -->
