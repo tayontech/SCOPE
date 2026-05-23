@@ -156,6 +156,7 @@ Enumeration is deterministic Python via `python -m scope` and `scope/enumerators
 | | |
 |---|---|
 | [PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/PROJECT.md) | Behavioral guidance: reasoning philosophy, operator pace, environmental learning |
+| [LLM-CONTEXT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/LLM-CONTEXT.md) | Reviewer and implementation-agent context for SCOPE contracts, boundaries, and verification |
 | [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
 | [Hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hook reference |
 | [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, controls, exploit output |
