@@ -96,7 +96,6 @@ def valid_exploit_results() -> dict[str, Any]:
                     {
                         "description": "Set the default policy version.",
                         "action": "aws iam set-default-policy-version --policy-arn arn:aws:iam::123456789012:policy/example --version-id v2",
-                        "visibility": "MGT",
                     }
                 ],
                 "iam_policy": {"Version": "2012-10-17", "Statement": []},
