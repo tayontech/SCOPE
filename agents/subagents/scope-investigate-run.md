@@ -209,7 +209,7 @@ HYPOTHESIS [N]
   Adversary goal:   [derived from category mapping — e.g., Privilege escalation]
   Target:           [target_arn from results.json]
   Statement:        "If [target_arn] executed [attack_path.name], investigate the derived event candidates and resource anchors below, then qualify any gaps against current Splunk and CloudTrail coverage."
-  Derived telemetry candidates:
+  Derived telemetry candidates (search for these observable actions and related management-plane precursors):
     - [step.description] → command/action: [step.action] → affected resource: [resource] → eventName or SPL candidate: [candidate]
   Telemetry caveats:
     - [coverage_caveats[] or runtime_assumptions[] that affect whether evidence should exist]
