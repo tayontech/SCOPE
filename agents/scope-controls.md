@@ -82,7 +82,7 @@ Extract SERVICES_COMPLETED — the services that have corresponding module JSON 
 ```bash
 SERVICES_COMPLETED=""
 for SVC in iam sts s3 kms secrets lambda ec2 rds sns sqs apigateway codebuild bedrock cognito dynamodb ssm; do
-  if ls "$AUDIT_RUN_DIR/modules/$SVC"/*.json >/dev/null 2>&1 || [ -f "$AUDIT_RUN_DIR/$SVC.json" ]; then
+  if ls "$AUDIT_RUN_DIR/modules/$SVC"/*.json >/dev/null 2>&1; then
     SERVICES_COMPLETED="${SERVICES_COMPLETED:+$SERVICES_COMPLETED,}$SVC"
   fi
 done

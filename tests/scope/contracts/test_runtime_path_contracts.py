@@ -120,6 +120,7 @@ def test_runtime_path_contracts_use_runs_directory() -> None:
 
 def test_controls_prompts_reject_legacy_audit_module_paths() -> None:
     controls_prompts = [
+        "agents/scope-controls.md",
         "agents/subagents/scope-controls-guardrails.md",
         "agents/subagents/scope-controls-remediation.md",
         "agents/subagents/scope-controls-policy.md",
@@ -130,6 +131,7 @@ def test_controls_prompts_reject_legacy_audit_module_paths() -> None:
         "$AUDIT_RUN_DIR/{service}.json",
         "AUDIT_RUN_DIR/iam.json",
         "$AUDIT_RUN_DIR/iam.json",
+        "$AUDIT_RUN_DIR/$SVC.json",
     ]
 
     for relative_path in controls_prompts:
@@ -137,6 +139,7 @@ def test_controls_prompts_reject_legacy_audit_module_paths() -> None:
         for needle in stale_needles:
             assert needle not in body, f"{relative_path} contains legacy handoff path {needle!r}"
 
+    assert_contains("agents/scope-controls.md", "$AUDIT_RUN_DIR/modules/$SVC")
     assert_contains("agents/subagents/scope-controls-guardrails.md", "$AUDIT_RUN_DIR/modules/<service>/<region>.json")
     assert_contains("agents/subagents/scope-controls-remediation.md", "AUDIT_RUN_DIR/modules/<service>/<region>.json")
     assert_contains("agents/subagents/scope-controls-policy.md", "$AUDIT_RUN_DIR/modules/iam/global.json")
