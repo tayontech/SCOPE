@@ -12,8 +12,8 @@
 
 ## File Structure
 
-- Create `config/exploit-reasoning-notes.md`: curated expert notes for complex exploit reasoning.
-- Create `config/hunt-reasoning-notes.md`: curated expert notes for complex hunt reasoning.
+- Create `knowledge/exploit-reasoning-notes.md`: curated expert notes for complex exploit reasoning.
+- Create `knowledge/hunt-reasoning-notes.md`: curated expert notes for complex hunt reasoning.
 - Delete `config/techniques.json`: generic exploit catalogue.
 - Delete `config/hunt-reference-patterns.json`: generic alert reference catalogue.
 - Delete `config/cloudtrail-classes.json`: static AWS action-to-CloudTrail catalogue.
@@ -37,7 +37,7 @@ Append this test after `test_attack_verify_and_exploit_contract_regressions`:
 def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_catalogue() -> None:
     exploit = read("agents/scope-exploit.md")
 
-    assert "config/exploit-reasoning-notes.md" in exploit
+    assert "knowledge/exploit-reasoning-notes.md" in exploit
     assert_matches(
         exploit,
         r"exploit-reasoning-notes\.md[\s\S]{0,260}(optional|warn and continue|continue)",
@@ -69,7 +69,7 @@ Append this test after the exploit test from Step 1:
 def test_scope_investigate_uses_curated_hunt_notes() -> None:
     investigate = read("agents/scope-investigate.md")
 
-    assert "config/hunt-reasoning-notes.md" in investigate
+    assert "knowledge/hunt-reasoning-notes.md" in investigate
     assert_matches(
         investigate,
         r"hunt-reasoning-notes\.md[\s\S]{0,260}(optional|warn and continue|continue)",
@@ -146,7 +146,7 @@ def assert_note_file(path: str, required_phrases: list[str]) -> None:
 
 def test_exploit_reasoning_notes_are_curated_expert_context() -> None:
     assert_note_file(
-        "config/exploit-reasoning-notes.md",
+        "knowledge/exploit-reasoning-notes.md",
         [
             "## PassRole Requires Execution Control",
             "## Data Events Change Post-Exploitation Confidence",
@@ -158,7 +158,7 @@ def test_exploit_reasoning_notes_are_curated_expert_context() -> None:
 
 def test_hunt_reasoning_notes_are_curated_expert_context() -> None:
     assert_note_file(
-        "config/hunt-reasoning-notes.md",
+        "knowledge/hunt-reasoning-notes.md",
         [
             "## Resolve The Actual Actor Before Query Expansion",
             "## Absence Of Data Events Does Not Refute Activity",
@@ -205,15 +205,15 @@ git commit -m "test: cover reasoning note config"
 ## Task 3: Create Curated Markdown Notes And Remove Static Catalogues
 
 **Files:**
-- Create: `config/exploit-reasoning-notes.md`
-- Create: `config/hunt-reasoning-notes.md`
+- Create: `knowledge/exploit-reasoning-notes.md`
+- Create: `knowledge/hunt-reasoning-notes.md`
 - Delete: `config/techniques.json`
 - Delete: `config/hunt-reference-patterns.json`
 - Delete: `config/cloudtrail-classes.json`
 
 - [ ] **Step 1: Create exploit reasoning notes**
 
-Create `config/exploit-reasoning-notes.md`:
+Create `knowledge/exploit-reasoning-notes.md`:
 
 ```md
 # Exploit Reasoning Notes
@@ -303,7 +303,7 @@ Avoid:
 
 - [ ] **Step 2: Create hunt reasoning notes**
 
-Create `config/hunt-reasoning-notes.md`:
+Create `knowledge/hunt-reasoning-notes.md`:
 
 ```md
 # Hunt Reasoning Notes
@@ -412,7 +412,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit note files and JSON removals**
 
 ```bash
-git add config/exploit-reasoning-notes.md config/hunt-reasoning-notes.md config/techniques.json config/hunt-reference-patterns.json config/cloudtrail-classes.json
+git add knowledge/exploit-reasoning-notes.md knowledge/hunt-reasoning-notes.md config/techniques.json config/hunt-reference-patterns.json config/cloudtrail-classes.json
 git commit -m "refactor: replace static catalogues with reasoning notes"
 ```
 
@@ -445,12 +445,12 @@ After Gate 2 operator approval and before escalation analysis begins, add:
 Load optional expert context after permission discovery:
 
 ```bash
-if [ -f config/exploit-reasoning-notes.md ]; then
-  EXPLOIT_REASONING_NOTES=$(cat config/exploit-reasoning-notes.md)
-  echo "Exploit reasoning notes loaded: config/exploit-reasoning-notes.md"
+if [ -f knowledge/exploit-reasoning-notes.md ]; then
+  EXPLOIT_REASONING_NOTES=$(cat knowledge/exploit-reasoning-notes.md)
+  echo "Exploit reasoning notes loaded: knowledge/exploit-reasoning-notes.md"
 else
   EXPLOIT_REASONING_NOTES=""
-  echo "config/exploit-reasoning-notes.md not found - continuing without curated expert notes"
+  echo "knowledge/exploit-reasoning-notes.md not found - continuing without curated expert notes"
 fi
 ```
 
@@ -468,7 +468,7 @@ After permission discovery, load techniques.json (seed knowledge) and cloudtrail
 with:
 
 ```md
-After permission discovery, load `config/exploit-reasoning-notes.md` as optional expert context. Then reason about escalation paths through unified creative reasoning. All paths emerge from discovered permissions, environment evidence, optional expert notes, and research context.
+After permission discovery, load `knowledge/exploit-reasoning-notes.md` as optional expert context. Then reason about escalation paths through unified creative reasoning. All paths emerge from discovered permissions, environment evidence, optional expert notes, and research context.
 ```
 
 Replace:
@@ -543,12 +543,12 @@ In `agents/scope-investigate.md`, after the active hypothesis session state sect
 Load optional expert context before selecting investigation steps:
 
 ```bash
-if [ -f config/hunt-reasoning-notes.md ]; then
-  HUNT_REASONING_NOTES=$(cat config/hunt-reasoning-notes.md)
-  echo "Hunt reasoning notes loaded: config/hunt-reasoning-notes.md"
+if [ -f knowledge/hunt-reasoning-notes.md ]; then
+  HUNT_REASONING_NOTES=$(cat knowledge/hunt-reasoning-notes.md)
+  echo "Hunt reasoning notes loaded: knowledge/hunt-reasoning-notes.md"
 else
   HUNT_REASONING_NOTES=""
-  echo "config/hunt-reasoning-notes.md not found - continuing without curated expert notes"
+  echo "knowledge/hunt-reasoning-notes.md not found - continuing without curated expert notes"
 fi
 ```
 
@@ -665,7 +665,7 @@ For active docs, use these replacements:
 becomes:
 
 ```md
-`config/exploit-reasoning-notes.md`
+`knowledge/exploit-reasoning-notes.md`
 ```
 
 and:
@@ -677,7 +677,7 @@ and:
 becomes:
 
 ```md
-`config/hunt-reasoning-notes.md`
+`knowledge/hunt-reasoning-notes.md`
 ```
 
 Delete references to `config/cloudtrail-classes.json`; do not replace them with another static catalogue.

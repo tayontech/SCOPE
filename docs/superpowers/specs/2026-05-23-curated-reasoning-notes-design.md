@@ -18,8 +18,8 @@ The notes should help agents reason through complex exploit paths and hunts by s
 
 Create two Markdown files:
 
-- `config/exploit-reasoning-notes.md`
-- `config/hunt-reasoning-notes.md`
+- `knowledge/exploit-reasoning-notes.md`
+- `knowledge/hunt-reasoning-notes.md`
 
 Remove or deprecate:
 
@@ -32,9 +32,9 @@ Remove `config/cloudtrail-classes.json`. Do not replace it with another static C
 
 ## Agent Behavior
 
-`scope-exploit` loads `config/exploit-reasoning-notes.md` after permission discovery if the file exists. The agent treats notes as optional expert context. Missing notes should warn and continue.
+`scope-exploit` loads `knowledge/exploit-reasoning-notes.md` after permission discovery if the file exists. The agent treats notes as optional expert context. Missing notes should warn and continue.
 
-`scope-investigate` loads `config/hunt-reasoning-notes.md` during hypothesis testing if the file exists. The agent treats notes as optional expert context. Missing notes should warn and continue.
+`scope-investigate` loads `knowledge/hunt-reasoning-notes.md` during hypothesis testing if the file exists. The agent treats notes as optional expert context. Missing notes should warn and continue.
 
 Agents must not treat notes as exhaustive catalogues, required checklists, or deterministic decision rules. Current environment evidence, AWS semantics, and live query results outrank notes.
 
