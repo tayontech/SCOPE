@@ -427,6 +427,9 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 | 4 | `agent-log.jsonl` | `$RUN_DIR/agent-log.jsonl` | Agent activity log — one JSON line per event |
 | 5 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
 | 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
+
+Dashboard export files are expected when runtime export succeeds. If a dashboard export or index file is missing and no runtime warning exists, recover it using `scope.runtime.post_processing.export_dashboard_results`; if a runtime warning explains the export failure, report the warning and continue with the run artifacts intact.
+
 Before reporting completion, verify all mandatory files exist. If ANY is missing (and no applicable exception applies), go back and create it.
 </mandatory_outputs>
 

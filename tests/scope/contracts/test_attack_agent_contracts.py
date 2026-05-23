@@ -374,6 +374,8 @@ def test_scope_audit_boundary_contract() -> None:
     assert "$RUN_DIR/results.json" in mandatory
     assert "$RUN_DIR/findings.md" in mandatory
     assert "$RUN_DIR/agent-log.jsonl" in mandatory
+    assert "Dashboard export files are expected when runtime export succeeds" in mandatory
+    assert "missing and no runtime warning exists" in mandatory
 
     assert_not_matches(prompt, r"(?<!Do not )Dispatch `?scope-research`?")
     assert_not_matches(prompt, r"(?<!Do not )dispatch scope-research")
