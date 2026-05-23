@@ -187,9 +187,9 @@ def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_ca
         r"(expert context|reasoning notes)[\s\S]{0,260}(not a checklist|not exhaustive|not authoritative)",
         "exploit notes must not become a checklist",
     )
-    assert_not_matches(exploit, r"config/techniques\.json", "scope-exploit must stop loading techniques.json")
+    assert_not_matches(exploit, r"(?:config/)?techniques\.json", "scope-exploit must stop loading techniques.json")
     assert_not_matches(exploit, r"\bTECHNIQUES\b", "scope-exploit must not keep stale TECHNIQUES variable")
-    assert_not_matches(exploit, r"config/cloudtrail-classes\.json", "scope-exploit must stop loading cloudtrail-classes.json")
+    assert_not_matches(exploit, r"(?:config/)?cloudtrail-classes\.json", "scope-exploit must stop loading cloudtrail-classes.json")
     assert_not_matches(exploit, r"\bCT_CLASSES\b", "scope-exploit must not keep stale CT_CLASSES variable")
     assert_not_matches(exploit, r"\[MGT\]|\[DATA\]|\[NONE\]", "scope-exploit must not tag playbook steps with static CloudTrail classes")
     assert_not_matches(exploit, r"CloudTrail visibility class tags", "scope-exploit must remove static visibility tag exception")
@@ -225,6 +225,8 @@ def test_scope_investigate_uses_curated_hunt_notes() -> None:
         r"Cannot load reference patterns",
         "missing hunt reference patterns must not halt investigations",
     )
+    assert_not_matches(investigate, r"\bREF_PATTERN\b", "scope-investigate must not keep stale reference-pattern variable")
+    assert_not_matches(investigate, r"Reference Pattern Loading", "scope-investigate must remove stale reference-pattern loading section")
 
 
 def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
