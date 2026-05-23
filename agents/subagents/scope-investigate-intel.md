@@ -250,7 +250,7 @@ For each `threat_intel` hypothesis, reason about what phases of the kill chain a
 | Credential theft (T1552, GetSecretValue, GetParameter) | Use stolen credentials: AssumeRole to downstream accounts, access downstream services |
 | Role chaining / lateral movement (T1021.007, AssumeRole cross-account) | Privilege escalation in target account, data exfiltration from accessed account |
 | Discovery / enumeration burst (Describe*, List* calls) | Target selection → exploitation of found resources (GetObject, InvokeFunction, GetSecretValue) |
-| Defense evasion (T1562 — StopLogging, DeleteTrail) | Unrestricted subsequent activity — hunt for all API calls after the evasion timestamp |
+| Defense evasion (T1562 — StopLogging, DeleteTrail) | Unrestricted subsequent activity — search for all API calls after the evasion timestamp |
 | Persistence (T1098 — CreateAccessKey, CreateLoginProfile) | Long-term durable access use — look for API calls using new key from different IP/region |
 | Data exfiltration (T1530 — GetObject, GetBucketPolicy) | Check for S3 sync patterns, GetObject bursts, cross-account copy calls |
 | Privilege escalation (PutRolePolicy, AttachUserPolicy) | Exploitation of escalated privileges — look for downstream actions using new permissions |
@@ -262,7 +262,7 @@ HYPOTHESIS [N]
   Source:           intel_reasoning — reasoned beyond the report
   Threat actor:     [intel_parsed.threat_actor | "unknown actor"]
   TTP:              [reasoned next-phase TTP + MITRE ID if applicable]
-  Statement:        "After [described behavior], the adversary would logically [next action] — hunt for [eventNames] to confirm or rule out."
+  Statement:        "After [described behavior], the adversary would logically [next action] — search for [eventNames] to confirm or rule out."
   IOC anchors:      [carry forward IPs/ARNs from the triggering threat_intel hypothesis where applicable]
   CloudTrail focus: [eventNames for reasoned next phase]
   Beyond report:    Yes
@@ -282,14 +282,14 @@ Present `threat_intel` hypotheses first, then `intel_reasoning` hypotheses. With
 
 Intel mode does not have a specific alert event — construct `investigation_context` from the parsed intel so the investigation loop and SPL query templates have the required fields:
 
-- **`alert_type`**: set to `intel_parsed.ttps.mitre_ids[0]` formatted as `"[ID] — [technique name]"` (e.g., `"T1078 — Valid Accounts"`). If no MITRE IDs were extracted, use `intel_parsed.ttps.cloudtrail_events[0]`. If both are empty, use `"Threat Intel Hunt"`.
-- **`event_time`**: current timestamp (intel mode is a proactive hunt — no specific event time).
-- **`time_range_earliest`**: 30 days before current time (intel hunts span a wide lookback window by default).
+- **`alert_type`**: set to `intel_parsed.ttps.mitre_ids[0]` formatted as `"[ID] — [technique name]"` (e.g., `"T1078 — Valid Accounts"`). If no MITRE IDs were extracted, use `intel_parsed.ttps.cloudtrail_events[0]`. If both are empty, use `"Threat Intel Investigation"`.
+- **`event_time`**: current timestamp (intel mode is a proactive investigation — no specific event time).
+- **`time_range_earliest`**: 30 days before current time (intel investigations span a wide lookback window by default).
 - **`time_range_latest`**: current time.
 - **`source_ip`**: first entry of `intel_parsed.iocs.ips` if non-empty; otherwise `null`.
 - **`user_arn`**: first entry of `intel_parsed.iocs.arns` if non-empty; otherwise `null`.
 - **`missing_fields`**: list any fields that could not be derived from `intel_parsed`.
-- **`notes`**: `"Threat intel hunt — [intel_parsed.summary]"`.
+- **`notes`**: `"Threat intel investigation — [intel_parsed.summary]"`.
 
 Display the constructed context before proceeding:
 
@@ -299,7 +299,7 @@ Alert type:     [alert_type]
 Time range:     [time_range_earliest] to [time_range_latest] (30-day lookback)
 Source IP:      [source_ip | "none extracted"]
 Principal:      [user_arn | "none extracted"]
-Notes:          Threat intel hunt — [intel_parsed.summary]
+Notes:          Threat intel investigation — [intel_parsed.summary]
 ```
 
 After displaying, proceed to operator hypothesis selection (HYPO-04).
@@ -312,7 +312,7 @@ Intel mode produces multiple hypotheses. Display the full selection prompt with 
 
 ```
 HYPOTHESIS SELECTION
-Generated [N] hunt hypotheses from threat intel ([X] from report, [Y] reasoned beyond report).
+Generated [N] investigation hypotheses from threat intel ([X] from report, [Y] reasoned beyond report).
 
   --- From the intel report ---
   1. [name] — [TTP] — [1-line statement]

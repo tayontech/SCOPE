@@ -230,6 +230,34 @@ def test_investigate_prompt_uses_declared_splunk_tools_for_index_discovery() -> 
     assert "For RUN and INTEL modes, run this probe after subagent handoff" in body
 
 
+def test_investigate_intel_prompt_uses_investigation_terminology() -> None:
+    body = read_repo_file("agents/subagents/scope-investigate-intel.md")
+
+    stale_phrases = [
+        "Threat Intel Hunt",
+        "proactive hunt",
+        "intel hunts",
+        "Threat intel hunt",
+        "hunt hypotheses",
+        "hunt for [eventNames]",
+        "hunt for all API calls",
+    ]
+    for phrase in stale_phrases:
+        assert phrase not in body, f"scope-investigate-intel should not expose stale phrase: {phrase!r}"
+
+    expected_phrases = [
+        "Threat Intel Investigation",
+        "proactive investigation",
+        "intel investigations",
+        "Threat intel investigation",
+        "investigation hypotheses",
+        "search for [eventNames]",
+        "search for all API calls",
+    ]
+    for phrase in expected_phrases:
+        assert phrase in body, f"scope-investigate-intel should contain current phrase: {phrase!r}"
+
+
 def test_investigate_handoffs_use_current_state_fields() -> None:
     parent = read_repo_file("agents/scope-investigate.md")
     alert = read_repo_file("agents/subagents/scope-investigate-alert.md")
