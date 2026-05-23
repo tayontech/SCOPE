@@ -214,7 +214,16 @@ def test_scope_investigate_uses_curated_hunt_notes() -> None:
         r"(expert context|reasoning notes)[\s\S]{0,260}(not a checklist|not exhaustive|not authoritative)",
         "hunt notes must not become a checklist",
     )
-    assert "config/hunt-techniques.json" in investigate
+    assert_not_matches(
+        investigate,
+        r"(?:config/)?hunt-techniques\.json",
+        "scope-investigate must stop loading hunt-techniques.json",
+    )
+    assert_not_matches(
+        investigate,
+        r"hunt technique catalogue|investigation technique catalogue|active investigation technique pattern",
+        "scope-investigate must not keep stale hunt catalogue wording",
+    )
     assert_not_matches(
         investigate,
         r"config/hunt-reference-patterns\.json",

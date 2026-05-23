@@ -30,7 +30,6 @@ Read these files when present. Missing files are normal on first use.
 - `config/observations.md`
 - `config/index.json`
 - `config/splunk-patterns.md`
-- `config/hunt-techniques.json`
 - `config/hunt-reasoning-notes.md`
 
 ## Selection Rules

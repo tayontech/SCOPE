@@ -210,11 +210,11 @@ def test_investigate_prompt_uses_investigation_terminology() -> None:
         assert phrase not in body, f"scope-investigate should not expose stale phrase: {phrase!r}"
 
     expected_phrases = [
-        "<investigation_technique_patterns>",
-        "</investigation_technique_patterns>",
-        "Investigation Technique Patterns",
-        "investigation technique catalogue",
-        "active investigation technique pattern",
+        "<hypothesis_driven_step_selection>",
+        "</hypothesis_driven_step_selection>",
+        "Hypothesis-Driven Step Selection",
+        "Service-Qualified Events",
+        "Data-Event Caveat",
         "Re-run this investigation session",
     ]
     for phrase in expected_phrases:

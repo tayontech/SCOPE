@@ -48,6 +48,7 @@ def test_hunt_reasoning_notes_are_curated_expert_context() -> None:
 
 def test_static_aws_knowledge_catalogues_do_not_exist() -> None:
     assert not (ROOT / "config/techniques.json").exists()
+    assert not (ROOT / "config/hunt-techniques.json").exists()
     assert not (ROOT / "config/hunt-reference-patterns.json").exists()
     assert not (ROOT / "config/cloudtrail-classes.json").exists()
 
@@ -55,6 +56,7 @@ def test_static_aws_knowledge_catalogues_do_not_exist() -> None:
 def test_remaining_config_json_files_are_valid() -> None:
     removed = {
         "techniques.json",
+        "hunt-techniques.json",
         "hunt-reference-patterns.json",
         "cloudtrail-classes.json",
     }

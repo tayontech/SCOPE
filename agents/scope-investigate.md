@@ -223,56 +223,43 @@ fi
 Use these notes as expert context for complex hunts, false-positive reasoning, visibility caveats, and dashboard-worthy monitoring ideas. They are not a checklist, not exhaustive, and not authoritative over current environment evidence or Splunk results.
 </hypothesis_engine>
 
-<investigation_technique_patterns>
-## Investigation Technique Patterns — Data Layer Reference
+<hypothesis_driven_step_selection>
+## Hypothesis-Driven Step Selection
 
-This section applies **only in MODE=RUN** (when an audit or exploit run directory was provided). It is skipped in MODE=INVESTIGATION (detection alert investigation does not use the technique catalogue — the hypothesis engine's alert type mapping table is sufficient).
+After `active_hypothesis` is set and before entering `<investigation_loop>`, derive the next investigation questions from the hypothesis, current evidence, `KNOWLEDGE_CONTEXT`, `$HUNT_REASONING_NOTES`, and confirmed Splunk field/index context. Do not load a static hunt JSON catalogue. Missing curated notes are non-blocking, and investigations continue with independent reasoning when notes do not cover the scenario.
 
-### Loading the Catalogue
+### Selecting Signals
 
-After `active_hypothesis` is set and before entering `<investigation_loop>`, read the investigation technique catalogue:
+For each candidate query, identify the hypothesis element it tests:
 
-```bash
-cat config/hunt-techniques.json 2>/dev/null || echo '{}'
-```
+- **Actor**: principal, assumed role chain, source IP, user agent, session issuer, external account, or workload identity.
+- **Action**: AWS event name, data access pattern, permission change, network path, or control-plane sequence.
+- **Resource**: bucket, key prefix, IAM role/user, policy, secret, KMS key, compute target, repository, or account boundary.
+- **Timing**: alert window, first-seen time, delayed-use window, repeated attempts, or post-change activity.
+- **Visibility**: whether the required evidence source exists in the current Splunk indexes and whether CloudTrail management or data-event coverage can observe the action.
 
-If the file is absent, emit: `[ERROR] config/hunt-techniques.json not found — setup required.` and halt.
+Prefer the query that answers the most decision-critical unresolved question. If two queries have similar value, choose the one that can confirm or refute the active hypothesis with the fewest assumptions.
 
-### Pattern Matching — Adversary Goal → Category Key
+### Service-Qualified Events
 
-Match `active_hypothesis.adversary_goal` to a category key in the catalogue's `categories` object:
+When notes, evidence, or analyst input use service-qualified event names such as `iam:CreateAccessKey`, normalize them before writing SPL:
 
-| Adversary Goal Label | Category Key |
-|---|---|
-| Persistence | `persistence` |
-| Lateral movement | `lateral_movement` |
-| Defense evasion | `defense_evasion` |
-| Credential abuse / Credential theft | `credential_abuse` |
-| Data exfiltration / Data exposure | `data_exfiltration` |
+- Query CloudTrail with `eventName=CreateAccessKey`.
+- Use the service prefix as context for `eventSource` filtering when it improves precision, for example `eventSource=iam.amazonaws.com`.
+- Cite the normalized event name in the PURPOSE label and explain the service context only when it changes interpretation.
 
-If no category match: fall back to curated reasoning notes in `<reasoning_framework>`. Do not error — the fallback is expected for custom or novel hypotheses.
+### Data-Event Caveat
 
-### Using Pattern Fields
-
-When a matching category is found, select the most specific pattern by `id` based on the hypothesis statement. Use the pattern fields as follows:
-
-- **`cloudtrail_signals`** — Prioritize these events when selecting queries. Each signal's `confirm_refute` field tells you whether finding the event confirms or refutes the hypothesis. Use this to populate the PURPOSE label in the investigation loop (see `<investigation_loop>` step 3.5). Normalize `cloudtrail_signals[].event` before writing SPL: split service-qualified values like `iam:CreateAccessKey` into `service=iam` and `action=CreateAccessKey`; query CloudTrail with `eventName=CreateAccessKey`; use the service context only for `eventSource` filtering when needed or for explanation.
-- **`spl_templates`** — Use the named SPL blocks as starting points. Adapt field values from `investigation_context` or `active_hypothesis.affected_resources`. Each template's `purpose` field (`confirm` or `refute`) maps directly to the PURPOSE label.
-- **`confirm_criteria`** — Cite this verbatim in the HYPOTHESIS CHECK line at step 6 when result matches.
-- **`refute_criteria`** — Cite this verbatim in the HYPOTHESIS CHECK line at step 6 when result refutes.
-- **`data_event_caveat`** — If `true`, display this warning before proposing any query that uses a DATA-class signal:
+Before proposing a query that depends on S3 object-level events, Lambda function invocation data events, or another source that the current Splunk context may not collect, state the coverage dependency:
 
 ```
-DATA EVENT CAVEAT: This query depends on S3 data events (class=DATA). If data event
-logging is not enabled for this bucket, the query will return zero results even if
-the activity occurred. Zero results here is not evidence of absence.
-Confirm data event status before interpreting results.
+DATA EVENT CAVEAT: This query depends on data-event logging for the affected
+resource. If that coverage is missing, zero results do not prove the activity did
+not occur. Confirm coverage before treating absence as refutation.
 ```
 
-### Extending the Catalogue
-
-New patterns are added by appending entries to the relevant category array in `config/hunt-techniques.json`. No changes to this section or the reasoning framework are required. The category key lookup (`adversary_goal` → category key) is the only coupling point between the agent and the data file.
-</investigation_technique_patterns>
+Do not use static visibility tags. Base visibility caveats on discovered indexes, stored coverage gaps, active observations, and the analyst's confirmed logging setup.
+</hypothesis_driven_step_selection>
 
 <mcp_detection>
 ## MCP Detection — Splunk Connection Check
@@ -327,8 +314,9 @@ REASONING:
   Alert context:         [What the alert tells us — key fields, event type, urgency signals]
   Environment knowledge: [What KNOWLEDGE_CONTEXT tells us about entities involved — cite specific
                           entries by label/value, or "no context entries match" if none]
-  Reasoning source:      [Cite the `hunt-techniques.json` pattern ID, `HUNT_REASONING_NOTES`,
-                          or "independent reasoning" as the source for this step]
+  Reasoning source:      [Cite `HUNT_REASONING_NOTES`, `KNOWLEDGE_CONTEXT`,
+                          Splunk context, current evidence, or "independent reasoning"
+                          as the source for this step]
   Hypothesis test:       [How this query tests the active hypothesis — "This confirms step 3 of
                           the exploit path is observable" / "This refutes the hypothesis if
                           [eventName] is absent" / "This is context-gathering before testing
@@ -347,7 +335,7 @@ Show the complete SPL query, pre-formatted, copy-pasteable:
 
 **3.5. PURPOSE Label (when active_hypothesis is set)**
 
-Before presenting the gate, state the query's hypothesis role. Derive this from the active investigation technique pattern's `cloudtrail_signals[].confirm_refute` field for the primary event in this query. Normalize service-qualified `cloudtrail_signals[].event` values before citing or querying them: for `service:Action`, query `eventName=Action` and use `service` only as service context. In MODE=INVESTIGATION with no pattern loaded, omit this label.
+Before presenting the gate, state the query's hypothesis role. Derive this from the active hypothesis, current evidence, observations/knowledge context, `$HUNT_REASONING_NOTES`, and Splunk field/index context. Normalize service-qualified event names before citing or querying them: for `service:Action`, query `eventName=Action` and use `service` only as service context. If no active hypothesis exists, omit this label.
 
 ```
 PURPOSE: This query is designed to [confirm / refute] the hypothesis by checking for
@@ -526,7 +514,7 @@ At each step, the agent evaluates these priorities in order. The highest-priorit
 
 When the priority hierarchy produces a step, the structured reasoning block must cite which priority triggered the selection and what specific context entry or absence of context drove the decision.
 
-Use `$HUNT_REASONING_NOTES` only to sharpen reasoning. Build SPL from the active hypothesis, current evidence, `hunt-techniques.json` when applicable, and Splunk field context.
+Use `$HUNT_REASONING_NOTES` only to sharpen reasoning. Build SPL from the active hypothesis, current evidence, observations/knowledge context, and Splunk field context.
 </reasoning_framework>
 
 <output_format>

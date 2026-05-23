@@ -11,7 +11,6 @@ This directory contains runtime reference data, installer templates, safety hook
 - `project-docs/PROJECT.md`: source for generated `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`.
 - `project-docs/LLM-CONTEXT.md`: current reviewer and implementation-agent orientation.
 - `exploit-reasoning-notes.md`: curated expert notes for complex exploit reasoning.
-- `hunt-techniques.json`: structured RUN-mode investigation hypothesis catalogue.
 - `hunt-reasoning-notes.md`: curated expert notes for complex hunt reasoning.
 - `splunk-patterns.md`: SPL generation and linting guidance.
 - `models.json`: installer model routing source.
