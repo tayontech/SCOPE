@@ -173,6 +173,60 @@ def test_attack_verify_and_exploit_contract_regressions() -> None:
         assert text in exploit
 
 
+def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_catalogue() -> None:
+    exploit = read("agents/scope-exploit.md")
+
+    assert "config/exploit-reasoning-notes.md" in exploit
+    assert_matches(
+        exploit,
+        r"exploit-reasoning-notes\.md[\s\S]{0,260}(optional|warn and continue|continue)",
+        "exploit notes must be optional expert context",
+    )
+    assert_matches(
+        exploit,
+        r"(expert context|reasoning notes)[\s\S]{0,260}(not a checklist|not exhaustive|not authoritative)",
+        "exploit notes must not become a checklist",
+    )
+    assert_not_matches(exploit, r"config/techniques\.json", "scope-exploit must stop loading techniques.json")
+    assert_not_matches(exploit, r"\bTECHNIQUES\b", "scope-exploit must not keep stale TECHNIQUES variable")
+    assert_not_matches(exploit, r"config/cloudtrail-classes\.json", "scope-exploit must stop loading cloudtrail-classes.json")
+    assert_not_matches(exploit, r"\bCT_CLASSES\b", "scope-exploit must not keep stale CT_CLASSES variable")
+    assert_not_matches(exploit, r"\[MGT\]|\[DATA\]|\[NONE\]", "scope-exploit must not tag playbook steps with static CloudTrail classes")
+    assert_not_matches(exploit, r"CloudTrail visibility class tags", "scope-exploit must remove static visibility tag exception")
+    assert_matches(
+        exploit,
+        r"Detection[\s\S]{0,100}visibility[\s\S]{0,180}(scope-controls|scope-investigate)",
+        "exploit prompt must keep detection and visibility analysis out of exploit output",
+    )
+
+
+def test_scope_investigate_uses_curated_hunt_notes() -> None:
+    investigate = read("agents/scope-investigate.md")
+
+    assert "config/hunt-reasoning-notes.md" in investigate
+    assert_matches(
+        investigate,
+        r"hunt-reasoning-notes\.md[\s\S]{0,260}(optional|warn and continue|continue)",
+        "hunt notes must be optional expert context",
+    )
+    assert_matches(
+        investigate,
+        r"(expert context|reasoning notes)[\s\S]{0,260}(not a checklist|not exhaustive|not authoritative)",
+        "hunt notes must not become a checklist",
+    )
+    assert "config/hunt-techniques.json" in investigate
+    assert_not_matches(
+        investigate,
+        r"config/hunt-reference-patterns\.json",
+        "scope-investigate must stop loading hunt-reference-patterns.json",
+    )
+    assert_not_matches(
+        investigate,
+        r"Cannot load reference patterns",
+        "missing hunt reference patterns must not halt investigations",
+    )
+
+
 def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
     prompt = read("agents/subagents/scope-attack-analyze.md")
 
