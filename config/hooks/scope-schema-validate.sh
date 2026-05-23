@@ -401,10 +401,31 @@ case "$SOURCE" in
     check_field "target_arn" "principal ARN analyzed"
     check_field "summary" "exploit summary object"
     check_field "discovery_mode" "standalone or audit"
-    check_field "paths" "array of attack paths"
+    check_field "attack_paths" "array of final exploit attack paths"
 
-    # paths items must have name, steps
-    check_array_item_fields "paths" "name,steps" "path entries"
+    # exploit attack_paths items must use the shared downstream contract
+    check_array_item_fields "attack_paths" "name,severity,category,description,steps,validation_status,runtime_assumptions,coverage_caveats" "exploit attack path entries"
+
+    if [ "$(jq 'has("paths")' "$FILE_PATH")" = "true" ]; then
+      ERRORS+=("Exploit results must expose final paths in 'attack_paths', not legacy 'paths'")
+    fi
+
+    if [ "$(jq 'has("attack_paths")' "$FILE_PATH")" = "true" ]; then
+      INVALID_SEV=$(jq -r '[.attack_paths[] | select(.severity != null) | .severity | select(. != "critical" and . != "high" and . != "medium" and . != "low")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_SEV" ]; then
+        ERRORS+=("attack_paths[].severity contains invalid values (must be lowercase: critical|high|medium|low): $INVALID_SEV")
+      fi
+
+      INVALID_CAT=$(jq -r --argjson valid '["privilege_escalation","trust_misconfiguration","data_exposure","credential_risk","excessive_permission","network_exposure","persistence","post_exploitation","lateral_movement"]' '[.attack_paths[] | select(.category != null) | .category | select(. as $c | $valid | index($c) | not)] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_CAT" ]; then
+        ERRORS+=("attack_paths[].category contains invalid values (must be one of: privilege_escalation, trust_misconfiguration, data_exposure, credential_risk, excessive_permission, network_exposure, persistence, post_exploitation, lateral_movement): $INVALID_CAT")
+      fi
+
+      INVALID_STATUS=$(jq -r '[.attack_paths[] | select(.validation_status != null) | .validation_status | select(. != "validated" and . != "conditional")] | join(", ")' "$FILE_PATH" 2>/dev/null || echo "")
+      if [ -n "$INVALID_STATUS" ]; then
+        ERRORS+=("attack_paths[].validation_status contains invalid values (must be one of: validated|conditional): $INVALID_STATUS")
+      fi
+    fi
 
     # summary.severity is required
     if [ "$(jq 'has("summary")' "$FILE_PATH")" = "true" ]; then

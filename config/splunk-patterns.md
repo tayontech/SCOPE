@@ -243,7 +243,7 @@ Avoid these patterns in all generated SPL. The `scope-spl-lint.sh` hook enforces
 
 ## Index Discovery
 
-When `config/index.json` does not exist, the agent enumerates available Splunk indexes using the `get_indexes` MCP tool, reasons about security relevance, and presents discovered groupings to the operator for confirmation before writing the file.
+When `config/index.json` does not exist, the agent enumerates available Splunk indexes by running `| rest /services/data/indexes | fields title` through the active Splunk execution tool, reasons about security relevance, and presents discovered groupings to the operator for confirmation before writing the file.
 
 **Internal indexes to exclude during discovery.** These are Splunk Enterprise Security platform indexes — not operator data sources. Never group them as security-relevant data:
 
@@ -273,11 +273,9 @@ When `config/index.json` does not exist, the agent enumerates available Splunk i
 
 The Splunkbase app 7931 (MCP Server for Splunk Platform, version 1.0.2+) exposes these tools relevant to SCOPE query generation:
 
-### get_indexes
+### Index discovery query
 
-Enumerates all available Splunk indexes. Use at startup when `config/index.json` does not exist to drive the index discovery flow. Filter internal indexes (see Index Discovery section) before presenting to the operator.
-
-When the tool is unavailable (older app version): fall back to `search_oneshot` with:
+Use the active query execution tool selected by `scope-investigate.md` and run:
 
 ```spl
 | rest /services/data/indexes | fields title

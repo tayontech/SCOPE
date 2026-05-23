@@ -74,6 +74,37 @@ def valid_audit_results() -> dict[str, Any]:
     }
 
 
+def valid_exploit_results() -> dict[str, Any]:
+    return {
+        "account_id": "123456789012",
+        "source": "exploit",
+        "timestamp": "2026-05-17T12:00:00Z",
+        "target_arn": "arn:aws:iam::123456789012:role/target-role",
+        "discovery_mode": "standalone",
+        "summary": {"paths_found": 1, "severity": "high"},
+        "attack_paths": [
+            {
+                "name": "Validated role policy escalation",
+                "severity": "high",
+                "category": "privilege_escalation",
+                "description": "The target role can activate an existing policy version.",
+                "validation_status": "validated",
+                "runtime_assumptions": [],
+                "coverage_caveats": [],
+                "research_sources": [],
+                "steps": [
+                    {
+                        "description": "Set the default policy version.",
+                        "action": "aws iam set-default-policy-version --policy-arn arn:aws:iam::123456789012:policy/example --version-id v2",
+                        "visibility": "MGT",
+                    }
+                ],
+                "iam_policy": {"Version": "2012-10-17", "Statement": []},
+            }
+        ],
+    }
+
+
 def valid_public_entrypoint(**overrides: Any) -> dict[str, Any]:
     entrypoint = {
         "id": "entry-public-api",
@@ -207,6 +238,23 @@ def test_hook_accepts_populated_coverage_and_errors(tmp_path: Path) -> None:
 def test_hook_accepts_envelope_without_coverage_and_errors(tmp_path: Path) -> None:
     result = run_hook(tmp_path, valid_envelope("iam"), "iam.json")
     assert_accepted(result, "envelope without optional coverage/errors")
+
+
+def test_exploit_hook_accepts_attack_paths_contract(tmp_path: Path) -> None:
+    result = run_hook(tmp_path, valid_exploit_results(), "results.json")
+    assert_accepted(result, "exploit attack_paths contract should pass")
+
+
+def test_exploit_hook_rejects_legacy_paths_contract(tmp_path: Path) -> None:
+    payload = valid_exploit_results()
+    payload["paths"] = payload.pop("attack_paths")
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "legacy exploit paths contract should fail")
+    reason = parse_decision(result.stdout)["reason"]
+    assert "attack_paths" in reason
+    assert "legacy 'paths'" in reason
 
 
 def test_audit_hook_blocks_malformed_public_entrypoints(tmp_path: Path) -> None:

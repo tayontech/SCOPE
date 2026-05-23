@@ -13,6 +13,10 @@ def load_schema() -> dict[str, Any]:
     return json.loads(SCHEMA_PATH.read_text())
 
 
+def load_named_schema(name: str) -> dict[str, Any]:
+    return json.loads((ROOT / "config" / "schemas" / name).read_text())
+
+
 def resolve_ref(schema: dict[str, Any], value: dict[str, Any]) -> dict[str, Any]:
     ref = value.get("$ref")
     if not ref:
@@ -162,3 +166,29 @@ def test_audit_schema_documents_public_entrypoint_fields() -> None:
     assert "RESOURCE_POLICY" in props["auth_type"]["enum"]
     assert "public_endpoint" in props["exposure_type"]["enum"]
     assert entrypoint["additionalProperties"] is False
+
+
+def test_exploit_schema_uses_downstream_attack_paths_contract() -> None:
+    schema = load_named_schema("exploit.schema.json")
+
+    assert "attack_paths" in schema["required"]
+    assert "paths" not in schema["required"]
+    assert "paths" not in schema["properties"]
+
+    path_schema = schema["properties"]["attack_paths"]["items"]
+    required = path_schema["required"]
+    for field in [
+        "name",
+        "severity",
+        "category",
+        "description",
+        "steps",
+        "validation_status",
+        "runtime_assumptions",
+        "coverage_caveats",
+    ]:
+        assert field in required
+
+    props = path_schema["properties"]
+    assert props["validation_status"]["enum"] == ["validated", "conditional"]
+    assert props["severity"]["enum"] == ["critical", "high", "medium", "low"]
