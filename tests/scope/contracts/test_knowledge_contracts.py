@@ -126,6 +126,17 @@ def test_knowledge_directory_templates_exist() -> None:
     assert "Top-level agents update knowledge through `skills/scope-knowledge-update/SKILL.md`" in readme
 
 
+def test_active_observations_path_contracts_use_knowledge_directory() -> None:
+    claude = read("CLAUDE.md")
+    gitignore = read(".gitignore")
+    stale_observations_path = f"config/{'observations'}.md"
+
+    assert stale_observations_path not in claude
+    if (ROOT / "knowledge/observations.md").exists():
+        assert "knowledge/observations.md" in claude
+    assert stale_observations_path not in gitignore
+
+
 def test_top_level_agents_use_knowledge_skills() -> None:
     top_level_agents = [
         "agents/scope-audit.md",
