@@ -2,7 +2,7 @@
 name: scope-audit
 description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs Python SCOPE runtime enumeration, chains attack-path reasoning, verification, defensive controls, post-processing, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
+tools: Read, Write, Bash, Grep, Glob
 color: blue
 context: fork
 agent: general-purpose
@@ -142,11 +142,11 @@ Stop. Do not continue.
 
 **Load SCP config:** Glob `config/scps/*.json`. Skip `_`-prefixed files. Load PolicyId → SCP object map. Tag each as `_source: "config"`.
 
-**Region discovery:** `scope audit` discovers enabled regions through `scope.core.regions.discover_regions()` when regional services are requested. If the operator supplies explicit regions, pass them with `--regions us-east-1,us-west-2`. If region discovery fails, stop and show the runtime error rather than guessing region coverage.
+**Region handling:** `scope audit` discovers enabled regions through `scope.core.regions.discover_regions()` during runtime dispatch when regional services are requested. If explicit regions were supplied, display those requested regions. Pass them with `--regions us-east-1,us-west-2`. If no explicit regions were supplied, display: `Region discovery will run during runtime dispatch.` If runtime region discovery fails, stop and show the runtime error rather than guessing region coverage.
 
-**Display Gate 1:** Identity confirmed — show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, enabled regions count (note if fallback). Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
+**Display Gate 1:** Identity confirmed - show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, requested regions when supplied, or the runtime-discovery message above. Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
 
-**Knowledge preflight:** Use `skills/scope-knowledge-load/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, target, services, and enabled regions before planning findings or dispatching downstream analysis. Use the returned `KNOWLEDGE_CONTEXT` to contextualize findings, public exposure, attack paths, and coverage gaps. Do not treat knowledge as ground truth; current audit evidence wins when it conflicts with stored knowledge. Cite knowledge entries that influence decisions.
+**Knowledge preflight:** Use `skills/scope-knowledge-load/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, target, services, and requested regions when supplied. If regions were not supplied, set the knowledge request region context to `runtime_discovery_pending`. Use the returned `KNOWLEDGE_CONTEXT` to contextualize findings, public exposure, attack paths, and coverage gaps. Do not treat knowledge as ground truth; current audit evidence wins when it conflicts with stored knowledge. Cite knowledge entries that influence decisions.
 </gate_1_credentials>
 
 <gate_2_batch_approval>
@@ -211,9 +211,14 @@ After all enumeration completes, display:
 
 Include any module validation warnings from the spot-check.
 
-Options: `continue` (dispatch attack-paths), `skip` (raw findings only), `stop` (end session with enumeration data).
+Options:
+- `continue` - dispatch public exposure and attack-path analysis.
+- `skip` - skip public exposure, attack analysis, attack validation, Gate 4, controls, and dashboard HTML generation. Write a raw-inventory `findings.md` from runtime artifacts, preserve `$RUN_DIR/results.json`, and verify Gate 3 skip mandatory artifacts.
+- `stop` - stop with runtime artifacts only and report `$RUN_DIR`.
 
-Regional failures are non-blocking — warn and continue. Wait for operator approval.
+On `skip`, write `$RUN_DIR/findings.md` with account ID, target, services enumerated, module statuses, coverage gaps, runtime findings or effective permissions available in `results.json`, a statement that the operator chose to omit attack analysis and controls, and a recommended next action to rerun `/scope:audit` and continue through attack analysis when ready. Preserve `$RUN_DIR/results.json`. Do not delete runtime dashboard export files that already exist.
+
+Regional failures are non-blocking - warn and continue. Wait for operator approval.
 </gate_3_enumeration_summary>
 
 <module_validation>
@@ -315,7 +320,7 @@ Wait for operator approval before proceeding.
 <findings_md>
 ## Findings Report
 
-After Gate 4 approval, write `$RUN_DIR/findings.md` — always generated, even with 0 findings.
+After Gate 4 approval, write `$RUN_DIR/findings.md` - always generated, even with 0 findings. If Gate 3 `skip` was selected, write the raw-inventory report described in `<gate_3_enumeration_summary>` instead and do not continue to Gate 4.
 
 **0-finding handling:** If attack_paths is empty and no findings across modules, generate a clean-run report: RISK SUMMARY with "low", services analyzed, modules with partial data, and recommended next action to review coverage gaps.
 
@@ -349,12 +354,13 @@ If all modules have `status === 'complete'` and no per-finding `<field>_status` 
 <results_export>
 ## Results JSON Export
 
-After findings.md is written (and Gate 4 was NOT skipped):
+The Python runtime performs dashboard public JSON export automatically when invoked with `--dashboard-export`.
 
-1. Copy `$RUN_DIR/results.json` to `dashboard/public/$RUN_ID.json`
-2. Upsert this run into `dashboard/public/index.json` (match on `run_id`, newest-first) with fields: run_id, date, source ("audit"), target, risk, status, file
+After findings.md is written (and Gate 4 was NOT skipped), verify:
+1. `dashboard/public/$RUN_ID.json` exists or a runtime warning explains why export failed.
+2. `dashboard/public/index.json` contains this run or a runtime warning explains why index update failed.
 
-The Python runtime performs this automatically when invoked with `--dashboard-export`. If the export is missing, rerun the runtime command with `--dashboard-export` or copy the run into `dashboard/public/` using the same index shape.
+Do not hand-build dashboard public JSON unless recovering from a runtime export failure and using the same index shape documented by `scope.runtime.post_processing.export_dashboard_results`.
 
 **Gate 4 skip exception:** If GATE4_SKIP=true, do not create or update dashboard export files after Gate 4. Keep any dashboard export files the Python runtime already wrote. `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required.
 </results_export>
@@ -403,7 +409,9 @@ If generation fails: log warning, continue — raw artifacts are still valid. An
 
 Every audit run MUST produce ALL of the following files. Check this list before reporting completion.
 
-**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Controls output and dashboard HTML generation are skipped. Dashboard export and dashboard index remain acceptable when the Python runtime already created them before Gate 4.
+**Gate 3 skip exception:** If the operator said `skip` at Gate 3, `$RUN_DIR/results.json`, `$RUN_DIR/findings.md`, and `$RUN_DIR/agent-log.jsonl` remain required. Public exposure, attack analysis, validation, controls, and dashboard HTML generation are skipped. Runtime dashboard export files remain acceptable when the Python runtime already created them before Gate 3.
+
+**Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Controls output and dashboard HTML generation are skipped. Runtime dashboard export files remain acceptable when the Python runtime already created them before Gate 4.
 
 | # | File | Location | Purpose |
 |---|------|----------|---------|
@@ -442,7 +450,7 @@ Log every subagent dispatch/return and every gate transition. Seed the log after
 | Network / connection error (DNS, timeout, HTTP 5xx, connection reset) | Do NOT retry. Log `[ERROR] [Module] — [command]: [full message]`, continue. |
 | Subagent STATUS: error | Log `[ERROR] {service} — {error}`, continue with remaining modules. |
 | Subagent STATUS: partial | Log `[PARTIAL] {service} — {error}`, continue. |
-| Subagent no output file | Log `[MISSING] {service}.json not written`, report at Gate 3. |
+| Runtime module artifact missing | Log `[MISSING] modules/<service>/<region>.json missing`, report at Gate 3. |
 | Attack analyze failure | Log, stop before candidate lint and surface the error. |
 | Candidate lint failure | Stop before validation and surface linter errors. |
 | Attack validation failure | Log, stop before validation lint and surface the error. |
@@ -455,7 +463,9 @@ Never swallow errors silently — operator must see every non-AccessDenied error
 <success_criteria>
 ## Success Criteria
 
-**Early stop:** If the operator says "stop" at any gate, the run is complete with partial output — only criteria up to that gate apply. Run is still indexed and existing artifacts are valid.
+**Early stop:** If the operator says `stop` at any gate, the run is complete with partial output - only criteria up to that gate apply. Existing artifacts remain valid.
+
+**Gate 3 skip:** If the operator says `skip` at Gate 3, the run succeeds when runtime artifacts exist, raw-inventory `findings.md` is written, `$RUN_DIR/results.json` is preserved, `$RUN_DIR/agent-log.jsonl` exists, and the omitted attack/controls/dashboard-HTML stages are reported.
 
 The `/scope:audit` orchestrator succeeds (full run) when ALL of the following are true:
 
