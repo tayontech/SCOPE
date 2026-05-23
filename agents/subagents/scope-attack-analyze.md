@@ -45,7 +45,14 @@ Analyze across the full inventory, not by service silo:
    - API/event trigger invocation paths
    - resource-policy external/public access paths
    - data access and decrypt paths
-7. Dispatch `scope-research` at most once with the top 3-5 permission combinations if research would materially improve candidate framing or real-world context. Research enriches analysis; it never gates output.
+7. Dispatch `scope-research` at most once if research would materially improve candidate framing or real-world context. Use this concrete handoff:
+   ```text
+   CALLER=attack-paths
+   SERVICE=[primary AWS service or service family]
+   PERMISSION_CONTEXT=[top 3-5 permission combinations, trust pattern, resource policy pattern, or service pivot]
+   ACCOUNT_CONTEXT=[bounded context only; ARNs/resource IDs stay session-scoped]
+   ```
+   Research enriches candidate framing only and never gates output.
 8. After writing `results.json`, run:
    ```bash
    uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage candidates

@@ -51,6 +51,11 @@ def test_attack_analyze_agent_contract() -> None:
         r"Update only attack-owned fields[\s\S]{0,220}- `attack_paths`",
         "attack_paths must not be analyze-owned",
     )
+    assert_matches(
+        prompt,
+        r"Dispatch `scope-research`[\s\S]{0,700}`?CALLER=attack-paths`?[\s\S]{0,700}`?SERVICE=[^`\n]+`?[\s\S]{0,700}`?PERMISSION_CONTEXT=[^`\n]+`?[\s\S]{0,700}`?ACCOUNT_CONTEXT=[^`\n]+`?[\s\S]{0,700}(enriches|enrich)[\s\S]{0,160}(never gates|does not gate)",
+        "scope-research dispatch must include supported attack-paths caller handoff fields and stay non-gating",
+    )
 
     assert "skills/scope-attack-path-analysis/SKILL.md" in prompt
     assert "skills/scope-evidence-logging/SKILL.md" in prompt
