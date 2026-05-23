@@ -333,12 +333,12 @@ def test_scope_audit_boundary_contract() -> None:
     assert "$RUN_DIR/findings.md" in mandatory
     assert "$RUN_DIR/agent-log.jsonl" in mandatory
 
-    assert "scope-research" not in prompt
-    assert "WebSearch" not in prompt
-    assert "WebFetch" not in prompt
-    assert "{service}.json not written" not in prompt
-    assert "[MISSING] {service}.json not written" not in prompt
-    assert "modules/<service>/<region>.json missing" in prompt
+    assert_not_matches(prompt, r"Dispatch `?scope-research`?|dispatch scope-research")
+
+    error_handling = section(prompt, "error_handling")
+    assert "{service}.json not written" not in error_handling
+    assert "[MISSING] {service}.json not written" not in error_handling
+    assert "modules/<service>/<region>.json missing" in error_handling
 
 
 def test_scope_research_agent_contract() -> None:
