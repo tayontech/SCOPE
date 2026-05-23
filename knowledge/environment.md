@@ -1,25 +1,23 @@
 # Environment Knowledge
 
-## Accounts
+Stable operator-supplied environment context only. Runtime discovery supplies telemetry and collection details.
 
-<!-- Account IDs, aliases, ownership, and business context. -->
+## Organization And Accounts
 
-## Identity Providers
+<!-- High-level org/account structure, aliases, ownership, and business context approved for durable use. -->
 
-<!-- Okta, IAM Identity Center, SAML/OIDC providers, break-glass access, privileged groups. -->
+## Identity And Access Model
 
-## Logging And SIEM
-
-<!-- Splunk indexes, sourcetypes, retention, field naming, known blind spots. -->
-
-## Cloud Data Sources
-
-<!-- CloudTrail management/data events, GuardDuty, VPC Flow Logs, Route53, EDR, DNS, proxy, VCS, identity logs. -->
+<!-- IAM Identity Center, SAML/OIDC providers, break-glass access, privileged groups, role assumption model, and access governance. -->
 
 ## Known Constraints
 
-<!-- Access limitations, accounts out of scope, approved exceptions, retention limits. -->
+<!-- Access limitations, accounts or regions out of scope, legal or operational constraints, and required operator gates. -->
+
+## Approved Exceptions
+
+<!-- Approved risk acceptances, known public services, expected external relationships, and approved non-standard patterns. -->
 
 ## Review Cadence
 
-<!-- When this environment knowledge was last reviewed and by whom. -->
+<!-- Last review date, reviewer role, and next review cadence. -->

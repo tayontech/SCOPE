@@ -52,7 +52,7 @@ If results.json has no `attack_paths` array or it is empty, write a placeholder 
 
 Before designing detections, read environment context that can reduce noise:
 
-- `config/observations.md` if present — known automation, known-good trusts, deployed controls, previous false-positive notes, prior hunt/investigation findings
+- `knowledge/observations.md` if present — known automation, known-good trusts, deployed controls, previous false-positive notes, prior hunt/investigation findings
 - prior controls outputs under the current audit run if present — existing detections and tuning notes
 - audit module data for IAM, S3, KMS, Secrets Manager, Lambda, EC2, and any service in SERVICES_COMPLETED — sensitive resources, privileged principals, trust relationships, external accounts, and normal role targets
 - `config/index.json` — real index groups and data sources
@@ -247,7 +247,7 @@ Format each detection object to match the controls schema's `detections[]` forma
     "covered_hops": ["hop-1", "hop-2"],
     "promotion_decision": "alert",
     "fidelity_rationale": "Sequence requires policy version activation against a policy named in the validated attack path.",
-    "noise_controls": ["scope to policy ARNs from affected_resources", "exclude approved IAM deployment role from config/observations.md if present"],
+    "noise_controls": ["scope to policy ARNs from affected_resources", "exclude approved IAM deployment role from knowledge/observations.md if present"],
     "expected_volume": "low",
     "validation_status": "not_validated",
     "coverage_caveats": [],

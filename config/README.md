@@ -12,12 +12,12 @@ This directory contains runtime contracts, installer templates, safety hooks, se
 - `project-docs/LLM-CONTEXT.md`: current reviewer and implementation-agent orientation.
 - `splunk-patterns.md`: SPL generation and linting guidance.
 - `models.json`: installer model routing source.
-- `accounts.example.json`, `index.example.json`, `observations.example.md`: operator templates for local configuration.
+- `accounts.example.json`, `index.example.json`: operator templates for local configuration.
 - `mcp-setup.md`: SIEM MCP setup guidance.
 
 ## Durable Knowledge
 
-Curated reasoning notes, baselines, observables, coverage gaps, research notes, and investigation lessons belong in `knowledge/`. Agents load that context through `skills/scope-knowledge-load/SKILL.md`.
+Curated reasoning notes, durable observations, coverage gaps, and stable environment context belong in `knowledge/`. Agents load that context through `skills/scope-knowledge-load/SKILL.md`.
 
 ## Historical Project Docs
 

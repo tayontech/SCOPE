@@ -375,7 +375,7 @@ VALIDATION_WARNS=${VALIDATION_WARNS:-0}
 ```
 </wave2_validate>
 
-**Knowledge update:** Before finishing, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-controls`, `ACCOUNT_ID`, `AUDIT_RUN_DIR`, `CONTROLS_RUN_DIR`, validation outcome, deployed controls, remediation blockers, detection effectiveness, and coverage gaps. The skill owns `config/observations.md` creation, deployed-control routing, dedupe, date stamping, and durable knowledge writes.
+**Knowledge update:** Before finishing, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-controls`, `ACCOUNT_ID`, `AUDIT_RUN_DIR`, `CONTROLS_RUN_DIR`, validation outcome, deployed controls, remediation blockers, detection effectiveness, and coverage gaps. The skill owns `knowledge/observations.md`, `knowledge/coverage-gaps.md`, deployed-control routing, dedupe, date stamping, and durable knowledge writes.
 
 <results_assembly>
 ## Results.JSON Assembly

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -28,12 +27,11 @@ def test_knowledge_skills_define_load_and_update_contracts() -> None:
     for text in [
         "KNOWLEDGE_CONTEXT",
         "knowledge/environment.md",
-        "knowledge/observables.jsonl",
-        "knowledge/baselines.json",
+        "knowledge/observations.md",
         "knowledge/coverage-gaps.md",
         "knowledge/exploit-reasoning-notes.md",
         "knowledge/hunt-reasoning-notes.md",
-        "config/observations.md",
+        "config/splunk-patterns.md",
         "Treat knowledge as context, not ground truth.",
         "Cite which knowledge entries influenced decisions.",
         "Do not use a knowledge entry as the only evidence",
@@ -44,12 +42,12 @@ def test_knowledge_skills_define_load_and_update_contracts() -> None:
         "KNOWLEDGE_UPDATE",
         "Subagents may propose `knowledge_updates[]`",
         "only the top-level orchestrator applies updates",
-        "config/observations.md",
-        "knowledge/observables.jsonl",
-        "knowledge/baselines.json",
+        "knowledge/environment.md",
+        "knowledge/observations.md",
         "knowledge/coverage-gaps.md",
-        "knowledge/investigations/INV-*.md",
-        "knowledge/research/R-*.md",
+        "knowledge/exploit-reasoning-notes.md",
+        "knowledge/hunt-reasoning-notes.md",
+        "no persistent investigation or research records",
         "Do not write secrets",
         "Every update must cite evidence",
     ]:
@@ -70,9 +68,9 @@ def test_knowledge_skills_define_load_and_update_contracts() -> None:
 def test_knowledge_skills_do_not_persist_resource_identifiers() -> None:
     load = read("skills/scope-knowledge-load/SKILL.md")
     update = read("skills/scope-knowledge-update/SKILL.md")
-    observables_template = read("knowledge/observables.example.jsonl")
-    baselines_template = read("knowledge/baselines.json")
+    observations_template = read("knowledge/observations.md")
     coverage_template = read("knowledge/coverage-gaps.md")
+    environment_template = read("knowledge/environment.md")
 
     assert "Do not write ARNs, account IDs, bucket names, role names, key IDs, or access key IDs" in update
     assert "Before writing, scan candidate entries for exact identifier patterns" in update
@@ -82,16 +80,21 @@ def test_knowledge_skills_do_not_persist_resource_identifiers() -> None:
         "Known-normal AssumeRole chains",
         "external_account",
         "bucket|secret",
+        f"knowledge/{'observables'}.jsonl",
+        f"knowledge/{'baselines'}.json",
+        f"config/{'observations'}.md",
     ]:
         assert forbidden not in update
 
     assert "Resource identifiers are session-scoped" in load
-    assert "type: principal|role|ip|user_agent|event_name|bucket|secret|external_account" not in load
-    assert "principal|role|ip|user_agent|event_name|bucket|secret|external_account" not in observables_template
-    assert "behavior_classes" in baselines_template
-    assert "principals" not in baselines_template
-    assert "role_chains" not in baselines_template
-    assert "source_ips" not in baselines_template
+    assert "SIEM indexes" not in environment_template
+    assert "sourcetypes" not in environment_template
+    assert "retention" not in environment_template
+    assert "data-source inventory" not in environment_template
+    assert "False Positives" in observations_template
+    assert "Known-Good Patterns" in observations_template
+    assert "Deployed Controls" in observations_template
+    assert "AWS audit, enumeration, and authorization gaps" in coverage_template
     assert "[account/source]" not in coverage_template
 
 
@@ -99,18 +102,23 @@ def test_knowledge_directory_templates_exist() -> None:
     expected_files = [
         "knowledge/README.md",
         "knowledge/environment.md",
-        "knowledge/observables.example.jsonl",
-        "knowledge/baselines.json",
+        "knowledge/observations.md",
         "knowledge/coverage-gaps.md",
         "knowledge/exploit-reasoning-notes.md",
         "knowledge/hunt-reasoning-notes.md",
-        "knowledge/investigations/README.md",
-        "knowledge/research/README.md",
     ]
     for path in expected_files:
         assert (ROOT / path).exists(), f"{path} should exist"
 
-    json.loads(read("knowledge/baselines.json"))
+    removed_paths = [
+        f"knowledge/{'baselines'}.json",
+        f"knowledge/{'observables'}.example.jsonl",
+        f"knowledge/{'investigations'}",
+        f"knowledge/{'research'}",
+        f"config/{'observations'}.example.md",
+    ]
+    for path in removed_paths:
+        assert not (ROOT / path).exists(), f"{path} should not exist"
 
     readme = read("knowledge/README.md")
     assert "context, not ground truth" in readme

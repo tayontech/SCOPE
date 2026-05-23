@@ -6,12 +6,13 @@ Knowledge is context, not ground truth. Agents must verify stored knowledge agai
 
 ## Files
 
-- `environment.md`: SIEM, cloud, identity, account, and data-source context.
-- `observables.jsonl`: generalized indicators and TTP patterns observed during investigations, audits, controls, and exploit runs.
-- `baselines.json`: known-normal behavior classes and expected relationship patterns.
-- `coverage-gaps.md`: telemetry, index, field, and AWS collection gaps.
-- `investigations/`: completed investigation records.
-- `research/`: threat-intel and news research records.
+- `environment.md`: stable operator-supplied environment context only: high-level org/accounts, identity/access model, known constraints, approved exceptions, and review cadence.
+- `observations.md`: durable lessons, baselines, false positives, known-good patterns, deployed controls, automation notes, and org-wide patterns.
+- `coverage-gaps.md`: telemetry gaps plus AWS audit, enumeration, and authorization gaps such as access denied, uncovered accounts/regions/services, missing permissions, no data-event coverage, or unavailable MCP/SIEM access.
+- `exploit-reasoning-notes.md`: curated expert reasoning notes for exploit analysis.
+- `hunt-reasoning-notes.md`: curated expert reasoning notes for investigations and hunts.
+
+Do not store SIEM indexes, sourcetypes, retention, or data-source inventories in durable knowledge. MCP/server discovery and agent learning provide that context over time.
 
 ## Ownership
 

@@ -351,7 +351,7 @@ If all modules have `status === 'complete'` and no per-finding `<field>_status` 
 **Rules:** Use REAL ARNs and resource names throughout — never placeholders. End with RECOMMENDED NEXT ACTION referencing controls artifacts and available follow-up commands (`/scope:exploit`, `/scope:audit`, dashboard link).
 </findings_md>
 
-**Knowledge update:** Before finishing, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, `RUN_DIR`, findings, coverage gaps, and evidence-backed learning candidates. Focus on naming conventions, role structure patterns, service usage patterns, severity trends vs prior knowledge, public exposure patterns, and new finding categories. The skill owns `config/observations.md` creation, dedupe, section routing, date stamping, org-wide promotion, and durable knowledge writes.
+**Knowledge update:** Before finishing, use `skills/scope-knowledge-update/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, `RUN_DIR`, findings, coverage gaps, and evidence-backed learning candidates. Focus on naming conventions, role structure patterns, service usage patterns, severity trends vs prior knowledge, public exposure patterns, new finding categories, and AWS audit/enumeration/authorization gaps. The skill owns `knowledge/observations.md`, `knowledge/coverage-gaps.md`, dedupe, section routing, date stamping, org-wide promotion, and durable knowledge writes.
 
 <results_export>
 ## Results JSON Export

@@ -26,7 +26,7 @@ Required runtime artifacts:
 - `$RUN_DIR/modules/<service>/<region>.json`
 
 Optional context:
-- `config/observations.md` for known public services, approved external accounts, and known-good entrypoints
+- `knowledge/observations.md` for known public services, approved external accounts, and known-good entrypoints
 
 If `results.json`, `graph.json`, or `resources.jsonl` is missing, return `STATUS: error`. If a module file is missing or has `status: "error"`, continue with available data and represent the gap in `evidence[]` or `seed_reason`.
 </input_contract>

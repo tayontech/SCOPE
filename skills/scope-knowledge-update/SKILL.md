@@ -1,6 +1,6 @@
 ---
 name: scope-knowledge-update
-description: Use after SCOPE evidence review, final disposition, or operator-approved save to update durable environment knowledge, observations, observables, baselines, and coverage gaps.
+description: Use after SCOPE evidence review, final disposition, or operator-approved save to update durable environment knowledge, observations, coverage gaps, or proposed reasoning-note improvements.
 ---
 
 # SCOPE Knowledge Update
@@ -21,14 +21,15 @@ The caller provides:
 
 ## Files To Update
 
-Create files from the templates in `knowledge/` when missing. For `config/observations.md`, use `config/observations.example.md` when present.
+Create Markdown files from the templates in `knowledge/` when missing.
 
-- `config/observations.md`: concise human-readable operational notes
-- `knowledge/observables.jsonl`: structured indicator or TTP patterns with resource identifiers removed or generalized
-- `knowledge/baselines.json`: known-normal behavioral patterns with resource identifiers removed or generalized
-- `knowledge/coverage-gaps.md`: missing indexes, fields, logs, denied AWS coverage, and blind spots
-- `knowledge/investigations/INV-*.md`: saved investigation records
-- `knowledge/research/R-*.md`: saved threat-intel or news research records
+- `knowledge/environment.md`: operator-supplied stable environment facts only
+- `knowledge/observations.md`: durable lessons, baselines, false positives, known-good patterns, automation notes, deployed-control notes, and org-wide patterns
+- `knowledge/coverage-gaps.md`: telemetry gaps and AWS audit, enumeration, or authorization gaps
+- `knowledge/exploit-reasoning-notes.md`: operator-reviewed expert reasoning note improvements for exploit analysis
+- `knowledge/hunt-reasoning-notes.md`: operator-reviewed expert reasoning note improvements for investigations and hunts
+
+There are no persistent investigation or research records under durable knowledge. Keep run-specific investigation and research artifacts under the run directory only.
 
 ## Update Status Values
 
@@ -60,12 +61,11 @@ Every durable update must use one of:
 
 Route updates by type:
 
-- Normal automation classes, false positives, detection tuning notes -> `config/observations.md`
-- Generalized IOCs, user-agent families, event-name patterns, TTPs -> `knowledge/observables.jsonl`
-- Expected event volume, service-account behavior classes, approved automation patterns -> `knowledge/baselines.json`
-- Missing indexes, missing fields, logging disabled, AWS access denied, no data-event coverage -> `knowledge/coverage-gaps.md`
-- Completed investigations -> `knowledge/investigations/INV-*.md`
-- Threat intel/news article research -> `knowledge/research/R-*.md`
+- Operator-supplied stable environment facts -> `knowledge/environment.md`
+- Durable lessons, baselines, false positives, known-good patterns, automation, deployed-control notes, and org-wide patterns -> `knowledge/observations.md`
+- Telemetry gaps and AWS audit, enumeration, or authorization gaps -> `knowledge/coverage-gaps.md`
+- Expert reasoning note improvements -> propose operator-reviewed edits to `knowledge/exploit-reasoning-notes.md` or `knowledge/hunt-reasoning-notes.md`
+- Completed investigations and threat-intel research -> do not persist as knowledge records; keep artifacts in the run directory
 
 ## Required Output
 

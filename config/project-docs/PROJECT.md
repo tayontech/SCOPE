@@ -40,7 +40,7 @@ SCOPE is an AI agent suite for AWS purple team security operations. Agents handl
 
 ## Environmental Learning
 
-Use `skills/scope-knowledge-load/SKILL.md` at session start when running SCOPE workflows. It loads environment knowledge from `knowledge/` and `config/observations.md` into bounded context.
+Use `skills/scope-knowledge-load/SKILL.md` at session start when running SCOPE workflows. It loads environment knowledge, durable observations, coverage gaps, and reasoning notes from `knowledge/` into bounded context.
 
 During a run:
 - Note account-specific patterns (naming conventions, role structure, tagging, service usage)
