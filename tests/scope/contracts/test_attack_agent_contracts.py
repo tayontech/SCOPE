@@ -302,6 +302,78 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert_not_matches(prompt, r"single fresh-context subagent")
 
 
+def test_scope_research_agent_contract() -> None:
+    prompt = read("agents/subagents/scope-research.md")
+
+    assert_matches(prompt, r"^name: scope-research$", "frontmatter name missing")
+    assert "RESEARCH_RESULT" in prompt
+    assert "`CALLER`: which parent agent dispatched you - `attack-paths` or `exploit`" in prompt
+    assert "Dispatched by attack-paths and exploit." in prompt
+
+    assert_not_matches(prompt, r"CALLER=investigate")
+    assert_not_matches(prompt, r"attack-paths \| exploit \| investigate")
+    assert_not_matches(prompt, r"attack-paths`, `exploit`, or `investigate")
+    assert_not_matches(prompt, r"detection perspective")
+    assert_not_matches(prompt, r"CloudTrail events it generates")
+    assert_not_matches(prompt, r"patterns to hunt for")
+    assert_not_matches(prompt, r"Defensive indicators")
+
+    for text in [
+        "Write files to disk",
+        "Write to MEMORY.md or any memory file",
+        "Execute AWS CLI commands or interact with AWS APIs",
+        "Run investigations, Splunk queries, or CloudTrail analysis",
+        "Perform detection engineering or remediation design",
+        "Make decisions about attack paths or exploit strategies",
+    ]:
+        assert text in prompt
+
+    output_contract = section(prompt, "output_contract")
+    assert "### When CALLER=attack-paths" in output_contract
+    assert "### When CALLER=exploit" in output_contract
+    assert "### When CALLER=investigate" not in output_contract
+    assert_matches(output_contract, r"When CALLER=attack-paths[\s\S]*`cli_examples`: null")
+    assert_matches(output_contract, r"When CALLER=attack-paths[\s\S]*Do not include CLI commands")
+    assert_matches(output_contract, r"When CALLER=attack-paths[\s\S]*Do not include detection guidance")
+    assert_matches(output_contract, r"When CALLER=attack-paths[\s\S]*Do not include remediation recommendations")
+    assert_matches(output_contract, r"When CALLER=exploit[\s\S]*source-backed AWS CLI commands")
+
+    error_handling = section(prompt, "error_handling")
+    for text in [
+        "Research failure must not block parent workflows.",
+        "If WebSearch fails",
+        "sources_found: 0",
+        "If WebFetch fails",
+        "If an MCP tool call fails",
+        "retry once",
+    ]:
+        assert text in error_handling
+
+    handoff = section(prompt, "handoff_return")
+    assert "caller:             [CALLER value - attack-paths | exploit]" in handoff
+    assert "When CALLER=attack-paths: null" in handoff
+    assert "When CALLER=exploit: list of source-backed AWS CLI commands or []" in handoff
+
+
+def test_scope_research_docs_do_not_claim_investigation_or_synthesis_support() -> None:
+    readme = read("README.md")
+    architecture = read("ARCHITECTURE.md")
+    installer = read("bin/install.js")
+
+    assert "scope-research` - shared external technique research for attack analysis and exploit playbooks" in readme
+    assert "dispatches `scope-attack-analyze`, optionally enriches candidates through `scope-research`, then chains controls" in readme
+
+    assert "| **scope-research** | Dispatched by attack-paths and exploit |" in architecture
+    assert "scope-research may enrich attack candidates with bounded external technique context" in architecture
+    assert "2. Dispatch scope-research" in architecture
+
+    for text in [readme, architecture, installer]:
+        assert "research, synthesis" not in text
+        assert "research, and synthesis" not in text
+        assert "scope-research` - real-world technique research integration" not in text
+        assert "Dispatched by attack-paths, exploit, and investigate" not in text
+
+
 def test_public_exposure_analysis_agent_contract() -> None:
     prompt = read("agents/subagents/scope-public-exposure-analysis.md")
 
