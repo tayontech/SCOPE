@@ -227,7 +227,7 @@ Verify replacement policy JSON is syntactically valid. Check filenames correspon
 
 **Consistency check:**
 
-- Verify that roles referenced in replacements map to real role ARNs. If `$AUDIT_RUN_DIR/modules/iam/global.json` exists (or legacy `$AUDIT_RUN_DIR/iam.json` exists), check that role names in replacement filenames (`iam-replacement-{role-name}.json`) correspond to roles present in that IAM module data.
+- Verify that roles referenced in replacements map to real role ARNs. If `$AUDIT_RUN_DIR/modules/iam/global.json` exists, check that role names in replacement filenames (`iam-replacement-{role-name}.json`) correspond to roles present in that IAM module data.
 - WARN if a replacement references a role not found in the IAM module data.
 </review_policy_replacements>
 

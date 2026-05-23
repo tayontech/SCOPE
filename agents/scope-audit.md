@@ -480,7 +480,7 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 3. **Target parsed and routed** — Input correctly identified (ARN, service name, `--all`, `@targets.txt`) and service list resolved. Service list passed to `scope audit`.
 4. **Python runtime dispatched** — `scope audit` ran the approved scope. All modules ran (or were operator-skipped) and per-module JSONs were written under `modules/`.
 5. **Attack pipeline completed** — scope-attack-analyze dispatched with RUN_DIR, ACCOUNT_ID, OWNED_ACCOUNTS; candidate linter passed; scope-attack-validate dispatched with RUN_DIR and ACCOUNT_ID; validation linter passed.
-6. **Verification ran inline after attack validation** — domain-core and domain-aws sections of scope-verify.md applied. Only Guaranteed and Conditional claims in output.
+6. **Verification ran inline after attack validation** — domain-core and domain-aws sections of scope-verify.md applied. Final `attack_paths[]` entries use `validation_status` values `validated` or `conditional`; rejected candidates stay out of final `attack_paths[]`.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory under `./runs/` or explicit `--run-dir` created, all artifacts written there, run metadata recorded in `manifest.json` and `summary.json`.
 9. **Controls handled** — scope-controls dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When controls succeeds, it creates `$RUN_DIR/controls/controls-{timestamp}/` and returns CONTROLS_RUN_DIR in its summary. Controls failure is logged and remains non-blocking.

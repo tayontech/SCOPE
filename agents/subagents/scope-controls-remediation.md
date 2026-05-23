@@ -22,7 +22,7 @@ Use final `attack_paths[]` as the only attack-path source of truth. Do not gener
 
 ## CRITICAL: Data Source Constraint
 
-This subagent reads ONLY from `AUDIT_RUN_DIR/results.json` and module files under `AUDIT_RUN_DIR/modules/{service}/` (or legacy `AUDIT_RUN_DIR/{service}.json` files).
+This subagent reads ONLY from `AUDIT_RUN_DIR/results.json` and runtime module files at `AUDIT_RUN_DIR/modules/<service>/<region>.json`.
 
 **Do NOT read from CONTROLS_RUN_DIR** — all four Wave 1 controls subagents run in parallel. `guardrails.md`, `detections.md`, and `policy-replacements.md` may not exist yet when this subagent starts. The attack paths in results.json already contain remediation hints and affected resources — that is sufficient input.
 

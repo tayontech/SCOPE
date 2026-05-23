@@ -26,9 +26,6 @@ Before doing anything, verify all required inputs exist.
 
 ```bash
 IAM_MODULE="$AUDIT_RUN_DIR/modules/iam/global.json"
-if [ ! -f "$IAM_MODULE" ] && [ -f "$AUDIT_RUN_DIR/iam.json" ]; then
-  IAM_MODULE="$AUDIT_RUN_DIR/iam.json"
-fi
 
 if [ ! -f "$IAM_MODULE" ]; then
   echo "STATUS: error"
@@ -49,7 +46,7 @@ mkdir -p "$CONTROLS_RUN_DIR/replacements"
 
 **Primary data source: `$AUDIT_RUN_DIR/modules/iam/global.json`**
 
-Read `$AUDIT_RUN_DIR/modules/iam/global.json` (or legacy `$AUDIT_RUN_DIR/iam.json` if present) and extract per-role data:
+Read `$AUDIT_RUN_DIR/modules/iam/global.json` and extract per-role data:
 - Role policy documents (trust policy + inline policies + attached managed policies)
 - `RoleLastUsed` timestamp per role — used for staleness reasoning
 - `last_activity` per permission or principal — used for staleness reasoning

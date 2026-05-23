@@ -39,7 +39,7 @@ Read `$AUDIT_RUN_DIR/results.json` and extract:
 
 **Step 2: Read per-module JSON files**
 
-For each service in SERVICES_COMPLETED, read `$AUDIT_RUN_DIR/modules/{service}/*.json` (or legacy `$AUDIT_RUN_DIR/{service}.json` if present):
+For each service in SERVICES_COMPLETED, read runtime module artifacts at `$AUDIT_RUN_DIR/modules/<service>/<region>.json`:
 - modules/iam/global.json — roles, users, policies, trust policies, permission boundaries
 - modules/ec2/*.json — instance profiles, IMDSv2 status, public exposure
 - modules/s3/global.json — bucket public access settings, bucket policies

@@ -466,6 +466,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     prompts = {
         path: read(path)
         for path in [
+            "agents/scope-audit.md",
             "agents/scope-controls.md",
             "agents/subagents/scope-controls-detections.md",
             "agents/subagents/scope-controls-remediation.md",
@@ -485,6 +486,13 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         else:
             assert_not_matches(body, r"confidence percentages")
         assert_not_matches(body, r"conditional (?:paths? )?(?:is|are) low priority|low priority conditional")
+
+    audit = prompts["agents/scope-audit.md"]
+    success_criteria = section(audit, "success_criteria")
+    assert "validation_status" in success_criteria
+    assert_matches(success_criteria, r"validation_status[\s\S]{0,120}validated[\s\S]{0,80}conditional")
+    assert_matches(success_criteria, r"rejected candidates[\s\S]{0,120}(stay out|must not appear)[\s\S]{0,120}attack_paths\[\]")
+    assert_not_matches(success_criteria, r"Guaranteed and Conditional claims")
 
     for path in [
         "agents/scope-controls.md",
