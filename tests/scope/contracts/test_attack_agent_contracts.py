@@ -176,7 +176,7 @@ def test_attack_verify_and_exploit_contract_regressions() -> None:
 def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_catalogue() -> None:
     exploit = read("agents/scope-exploit.md")
 
-    assert "config/exploit-reasoning-notes.md" in exploit
+    assert "knowledge/exploit-reasoning-notes.md" in exploit
     assert_matches(
         exploit,
         r"exploit-reasoning-notes\.md[\s\S]{0,260}(optional|warn and continue|continue)",
@@ -203,7 +203,7 @@ def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_ca
 def test_scope_investigate_uses_curated_hunt_notes() -> None:
     investigate = read("agents/scope-investigate.md")
 
-    assert "config/hunt-reasoning-notes.md" in investigate
+    assert "knowledge/hunt-reasoning-notes.md" in investigate
     assert_matches(
         investigate,
         r"hunt-reasoning-notes\.md[\s\S]{0,260}(optional|warn and continue|continue)",

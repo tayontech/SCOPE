@@ -24,7 +24,7 @@ def assert_note_file(path: str, required_phrases: list[str]) -> None:
 
 def test_exploit_reasoning_notes_are_curated_expert_context() -> None:
     assert_note_file(
-        "config/exploit-reasoning-notes.md",
+        "knowledge/exploit-reasoning-notes.md",
         [
             "## PassRole Requires Execution Control",
             "## Data Events Change Post-Exploitation Confidence",
@@ -36,7 +36,7 @@ def test_exploit_reasoning_notes_are_curated_expert_context() -> None:
 
 def test_hunt_reasoning_notes_are_curated_expert_context() -> None:
     assert_note_file(
-        "config/hunt-reasoning-notes.md",
+        "knowledge/hunt-reasoning-notes.md",
         [
             "## Resolve The Actual Actor Before Query Expansion",
             "## Absence Of Data Events Does Not Refute Activity",

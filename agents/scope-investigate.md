@@ -211,12 +211,12 @@ The `iocs.ips` and `iocs.arns` fields (intel mode only) are used by the investig
 Load optional expert context before selecting investigation steps:
 
 ```bash
-if [ -f config/hunt-reasoning-notes.md ]; then
-  HUNT_REASONING_NOTES=$(cat config/hunt-reasoning-notes.md)
-  echo "Hunt reasoning notes loaded: config/hunt-reasoning-notes.md optional expert context"
+if [ -f knowledge/hunt-reasoning-notes.md ]; then
+  HUNT_REASONING_NOTES=$(cat knowledge/hunt-reasoning-notes.md)
+  echo "Hunt reasoning notes loaded: knowledge/hunt-reasoning-notes.md optional expert context"
 else
   HUNT_REASONING_NOTES=""
-  echo "config/hunt-reasoning-notes.md not found - continuing without curated expert notes"
+  echo "knowledge/hunt-reasoning-notes.md not found - continuing without curated expert notes"
 fi
 ```
 

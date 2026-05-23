@@ -31,6 +31,8 @@ def test_knowledge_skills_define_load_and_update_contracts() -> None:
         "knowledge/observables.jsonl",
         "knowledge/baselines.json",
         "knowledge/coverage-gaps.md",
+        "knowledge/exploit-reasoning-notes.md",
+        "knowledge/hunt-reasoning-notes.md",
         "config/observations.md",
         "Treat knowledge as context, not ground truth.",
         "Cite which knowledge entries influenced decisions.",
@@ -100,6 +102,8 @@ def test_knowledge_directory_templates_exist() -> None:
         "knowledge/observables.example.jsonl",
         "knowledge/baselines.json",
         "knowledge/coverage-gaps.md",
+        "knowledge/exploit-reasoning-notes.md",
+        "knowledge/hunt-reasoning-notes.md",
         "knowledge/investigations/README.md",
         "knowledge/research/README.md",
     ]

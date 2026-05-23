@@ -1,6 +1,6 @@
 # SCOPE Config Directory
 
-This directory contains runtime reference data, installer templates, safety hooks, schemas, and project documentation sources.
+This directory contains runtime contracts, installer templates, safety hooks, settings, schemas, and project documentation sources. Durable learned and expert context lives in `knowledge/`.
 
 ## Keep
 
@@ -10,12 +10,14 @@ This directory contains runtime reference data, installer templates, safety hook
 - `scps/`: optional organization SCP context read by audit, controls policy, and verification flows.
 - `project-docs/PROJECT.md`: source for generated `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`.
 - `project-docs/LLM-CONTEXT.md`: current reviewer and implementation-agent orientation.
-- `exploit-reasoning-notes.md`: curated expert notes for complex exploit reasoning.
-- `hunt-reasoning-notes.md`: curated expert notes for complex hunt reasoning.
 - `splunk-patterns.md`: SPL generation and linting guidance.
 - `models.json`: installer model routing source.
 - `accounts.example.json`, `index.example.json`, `observations.example.md`: operator templates for local configuration.
 - `mcp-setup.md`: SIEM MCP setup guidance.
+
+## Durable Knowledge
+
+Curated reasoning notes, baselines, observables, coverage gaps, research notes, and investigation lessons belong in `knowledge/`. Agents load that context through `skills/scope-knowledge-load/SKILL.md`.
 
 ## Historical Project Docs
 

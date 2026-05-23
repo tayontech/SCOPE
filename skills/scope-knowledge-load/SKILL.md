@@ -25,12 +25,13 @@ Read these files when present. Missing files are normal on first use.
 - `knowledge/observables.jsonl`
 - `knowledge/baselines.json`
 - `knowledge/coverage-gaps.md`
+- `knowledge/exploit-reasoning-notes.md`
+- `knowledge/hunt-reasoning-notes.md`
 - `knowledge/investigations/*.md`
 - `knowledge/research/*.md`
 - `config/observations.md`
 - `config/index.json`
 - `config/splunk-patterns.md`
-- `config/hunt-reasoning-notes.md`
 
 ## Selection Rules
 
