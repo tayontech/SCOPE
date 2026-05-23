@@ -108,7 +108,7 @@ WebSearch always runs as the primary research tool. MCP tools are used alongside
 - Vulnerability databases: Check for CVEs or advisories related to the AWS service or specific feature being researched
 - OSINT tools: Supplement WebSearch with structured data when available
 
-**Error handling:** If an MCP tool call fails (tool exists but query errors), retry once. If the retry also fails, continue with WebSearch results only. MCP failures are non-blocking — log the failure visibly but do not let it stop the research.
+**Error handling:** If an MCP tool call fails (tool exists but query errors), retry once. If the retry also fails, continue with WebSearch results only. MCP failures are non-blocking. Record the failure inside `abuse_narrative` or the relevant `source_urls[].relevance` field so the final output remains parseable.
 
 **Source tagging:** In the RESEARCH_RESULT output, each piece of information notes its source — either the WebSearch URL it came from or the MCP tool name that provided it. The parent knows provenance of every claim. The `mcp_tools_used` field lists all MCP tools that were successfully used during research.
 </mcp_discovery>
@@ -118,7 +118,16 @@ WebSearch always runs as the primary research tool. MCP tools are used alongside
 
 Read the CALLER field from the dispatch message to determine output depth. Supported callers are `attack-paths` and `exploit`.
 
-If CALLER has any other value, return a `RESEARCH_RESULT` with `sources_found: 0`, `source_urls: []`, `cli_examples: null`, and an `abuse_narrative` that states the caller is unsupported. Do not perform research for unsupported callers.
+If CALLER has any other value, do not perform research. Return a full parseable `RESEARCH_RESULT` with:
+- `caller`: raw CALLER value
+- `service`: SERVICE value
+- `permission_context`: PERMISSION_CONTEXT value
+- `technique_summary`: Unsupported caller
+- `abuse_narrative`: Concise statement that the caller is unsupported and research did not run
+- `source_urls`: []
+- `cli_examples`: null
+- `sources_found`: 0
+- `mcp_tools_used`: []
 
 ### When CALLER=attack-paths
 
@@ -146,6 +155,8 @@ Full depth output. Include:
 <synthesis>
 ## Synthesis Rules — Never Return Empty
 
+These synthesis rules apply only after a supported caller passes validation.
+
 Always synthesize something. Even if no specific public technique documentation exists for the exact permission/service combination, produce useful context for the parent.
 
 **Quality hierarchy (best to worst):**
@@ -171,7 +182,7 @@ The `technique_summary` field must always have content. The `sources_found` coun
 
 Research failure must not block parent workflows.
 
-- If WebSearch fails, return a `RESEARCH_RESULT` with `sources_found: 0`, `source_urls: []`, no CLI examples, and a concise failure note inside `abuse_narrative`.
+- If WebSearch fails, return a `RESEARCH_RESULT` with `technique_summary: Research failed`, `sources_found: 0`, `source_urls: []`, caller-specific `cli_examples` (`[]` for `exploit`, `null` for `attack-paths`), `mcp_tools_used: []`, and a concise failure note inside `abuse_narrative`.
 - If WebFetch fails for one source, skip that URL and continue with remaining sources.
 - If an MCP tool call fails, retry once. If the retry fails, continue with WebSearch results only.
 - If no exact public technique exists, synthesize from related techniques or AWS service behavior and label the gap.
