@@ -307,6 +307,40 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert_not_matches(prompt, r"single fresh-context subagent")
 
 
+def test_scope_audit_boundary_contract() -> None:
+    prompt = read("agents/scope-audit.md")
+
+    assert_matches(prompt, r"^name: scope-audit$", "frontmatter name missing")
+    assert "tools: Read, Write, Bash, Grep, Glob" in prompt
+    assert_not_matches(prompt, r"^tools:[^\n]*(WebSearch|WebFetch)", "scope-audit should not expose web research tools")
+
+    gate1 = section(prompt, "gate_1_credentials")
+    assert "Region discovery will run during runtime dispatch." in gate1
+    assert "If explicit regions were supplied, display those requested regions." in gate1
+    assert "enabled regions count" not in gate1
+    assert "note if fallback" not in gate1
+
+    gate3 = section(prompt, "gate_3_enumeration_summary")
+    assert "`skip`" in gate3
+    assert "raw-inventory `findings.md`" in gate3
+    assert "skip public exposure, attack analysis, attack validation, Gate 4, controls, and dashboard HTML generation" in gate3
+    assert "Preserve `$RUN_DIR/results.json`" in gate3
+    assert "Do not delete runtime dashboard export files" in gate3
+
+    mandatory = section(prompt, "mandatory_outputs")
+    assert "Gate 3 skip exception" in mandatory
+    assert "$RUN_DIR/results.json" in mandatory
+    assert "$RUN_DIR/findings.md" in mandatory
+    assert "$RUN_DIR/agent-log.jsonl" in mandatory
+
+    assert "scope-research" not in prompt
+    assert "WebSearch" not in prompt
+    assert "WebFetch" not in prompt
+    assert "{service}.json not written" not in prompt
+    assert "[MISSING] {service}.json not written" not in prompt
+    assert "modules/<service>/<region>.json missing" in prompt
+
+
 def test_scope_research_agent_contract() -> None:
     prompt = read("agents/subagents/scope-research.md")
 
