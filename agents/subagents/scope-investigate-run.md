@@ -64,7 +64,7 @@ cat "$SOURCE_RUN_DIR/results.json"
 
 **For EXPLOIT runs, extract:**
 - `target_arn`, `summary.paths_found`, `summary.severity`, `summary.discovery_summary`
-- `attack_paths[]` — for each: `name`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `steps[]` (especially `steps[].action` as exploit command/action text and `steps[].visibility` as MGT/DATA/NONE), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`
+- `attack_paths[]` — for each: `name`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `steps[]` (especially `steps[].action`, step descriptions, and affected resource context), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`
 - Filter: prefer `validation_status=validated` paths for investigation focus. If none exist, include `validation_status=conditional` paths.
 Do not treat exploit `steps[].action` as a CloudTrail eventName. Derive CloudTrail event candidates from the AWS CLI command or API operation when possible, then fall back to the MITRE mapping below.
 
@@ -185,18 +185,17 @@ When storing `active_hypothesis` for a selected HYPO-02 hypothesis (HYPO-04), po
 
 ### Branch: SOURCE_RUN_TYPE=EXPLOIT (HYPO-03)
 
-**Input:** `attack_paths[]` from exploit results.json, each with `name`, `steps[]` (including `steps[].action` as exploit command/action text and `steps[].visibility`), `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `noise_score`, `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`. Also `target_arn` at the run level.
+**Input:** `attack_paths[]` from exploit results.json, each with `name`, `steps[]` (including `steps[].action` as exploit command/action text, step descriptions, and affected resource context), `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `noise_score`, `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`. Also `target_arn` at the run level.
 
 **Formation logic:**
 
 1. Filter to `validation_status=validated` paths first. If none exist, include `validation_status=conditional` paths. Do not lower investigation priority only because a path is conditional; use runtime assumptions and coverage caveats to shape the hypothesis.
-2. For each selected path, partition steps by visibility:
-   - `visibility=MGT` or `visibility=DATA` → observable steps (produce CloudTrail events — search for these)
-   - `visibility=NONE` → unobservable steps (no CloudTrail evidence expected — note explicitly)
-3. `noise_score` informs investigation strategy context: low noise paths are harder to detect; CloudTrail absence is less conclusive for low-noise paths.
-4. Derive `adversary_goal` from the attack path's `category` field using the same category → label mapping defined in the HYPO-02 branch (privilege_escalation → Privilege escalation, lateral_movement → Lateral movement, persistence → Persistence, data_exfiltration → Data exfiltration, defense_evasion → Defense evasion, reconnaissance → Reconnaissance; any other value → use category value directly).
+2. For each selected path, derive candidate CloudTrail or Splunk signals from `steps[].action`, step descriptions, affected resources, runtime assumptions, and coverage caveats. Do not depend on exploit playbook step tags.
+3. Use current Splunk and CloudTrail context during investigation to decide whether a derived step should have observable telemetry. Missing evidence must remain conditional when telemetry coverage is absent, delayed, or limited to management-plane events.
+4. `noise_score` informs investigation strategy context: low noise paths are harder to detect; CloudTrail absence is less conclusive for low-noise paths.
+5. Derive `adversary_goal` from the attack path's `category` field using the same category → label mapping defined in the HYPO-02 branch (privilege_escalation → Privilege escalation, lateral_movement → Lateral movement, persistence → Persistence, data_exfiltration → Data exfiltration, defense_evasion → Defense evasion, reconnaissance → Reconnaissance; any other value → use category value directly).
 
-**Key design rule:** The hypothesis statement must explicitly state the count of unobservable steps. If half the steps are NONE, the analyst must know that absence of evidence is not evidence of absence for those steps.
+**Key design rule:** The hypothesis must separate derived telemetry candidates from telemetry caveats. The analyst must infer observability from the current SIEM and CloudTrail coverage during investigation, not from static exploit playbook classifications.
 
 #### Exploit Hypothesis Format
 
@@ -209,11 +208,11 @@ HYPOTHESIS [N]
   Noise level:      [noise_score / noise_profile]
   Adversary goal:   [derived from category mapping — e.g., Privilege escalation]
   Target:           [target_arn from results.json]
-  Statement:        "If [target_arn] executed [attack_path.name], we expect CloudTrail to show [observable_steps_count] observable events. [unobservable_count] steps will leave no CloudTrail trace."
-  Observable steps (search for these):
-    - [step.description] → command/action: [step.action] → derived eventName candidate: [eventName]  (visibility: MGT/DATA)
-  Unobservable steps (no CloudTrail evidence):
-    - [step.description]  (visibility: NONE)
+  Statement:        "If [target_arn] executed [attack_path.name], investigate the derived event candidates and resource anchors below, then qualify any gaps against current Splunk and CloudTrail coverage."
+  Derived telemetry candidates:
+    - [step.description] → command/action: [step.action] → affected resource: [resource] → eventName or SPL candidate: [candidate]
+  Telemetry caveats:
+    - [coverage_caveats[] or runtime_assumptions[] that affect whether evidence should exist]
   Persistence signals:   [persistence_techniques[].technique where available=true]
   Exfiltration signals:  [exfiltration_vectors[].vector where available=true]
   Lateral movement:      [lateral_movement_chain[] from/to/mechanism]
