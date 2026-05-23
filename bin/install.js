@@ -885,7 +885,7 @@ Options:
 What gets installed:
   Skills      Operator-invoked slash commands (scope-audit, scope-controls, scope-exploit, scope-investigate)
               -> .claude/skills/ (Claude Code) or .agents/skills/ (Gemini/Codex)
-  Subagents   Orchestrator-dispatched workers (attack analysis, controls, investigation, research, synthesis)
+  Subagents   Orchestrator-dispatched workers (attack analysis, controls, investigation, research)
               -> .claude/agents/ (Claude Code)
               -> .gemini/agents/ (Gemini CLI) — requires experimental.enableAgents: true
               -> .codex/agents/ + .codex/config.toml (Codex)

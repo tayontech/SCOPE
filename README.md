@@ -137,9 +137,9 @@ SCOPE has two types of agents:
 - `scope-attack-analyze` — attack path analysis over Python runtime inventory, graph, and IAM policy context
 - `scope-controls-guardrails`, `scope-controls-detections`, `scope-controls-policy`, `scope-controls-remediation`, `scope-controls-validate` — controls subagents
 - `scope-investigate-alert`, `scope-investigate-intel`, `scope-investigate-run` — investigation intake and hypothesis generation
-- `scope-research` — real-world technique research integration
+- `scope-research` - shared external technique research for attack analysis and exploit playbooks
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, then chains controls on a reasoning model. Scope-investigate dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
+When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, optionally enriches candidates through `scope-research`, then chains controls on a reasoning model. Scope-investigate dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
 
 ### Model Routing
 
@@ -147,7 +147,7 @@ When you run `/scope:audit --all`, the orchestrator runs on your session model, 
 
 | Agent Type | Claude Code | Gemini CLI | Codex |
 |------------|-------------|------------|-------|
-| Reasoning (attack analysis, controls + subagents, investigation intake, research) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Reasoning (attack analysis, controls + subagents, investigation intake, research subagent) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
 
 Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, investigate) inherit your session model.
 

@@ -19,8 +19,9 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 - `scope.core` owns AWS clients, coverage, envelope models, retry, and region discovery
 
 **Attack path analysis** (fresh-context subagent dispatched by scope-audit):
-- `scope.runtime.graph` — deterministic graph v2 extraction from per-module JSON (Python, no AI model)
-- `scope-attack-analyze` — cross-service attack path analysis over `results.json`, `resources.jsonl`, `graph.json`, and module envelopes
+- `scope.runtime.graph` - deterministic graph v2 extraction from per-module JSON (Python, no AI model)
+- `scope-attack-analyze` - cross-service attack path analysis over `results.json`, `resources.jsonl`, `graph.json`, and module envelopes
+- `scope-research` - optional bounded external technique context for candidate framing
 
 **Verification agent** (read inline during execution):
 - `scope-verify` — Unified verification: claim ledger, taxonomy, AWS API validation, SPL lints (domain sections dispatched by caller)
@@ -61,7 +62,8 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
     │                               │             ▼                         │
     │                               │  ┌──────────────────────────────┐    │
     │                               │  │ scope-attack-analyze         │    │
-    │                               │  │ (cross-service paths)        │    │
+    │                               │  │ cross-service paths          │    │
+    │                               │  │ optional scope-research      │    │
     │                               │  └──────────────────────────────┘    │
     │                               │       │                           │
     │                               │  Gate 3: results                  │
@@ -153,6 +155,8 @@ Agent communication diagram for the SCOPE pipeline orchestration system.
 ## Runtime Post-Processing
 
 `scope audit` performs deterministic post-processing immediately after enumeration. Scope-investigate does not run post-processing in any mode; if the analyst saves, it writes `investigation.md` and `agent-log.jsonl` to the run directory. Top-level agents load bounded environment knowledge through `skills/scope-knowledge-load/SKILL.md`; they update durable knowledge only through `skills/scope-knowledge-update/SKILL.md` after evidence review or operator-approved save. In run-guided mode, scope-investigate reads from an existing audit or exploit run directory but does not write back to it. In intel mode, extracted IOCs and TTPs remain session-scoped unless the analyst approves persistence.
+
+scope-research may enrich attack candidates with bounded external technique context and exploit playbooks with source-backed procedure examples. It does not write artifacts, run investigations, design detections, or persist knowledge.
 
 ```
   $RUN_DIR/modules/<service>/<region>.json
@@ -288,7 +292,7 @@ Downstream agents consume upstream output in this priority order:
 | **controls** | orchestrator dispatch or `/scope:controls [run-dir]` (operator) | `$AUDIT_RUN_DIR` (specified run) or `./runs/` (all runs, manual) | `results.json`, `guardrails.json`, `detections.json`, `policy-replacements.json`, `remediation-plan.md`, `validation-report.md`, `policies/{scp,rcp}-*.json`, `agent-log.jsonl` | scope-verify |
 | **exploit** | `/scope:exploit` | `./runs/` (optional), AWS APIs | `$RUN_DIR/playbook.md`, `results.json`, `agent-log.jsonl` | scope-verify |
 | **investigate** | `/scope:investigate [input]` | Run-guided mode: `$SOURCE_RUN_DIR/results.json`, attack-paths JSON, per-module JSON, bounded knowledge context, Splunk MCP (optional). Investigation mode: bounded knowledge context, Splunk MCP. Intel mode: bounded knowledge context, WebFetch (URL) or NL parse, Splunk MCP (optional) | `$RUN_DIR/investigation.md`, `$RUN_DIR/agent-log.jsonl` (if saved), durable knowledge updates through `scope-knowledge-update` only after approval | scope-verify (no post-processing pipeline in any mode) |
-| **scope-research** | Dispatched by exploit and attack-paths | WebSearch, external technique references | Research findings (in-memory, consumed by caller) | — |
+| **scope-research** | Dispatched by attack-paths and exploit | WebSearch, external technique references | Research findings (in-memory, consumed by caller) | - |
 | **scope-verify** | Read inline by source agents | Agent claims (in-memory) | Corrected claims (in-memory) | — (domains dispatched internally by XML section) |
 
 ## Enforcement Layer
