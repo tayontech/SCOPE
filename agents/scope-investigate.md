@@ -205,6 +205,22 @@ After receiving any mode handoff, confirm that `active_hypothesis` is populated.
 Store `active_hypothesis` in session memory after handoff receipt (or after inline fallback). The dispatched subagent returns an `active_hypothesis` in its handoff — see subagent docs for structure (`scope-investigate-alert.md`, `scope-investigate-run.md`, `scope-investigate-intel.md`).
 
 The `iocs.ips` and `iocs.arns` fields (intel mode only) are used by the investigation loop to add `sourceIPAddress` and `userIdentity.arn` filters to Splunk queries.
+
+### Curated Hunt Reasoning Notes
+
+Load optional expert context before selecting investigation steps:
+
+```bash
+if [ -f config/hunt-reasoning-notes.md ]; then
+  HUNT_REASONING_NOTES=$(cat config/hunt-reasoning-notes.md)
+  echo "Hunt reasoning notes loaded: config/hunt-reasoning-notes.md optional expert context"
+else
+  HUNT_REASONING_NOTES=""
+  echo "config/hunt-reasoning-notes.md not found - continuing without curated expert notes"
+fi
+```
+
+Use these notes as expert context for complex hunts, false-positive reasoning, visibility caveats, and dashboard-worthy monitoring ideas. They are not a checklist, not exhaustive, and not authoritative over current environment evidence or Splunk results.
 </hypothesis_engine>
 
 <investigation_technique_patterns>
@@ -234,7 +250,7 @@ Match `active_hypothesis.adversary_goal` to a category key in the catalogue's `c
 | Credential abuse / Credential theft | `credential_abuse` |
 | Data exfiltration / Data exposure | `data_exfiltration` |
 
-If no category match: fall back to reference patterns in `<reasoning_framework>`. Do not error — the fallback is expected for custom or novel hypotheses.
+If no category match: fall back to curated reasoning notes in `<reasoning_framework>`. Do not error — the fallback is expected for custom or novel hypotheses.
 
 ### Using Pattern Fields
 
@@ -486,14 +502,14 @@ This accumulator is the source for the final output summary. Do not re-query to 
 
 ---
 
-See `<reasoning_framework>` section below for the step selection priority hierarchy and reference patterns.
+See `<reasoning_framework>` section below for the step selection priority hierarchy and curated reasoning notes.
 The reasoning framework replaces fixed playbook step ordering — the agent selects steps based on context, environment knowledge, and independent reasoning.
 </investigation_loop>
 
 <reasoning_framework>
 ## Reasoning Framework — Autonomous Step Selection
 
-The agent selects investigation steps autonomously based on a priority hierarchy. Former playbooks are preserved as "reference patterns" — consulted for investigation angles and SPL templates, but never dictating step order.
+The agent selects investigation steps autonomously based on a priority hierarchy. Curated hunt reasoning notes provide expert caveats, false-positive traps, visibility gaps, and monitoring ideas, but never dictate step order.
 
 ### Step Selection Priority Hierarchy
 
@@ -505,31 +521,11 @@ At each step, the agent evaluates these priorities in order. The highest-priorit
 2. **Baseline deviation** — A known principal from `KNOWLEDGE_CONTEXT` is acting outside their recorded baseline (unusual source IP, unusual actions, unusual hours, unusual region). Investigate the deviation.
 3. **Novel entity** — An entity in the alert (IP, user, account) has no match in `KNOWLEDGE_CONTEXT`. Establish whether it is truly novel or simply not yet recorded.
 4. **FP pattern check** — The alert type has a high false-positive rate in `KNOWLEDGE_CONTEXT` (>50% FP rate). Check known FP patterns first to quickly dismiss or escalate.
-5. **Reference pattern** — No environmental signal applies. Fall back to the reference pattern steps for this alert type (see Reference Patterns below).
+5. **Curated reasoning notes** — No environmental signal applies. Use `HUNT_REASONING_NOTES` for expert caveats, false-positive traps, and visibility gaps that can shape the next query or dashboard recommendation.
 
 When the priority hierarchy produces a step, the structured reasoning block must cite which priority triggered the selection and what specific context entry or absence of context drove the decision.
 
-### Reference Pattern Loading
-
-The full reference pattern catalogue is in `config/hunt-reference-patterns.json`. Load the matching pattern on-demand after `active_hypothesis` is set, keyed by `alert_type`:
-
-```bash
-ALERT_TYPE="[alert_type from investigation_context]"
-REF_PATTERN=$(jq -r --arg t "$ALERT_TYPE" '
-  .patterns as $p |
-  ($p | keys[] | select(ascii_downcase == ($t | ascii_downcase))) as $k |
-  $p[$k]
-' config/hunt-reference-patterns.json 2>/dev/null)
-
-if [ -z "$REF_PATTERN" ] || [ "$REF_PATTERN" = "null" ]; then
-  echo "[INFO] No reference pattern matched alert type '$ALERT_TYPE' — using Generic pattern"
-  REF_PATTERN=$(jq -r '.patterns.Generic' config/hunt-reference-patterns.json)
-fi
-```
-
-If `config/hunt-reference-patterns.json` does not exist: emit `[ERROR] config/hunt-reference-patterns.json not found — setup required. Cannot load reference patterns.` and halt the investigation.
-
-Use `$REF_PATTERN` to read `investigation_angles` and `spl_templates` for the matched alert type. Adapt SPL template field values from `investigation_context`. Apply the priority hierarchy — reference patterns are a floor, not a ceiling.
+Use `$HUNT_REASONING_NOTES` only to sharpen reasoning. Build SPL from the active hypothesis, current evidence, `hunt-techniques.json` when applicable, and Splunk field context.
 </reasoning_framework>
 
 <output_format>
@@ -779,7 +775,7 @@ An investigation session is complete when ALL of the following are true:
 - The summary was written before the investigation loop finished (the narrative and event table are generated only after the analyst selects "done" — never mid-investigation)
 - The output contains risk or severity assessment language ("critical risk", "high severity", "this is concerning", or any grading system)
 - Any query was executed without analyst approval (the approve gate was bypassed)
-- The completion signal was never shown (even if all reference pattern angles were explored, the signal must appear before generating output)
+- The completion signal was never shown (even if all curated reasoning-note angles were explored, the signal must appear before generating output)
 - The skill silently advanced past a step without analyst interaction
 
 **Knowledge update (gated on analyst save approval):** Only run this step if the analyst chose to save artifacts in step 6 above. If the analyst declined to save, call `skills/scope-knowledge-update/SKILL.md` with `status=skipped` and do not write durable knowledge.
