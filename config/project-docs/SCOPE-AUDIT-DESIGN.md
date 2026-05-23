@@ -145,7 +145,7 @@ The raw-inventory Gate 3 skip report should include:
 
 ## Tool Surface
 
-`scope-audit` should not declare `WebSearch` or `WebFetch`.
+`scope-audit` keeps `WebSearch` and `WebFetch` only because inline `scope-verify` needs documentation lookup for uncertain AWS API, CloudTrail, and MITRE claims. The orchestrator must not use web tools for audit research, target enrichment, external investigation, or research dispatch.
 
 Needed tools:
 
@@ -154,6 +154,8 @@ Needed tools:
 - `Bash`
 - `Grep`
 - `Glob`
+- `WebSearch`
+- `WebFetch`
 
 External research belongs to `scope-research`, dispatched by `scope-attack-analyze` or `scope-exploit`.
 
@@ -183,7 +185,8 @@ Use Python contract tests.
 
 Coverage:
 
-- `scope-audit` declares no `WebSearch` or `WebFetch` tools.
+- `scope-audit` declares `WebSearch` and `WebFetch` only for inline `scope-verify` documentation checks.
+- `scope-audit` does not use web tools for audit research or research dispatch.
 - Gate 1 does not claim enabled region count from runtime discovery before runtime dispatch.
 - Gate 3 `skip` has explicit raw-inventory artifact behavior and skips attack, controls, and dashboard HTML.
 - Legacy top-level service JSON wording is absent.

@@ -2,7 +2,7 @@
 name: scope-audit
 description: SCOPE audit orchestrator — single entry point for the full audit pipeline. Runs Python SCOPE runtime enumeration, chains attack-path reasoning, verification, defensive controls, post-processing, and dashboard generation. Invoke with /scope:audit <target>.
 compatibility: Requires AWS credentials in environment. AWS CLI v2 required.
-tools: Read, Write, Bash, Grep, Glob
+tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch
 color: blue
 context: fork
 agent: general-purpose
@@ -37,6 +37,8 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 3. `$RUN_DIR/modules/**` — raw per-service envelopes
 
 **Key pitfalls:** Do not add credential validation steps outside Gate 1. Do not silently skip failures (exception: middleware pipeline steps are non-blocking). Module failures are non-blocking — log partial results and continue.
+
+**Web tool boundary:** WebSearch and WebFetch are available only for inline `scope-verify` documentation checks when AWS API, CloudTrail, or MITRE claims are uncertain. Do not use web tools for audit research, target enrichment, external investigation, or research dispatch. Do not dispatch `scope-research`.
 </project_context>
 
 <service_routing>
@@ -356,11 +358,13 @@ If all modules have `status === 'complete'` and no per-finding `<field>_status` 
 
 The Python runtime performs dashboard public JSON export automatically when invoked with `--dashboard-export`.
 
-After findings.md is written (and Gate 4 was NOT skipped), verify:
+After findings.md is written (and neither Gate 3 nor Gate 4 was skipped), verify:
 1. `dashboard/public/$RUN_ID.json` exists or a runtime warning explains why export failed.
 2. `dashboard/public/index.json` contains this run or a runtime warning explains why index update failed.
 
 Do not hand-build dashboard public JSON unless recovering from a runtime export failure and using the same index shape documented by `scope.runtime.post_processing.export_dashboard_results`.
+
+**Gate 3 skip exception:** If Gate 3 `skip` was selected, do not create or update dashboard export files after Gate 3. Keep any dashboard export files the Python runtime already wrote. `$RUN_DIR/results.json`, `$RUN_DIR/findings.md`, and `$RUN_DIR/agent-log.jsonl` remain required.
 
 **Gate 4 skip exception:** If GATE4_SKIP=true, do not create or update dashboard export files after Gate 4. Keep any dashboard export files the Python runtime already wrote. `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required.
 </results_export>
@@ -369,6 +373,8 @@ Do not hand-build dashboard public JSON unless recovering from a runtime export 
 ## Controls Auto-Chain
 
 After findings.md and results.json are written, automatically dispatch scope-controls as a subagent.
+
+**Gate 3 skip exception:** If Gate 3 `skip` was selected, do not dispatch controls. Log skip and advise `/scope:controls` for later use.
 
 **Gate 4 skip exception:** If GATE4_SKIP=true, do not dispatch. Log skip and advise `/scope:controls` for later use.
 
@@ -448,14 +454,14 @@ Log every subagent dispatch/return and every gate transition. Seed the log after
 | Throttling / Rate exceeded (HTTP 429) | Wait 2-5s, retry once. If retry fails: log PARTIAL, continue. |
 | AccessDenied (expected) | Log PARTIAL for that call, continue. Not an error. First-command denied on a module: skip module. |
 | Network / connection error (DNS, timeout, HTTP 5xx, connection reset) | Do NOT retry. Log `[ERROR] [Module] — [command]: [full message]`, continue. |
-| Subagent STATUS: error | Log `[ERROR] {service} — {error}`, continue with remaining modules. |
-| Subagent STATUS: partial | Log `[PARTIAL] {service} — {error}`, continue. |
+| Controls subagent STATUS: error | Log `[ERROR] controls — {error}`, continue to post-processing/dashboard. |
+| Controls subagent STATUS: partial | Log `[PARTIAL] controls — {error}`, continue to post-processing/dashboard. |
 | Runtime module artifact missing | Log `[MISSING] modules/<service>/<region>.json missing`, report at Gate 3. |
 | Attack analyze failure | Log, stop before candidate lint and surface the error. |
 | Candidate lint failure | Stop before validation and surface linter errors. |
 | Attack validation failure | Log, stop before validation lint and surface the error. |
 | Validation lint failure | Stop before Gate 4 and surface linter errors. |
-| Controls / Pipeline / Dashboard failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
+| Dashboard HTML generation failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
 
 Never swallow errors silently — operator must see every non-AccessDenied error. Aggregate error count at Gate 3 summary.
 </error_handling>

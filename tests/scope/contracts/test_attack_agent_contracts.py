@@ -311,8 +311,10 @@ def test_scope_audit_boundary_contract() -> None:
     prompt = read("agents/scope-audit.md")
 
     assert_matches(prompt, r"^name: scope-audit$", "frontmatter name missing")
-    assert "tools: Read, Write, Bash, Grep, Glob" in prompt
-    assert_not_matches(prompt, r"^tools:[^\n]*(WebSearch|WebFetch)", "scope-audit should not expose web research tools")
+    assert "tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch" in prompt
+    assert "WebSearch and WebFetch are available only for inline `scope-verify` documentation checks" in prompt
+    assert "Do not use web tools for audit research" in prompt
+    assert "Do not dispatch `scope-research`" in prompt
 
     gate1 = section(prompt, "gate_1_credentials")
     assert "Region discovery will run during runtime dispatch." in gate1
@@ -327,18 +329,31 @@ def test_scope_audit_boundary_contract() -> None:
     assert "Preserve `$RUN_DIR/results.json`" in gate3
     assert "Do not delete runtime dashboard export files" in gate3
 
+    results_export = section(prompt, "results_export")
+    assert "neither Gate 3 nor Gate 4 was skipped" in results_export
+    assert "Gate 3 skip exception" in results_export
+
+    controls = section(prompt, "controls_auto_chain")
+    assert "Gate 3 skip exception" in controls
+    assert "do not dispatch controls" in controls
+
     mandatory = section(prompt, "mandatory_outputs")
     assert "Gate 3 skip exception" in mandatory
     assert "$RUN_DIR/results.json" in mandatory
     assert "$RUN_DIR/findings.md" in mandatory
     assert "$RUN_DIR/agent-log.jsonl" in mandatory
 
-    assert_not_matches(prompt, r"Dispatch `?scope-research`?|dispatch scope-research")
+    assert_not_matches(prompt, r"(?<!Do not )Dispatch `?scope-research`?")
+    assert_not_matches(prompt, r"(?<!Do not )dispatch scope-research")
 
     error_handling = section(prompt, "error_handling")
     assert "{service}.json not written" not in error_handling
     assert "[MISSING] {service}.json not written" not in error_handling
     assert "modules/<service>/<region>.json missing" in error_handling
+    assert "Subagent STATUS: error" not in error_handling
+    assert "Subagent STATUS: partial" not in error_handling
+    assert "Controls subagent STATUS: error" in error_handling
+    assert "Controls subagent STATUS: partial" in error_handling
 
 
 def test_scope_research_agent_contract() -> None:
