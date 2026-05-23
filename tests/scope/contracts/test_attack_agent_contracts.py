@@ -159,9 +159,12 @@ def test_attack_verify_and_exploit_contract_regressions() -> None:
 
     assert "$AUDIT_RUN_DIR/modules/iam/global.json" in exploit
     assert "$AUDIT_RUN_DIR/modules/<service>/<region>.json" in exploit
+    assert "iam.json" not in exploit
     assert "$AUDIT_RUN_DIR/iam.json" not in exploit
     assert_not_matches(exploit, r'for module_file in "\$AUDIT_RUN_DIR"/\*\.json')
     assert_matches(exploit, r'find "\$AUDIT_RUN_DIR/modules"[\s\S]{0,220}cat "\$module_file"')
+    assert "Persistence and post-exploitation sections require explicit operator approval" in exploit
+    assert "PERSISTENCE_POST_EXPLOITATION_APPROVED" in exploit
     for text in [
         "aws iam get-policy-version",
         "aws iam get-user-policy",
