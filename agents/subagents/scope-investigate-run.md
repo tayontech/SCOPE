@@ -109,14 +109,14 @@ RUN DIRECTORY LOADED
   Conditional paths: [count of validation_status=conditional]
   Persistence techniques available: [summary.persistence_techniques count]
   Exfiltration vectors available:   [summary.exfiltration_vectors count]
-  CloudTrail eventNames to hunt:    [deduplicated derived eventNames from validated paths, or conditional paths when no validated paths exist]
+  CloudTrail eventNames to investigate: [deduplicated derived eventNames from validated paths, or conditional paths when no validated paths exist]
 
   Top findings:
   [summary.top_findings[] — one per line, bulleted]
 ```
 </run_mode_intake>
 
-<hypothesis_engine_hunt>
+<hypothesis_engine_run>
 ## Hypothesis Engine — HYPO-02 and HYPO-03 Branches (MODE=RUN)
 
 After the run summary is displayed, generate hypotheses from the loaded attack paths.
@@ -191,9 +191,9 @@ When storing `active_hypothesis` for a selected HYPO-02 hypothesis (HYPO-04), po
 
 1. Filter to `validation_status=validated` paths first. If none exist, include `validation_status=conditional` paths. Do not lower investigation priority only because a path is conditional; use runtime assumptions and coverage caveats to shape the hypothesis.
 2. For each selected path, partition steps by visibility:
-   - `visibility=MGT` or `visibility=DATA` → observable steps (produce CloudTrail events — hunt for these)
+   - `visibility=MGT` or `visibility=DATA` → observable steps (produce CloudTrail events — search for these)
    - `visibility=NONE` → unobservable steps (no CloudTrail evidence expected — note explicitly)
-3. `noise_score` informs hunt strategy context: low noise paths are harder to detect; CloudTrail absence is less conclusive for low-noise paths.
+3. `noise_score` informs investigation strategy context: low noise paths are harder to detect; CloudTrail absence is less conclusive for low-noise paths.
 4. Derive `adversary_goal` from the attack path's `category` field using the same category → label mapping defined in the HYPO-02 branch (privilege_escalation → Privilege escalation, lateral_movement → Lateral movement, persistence → Persistence, data_exfiltration → Data exfiltration, defense_evasion → Defense evasion, reconnaissance → Reconnaissance; any other value → use category value directly).
 
 **Key design rule:** The hypothesis statement must explicitly state the count of unobservable steps. If half the steps are NONE, the analyst must know that absence of evidence is not evidence of absence for those steps.
@@ -210,7 +210,7 @@ HYPOTHESIS [N]
   Adversary goal:   [derived from category mapping — e.g., Privilege escalation]
   Target:           [target_arn from results.json]
   Statement:        "If [target_arn] executed [attack_path.name], we expect CloudTrail to show [observable_steps_count] observable events. [unobservable_count] steps will leave no CloudTrail trace."
-  Observable steps (hunt for these):
+  Observable steps (search for these):
     - [step.description] → command/action: [step.action] → derived eventName candidate: [eventName]  (visibility: MGT/DATA)
   Unobservable steps (no CloudTrail evidence):
     - [step.description]  (visibility: NONE)
@@ -220,7 +220,7 @@ HYPOTHESIS [N]
 ```
 
 When storing `active_hypothesis` for a selected HYPO-03 hypothesis (HYPO-04), populate `adversary_goal` with the label derived from the category mapping above.
-</hypothesis_engine_hunt>
+</hypothesis_engine_run>
 
 <operator_selection>
 ## Operator Selection (HYPO-04) — Multi-Hypothesis Selection UI
@@ -229,7 +229,7 @@ Run-guided mode produces multiple hypotheses. Display a numbered list and wait f
 
 ```
 HYPOTHESIS SELECTION
-Generated [N] hunt hypotheses from [source — audit run / exploit run].
+Generated [N] investigation hypotheses from [source — audit run / exploit run].
 
   1. [Hypothesis 1 name] — [severity/validation_status] — [1-line statement]
   2. [Hypothesis 2 name] — [severity/validation_status] — [1-line statement]

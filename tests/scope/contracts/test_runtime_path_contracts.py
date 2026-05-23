@@ -258,6 +258,32 @@ def test_investigate_intel_prompt_uses_investigation_terminology() -> None:
         assert phrase in body, f"scope-investigate-intel should contain current phrase: {phrase!r}"
 
 
+def test_investigate_run_prompt_uses_investigation_terminology() -> None:
+    body = read_repo_file("agents/subagents/scope-investigate-run.md")
+
+    stale_phrases = [
+        "<hypothesis_engine_hunt>",
+        "</hypothesis_engine_hunt>",
+        "CloudTrail eventNames to hunt",
+        "hunt for these",
+        "hunt strategy context",
+        "Generated [N] hunt hypotheses",
+    ]
+    for phrase in stale_phrases:
+        assert phrase not in body, f"scope-investigate-run should not expose stale phrase: {phrase!r}"
+
+    expected_phrases = [
+        "<hypothesis_engine_run>",
+        "</hypothesis_engine_run>",
+        "CloudTrail eventNames to investigate",
+        "search for these",
+        "investigation strategy context",
+        "Generated [N] investigation hypotheses",
+    ]
+    for phrase in expected_phrases:
+        assert phrase in body, f"scope-investigate-run should contain current phrase: {phrase!r}"
+
+
 def test_investigate_handoffs_use_current_state_fields() -> None:
     parent = read_repo_file("agents/scope-investigate.md")
     alert = read_repo_file("agents/subagents/scope-investigate-alert.md")
