@@ -10,6 +10,7 @@ You are the run-guided investigation intake subagent for SCOPE's investigation o
 
 You receive from the parent:
 - `SOURCE_RUN_DIR`: the path to the SCOPE audit or exploit run directory
+- `KNOWLEDGE_CONTEXT`: bounded environment knowledge from the parent, used only as context
 
 You do NOT:
 - Run MCP detection (parent owns this)
@@ -62,7 +63,7 @@ cat "$SOURCE_RUN_DIR/results.json"
 - Filter: prefer `validation_status=validated` paths for investigation focus. If none exist, include `validation_status=conditional` paths.
 
 **For EXPLOIT runs, extract:**
-- `target_arn`, `summary.risk_score`, `summary.persistence_techniques`, `summary.exfiltration_vectors`, `summary.passrole_chains`
+- `target_arn`, `summary.paths_found`, `summary.severity`, `summary.discovery_summary`
 - `attack_paths[]` — for each: `name`, `category`, `validation_status`, `runtime_assumptions[]`, `coverage_caveats[]`, `steps[]` (especially `steps[].action` as exploit command/action text and `steps[].visibility` as MGT/DATA/NONE), `persistence_techniques[]`, `exfiltration_vectors[]`, `lateral_movement_chain[]`, `noise_score`
 - Filter: prefer `validation_status=validated` paths for investigation focus. If none exist, include `validation_status=conditional` paths.
 Do not treat exploit `steps[].action` as a CloudTrail eventName. Derive CloudTrail event candidates from the AWS CLI command or API operation when possible, then fall back to the MITRE mapping below.
@@ -74,8 +75,10 @@ Use final `attack_paths[]` as the only attack-path source of truth for audit and
 For AUDIT runs, list available per-module files and note which services were enumerated:
 
 ```bash
-ls "$SOURCE_RUN_DIR"/*.json 2>/dev/null | grep -v results.json
+find "$SOURCE_RUN_DIR/modules" -type f -name "*.json" 2>/dev/null
 ```
+
+Runtime module artifacts live at `$SOURCE_RUN_DIR/modules/<service>/<region>.json`.
 
 Do not read all module files at this step — only note which are present. Individual module files may be read later when anchoring specific Splunk queries to resource identifiers.
 
@@ -237,7 +240,7 @@ Generated [N] hunt hypotheses from [source — audit run / exploit run].
 Select a hypothesis (1-[N], A, or B [number]):
 ```
 
-**On selection 1-N:** Set `selected_hypothesis` to the chosen hypothesis. State:
+**On selection 1-N:** Set `active_hypothesis` to the chosen hypothesis. State:
 
 ```
 ACTIVE HYPOTHESIS: [hypothesis name]
@@ -246,7 +249,7 @@ ACTIVE HYPOTHESIS: [hypothesis name]
 
 Set `investigation_mode` to "single".
 
-**On selection A (all):** Set `investigation_mode` to "all". Set `selected_hypothesis` to the first hypothesis. Include all hypotheses in `all_hypotheses`. State:
+**On selection A (all):** Set `investigation_mode` to "all". Set `active_hypothesis` to the first hypothesis. Include all hypotheses in `all_hypotheses`. State:
 
 ```
 Investigating all [N] hypotheses sequentially. After completing each hypothesis investigation, I will prompt before proceeding to the next.
@@ -274,8 +277,8 @@ After completing run directory validation, results.json reading, run summary dis
 
 ```
 RUN_HANDOFF
-  hunt_run_dir:    [string — path provided at input]
-  hunt_run_type:   AUDIT | EXPLOIT
+  source_run_dir:  [string — path provided at input]
+  source_run_type: AUDIT | EXPLOIT
 
   run_summary:
     risk_score:          [string or number]
@@ -296,7 +299,7 @@ RUN_HANDOFF
     exfiltration_count:  [number]
     cloudtrail_eventnames: [deduplicated derived eventNames from validated path steps, or conditional path steps when no validated paths exist]
 
-  selected_hypothesis:
+  active_hypothesis:
     name:              [string]
     source:            "audit" | "exploit"
     statement:         [string]

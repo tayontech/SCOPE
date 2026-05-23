@@ -45,7 +45,7 @@ Analyze across the full inventory, not by service silo:
    - API/event trigger invocation paths
    - resource-policy external/public access paths
    - data access and decrypt paths
-7. Dispatch `scope-research` at most once if research would materially improve candidate framing or real-world context. Use this concrete handoff:
+7. Dispatch `scope-research` at most once if research would materially improve candidate framing or real-world context. Use the Agent tool with `subagent_type="scope-research"` and this concrete handoff:
    ```text
    CALLER=attack-paths
    SERVICE=[primary AWS service or service family]
@@ -142,7 +142,7 @@ Load `$RUN_DIR/results.json`, preserve all existing factual fields, and update o
 - `security_observations`
 - attack-specific summary fields under `summary`
 
-Keep `attack_paths[]` empty or unchanged. Do not create, rewrite, or promote final paths. `scope-attack-validate` promotes validated or conditional candidates into final `attack_paths[]`.
+Keep `attack_paths[]` empty. If `attack_paths[]` is non-empty on input, return `STATUS: error` before writing candidate output because stale final paths would fail candidate lint. Do not create, rewrite, or promote final paths. `scope-attack-validate` promotes validated or conditional candidates into final `attack_paths[]`.
 
 Preserve unchanged:
 - `source`, `run_id`, `account_id`, `account_name`, `account_owned`, `region`, `timestamp`, `status`

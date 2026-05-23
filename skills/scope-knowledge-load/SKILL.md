@@ -50,6 +50,7 @@ If more than 10 entries match, return the 10 most relevant. Prefer recent, evide
 
 ## Interpretation Rules
 
+- Resource identifiers are session-scoped. Do not treat durable knowledge as a source of ARNs, account IDs, bucket names, role names, key IDs, or access key IDs.
 - Treat knowledge as context, not ground truth.
 - Cite which knowledge entries influenced decisions.
 - If live evidence contradicts stored knowledge, trust live evidence and mark the stored knowledge as stale in proposed updates.
@@ -74,7 +75,7 @@ KNOWLEDGE_CONTEXT
       normal_pattern: ...
       source: ...
   observables:
-    - type: principal|role|ip|user_agent|event_name|bucket|secret|external_account|repo|domain|threat_actor|ttp
+    - type: user_agent_family|event_name|repo|domain|threat_actor|ttp|indicator_pattern
       value: ...
       status: confirmed|likely_normal|suspicious|false_positive|coverage_gap|needs_review
       evidence: ...

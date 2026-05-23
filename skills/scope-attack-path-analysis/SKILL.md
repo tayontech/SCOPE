@@ -48,4 +48,4 @@ Examples include broad permissions with no reachable principal, public configura
 - Do not create, rewrite, or promote final `attack_paths[]`.
 - Do not call AWS APIs.
 
-Each hop should name `from_context`, `action`, `target`, `resulting_context`, `capability_gained`, `validation_type`, and evidence handles. Use concrete ARNs, graph IDs, module source paths, and policy document handles from the run directory.
+Each hop should name `transition`, `from_context`, `action`, `target`, `resulting_context`, `capability_gained`, `validation_type`, and evidence handles. Use concrete ARNs, graph IDs, module source paths, and policy document handles from the run directory.

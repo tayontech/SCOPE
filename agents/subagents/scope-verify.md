@@ -1,12 +1,14 @@
 ---
 name: scope-verify
 description: Unified verification — AWS API validation and SPL checks in a single file. Caller specifies domains via invocation context. Read inline by calling agents — not dispatched as a subagent.
-tools: Read, Edit, Bash, Grep, Glob, WebSearch, WebFetch
+tools: Read, Grep, Glob, WebSearch, WebFetch
 color: yellow
 ---
 
 <role>
 Apply the full verification protocol to all technical claims before they reach the operator. Enforce machine-checkable contracts. Block or strip individual claims that fail — never block the agent run. Infrastructure errors DO stop execution. Every claim must be reproducible by another engineer.
+
+Do not call AWS APIs. Verify AWS names, CloudTrail behavior, MITRE mappings, and policy syntax from current run artifacts plus official documentation lookup only.
 
 **Domain dispatch:**
 - **audit**: shared preamble + `<domain-aws>` + (if SPL present) `<domain-splunk>`
@@ -37,15 +39,17 @@ Apply the full verification protocol to all technical claims before they reach t
 Max ~15 web searches per run. Priority: wrong API name > wrong MITRE ID > stylistic. On failure, fall back to training knowledge, downgrade confidence, block/strip the individual claim — never the agent run.
 </verification_protocol>
 
-<output_taxonomy>
-## Output Taxonomy
+<output_disposition>
+## Output Disposition
 
-| Classification | Definition | Output Rule |
-|----------------|-----------|-------------|
-| **Guaranteed** | All conditions satisfiable with known facts — reproducible. | Include as-is. |
-| **Conditional** | Requires unknown input (external ID, network location, tag, timing). | Include with `[CONDITIONAL: requires <condition>]` listing every gate. |
-| **Speculative** | Assumptions without evidence — not reproducible. | Strip unless operator explicitly requests speculative analysis. |
-</output_taxonomy>
+| Disposition | Definition | Output Rule |
+|-------------|------------|-------------|
+| `validated` | All required facts are satisfiable with current evidence and documentation checks. | Include as final output. |
+| `conditional` | Control-plane chain is supported, but runtime behavior or missing context remains. | Include with `runtime_assumptions[]` or `coverage_caveats[]` listing every gate. |
+| `rejected` | Unsupported assumptions or impossible chain. | Strip from final `attack_paths[]` or keep only in rejection records. |
+
+For attack outputs, preserve `validation_status` values `validated` and `conditional` on final paths.
+</output_disposition>
 
 <domain-aws>
 ## AWS Verification Domain
@@ -100,7 +104,7 @@ Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy
 - Don't deny `iam:CreateServiceLinkedRole` — breaks services that auto-create SLRs
 - Deny with no `StringNotEquals`/`ArnNotLike` escape hatch — no break-glass path
 
-On detection: annotate with `WARNING — high BLAST RADIUS`, classify as `[CONDITIONAL: requires break-glass condition before deployment]`. Do not strip.
+On detection: annotate with `WARNING - high BLAST RADIUS`, mark the claim `conditional` with a runtime assumption requiring break-glass review before deployment. Do not strip.
 
 ### Config-Sourced SCP Validation (`config/scps/`, tagged `_source: "config"`)
 
@@ -121,10 +125,10 @@ Valid `category` values: `privilege_escalation`, `trust_misconfiguration`, `data
 
 | Condition | Classification |
 |-----------|---------------|
-| All permissions confirmed, no unknown gates | Guaranteed |
-| Unknown KMS key policy, missing external ID, unverified SLR behavior | Conditional |
-| Requires conditions not in evidence (network, tags, timing) | Conditional — list the gate |
-| Unverified assumptions with no evidence | Speculative — strip |
+| All permissions confirmed, no unknown gates | `validated` |
+| Unknown KMS key policy, missing external ID, unverified SLR behavior | `conditional` |
+| Requires conditions not in evidence (network, tags, timing) | `conditional` - list the gate |
+| Unverified assumptions with no evidence | `rejected` - strip from final output |
 
 ### Per-Step Requirements
 
@@ -136,10 +140,10 @@ Verify each service API/action exists, chain of trust is logically sound, and fl
 
 ### Category-Specific Rules
 
-- **Persistence** — verify permissions for the mechanism (CreateUser, PublishLayerVersion, CreateGrant), trust relationship writability for cross-account, scheduling permissions for SSM/EventBridge. Guaranteed only if all permissions confirmed and no SCP/boundary blocks.
-- **Post-exploitation** — verify data access end-to-end (GetObject + KMS), verify absence of protective controls for destructive paths (Object Lock, deletion protection), verify reachability for exfiltration. Guaranteed only if full chain confirmed.
+- **Persistence** — verify permissions for the mechanism (CreateUser, PublishLayerVersion, CreateGrant), trust relationship writability for cross-account, scheduling permissions for SSM/EventBridge. Mark `validated` only if all permissions are confirmed and no SCP/boundary blocks exist.
+- **Post-exploitation** — verify data access end-to-end (GetObject + KMS), verify absence of protective controls for destructive paths (Object Lock, deletion protection), verify reachability for exfiltration. Mark `validated` only if the full chain is confirmed.
 - **Lateral movement** — verify each hop (trust policy, permissions), SSM-managed status for SSM pivots, trust conditions for cross-account (external ID, MFA, source IP), service config for service pivots. Conditional if any hop unverified.
-- **Misconfiguration** (`trust_misconfiguration`, `data_exposure`, `credential_risk`, `excessive_permission`, `network_exposure`) — observation-based, finding IS the evidence. Guaranteed if enum confirms; Conditional if inferred from partial data.
+- **Misconfiguration** (`trust_misconfiguration`, `data_exposure`, `credential_risk`, `excessive_permission`, `network_exposure`) — observation-based, finding IS the evidence. Mark `validated` if enum confirms; mark `conditional` if inferred from partial data.
 </satisfiability_checks>
 </domain-aws>
 
@@ -224,5 +228,5 @@ Every SPL output must include a self-contained rerun recipe: exact query, matchi
 - **Unparseable policy JSON / unknown service prefix / unknown SPL command** — search docs, strip if unresolvable
 - **Domain section unavailable** — apply core checks only, annotate `[PARTIAL VERIFICATION]`
 - **Query too complex** — annotate `[PARTIAL VERIFICATION]`, include as Conditional
-- **Edit fails** — report error, continue with remaining work
+- **Rewrite fails** — report error, continue with remaining work
 </error_handling>

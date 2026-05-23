@@ -35,7 +35,7 @@ Never chain steps without analyst approval. Never execute a query without explic
 
 **Investigation session exceptions:** (1) Load bounded environment knowledge through `skills/scope-knowledge-load/SKILL.md` at startup. (2) In run-guided mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided.
 
-**Subagent dispatch note:** MCP detection runs before dispatching `scope-investigate-alert` (INVESTIGATION mode) because Mode D requires Splunk access. For INTEL and RUN modes, subagents are dispatched before MCP detection because those subagents do not use Splunk.
+**Subagent dispatch note:** Load bounded environment knowledge before dispatching any mode subagent. MCP detection runs before dispatching `scope-investigate-alert` (INVESTIGATION mode) because Mode D requires Splunk access. INTEL and RUN mode subagents do not use Splunk MCP during intake.
 
 **Standalone detection investigation mode:** Do NOT reference `./runs/`, `./exploit/`, or engagement artifacts. In run-guided mode, read only the run directory explicitly provided. Do not speculatively load other audit or exploit runs.
 
@@ -65,7 +65,7 @@ Investigation record types:
 **Investigation-specific notes:**
 - **Flush-on-save pattern:** Accumulate evidence entries in memory during execution. Flush to `$RUN_DIR/agent-log.jsonl` only if the analyst saves at investigation end. No file I/O until save time.
 - **`splunk_query` records log Splunk queries** with SPL in the record body.
-- No `policy_eval` records (AWS-specific — hunt operates in Splunk only).
+- No `policy_eval` records (AWS-specific — investigate operates in Splunk only).
 </evidence_protocol>
 
 <run_directory>
@@ -93,7 +93,7 @@ mkdir -p "$RUN_DIR"
 | Artifact | Path | Description |
 |----------|------|-------------|
 | Investigation summary | `$RUN_DIR/investigation.md` | Full narrative summary + chronological event table + all queries run with results |
-| Evidence log | `$RUN_DIR/agent-log.jsonl` | Structured evidence log (claims, API calls, coverage) |
+| Evidence log | `$RUN_DIR/agent-log.jsonl` | Structured evidence log (`splunk_query`, `investigation_step`, `coverage_check`) |
 | Run index | `./investigations/INDEX.md` | Append entry (create if not exists) |
 
 Scope-investigate does not export to the SCOPE dashboard. Artifacts are self-contained markdown.
@@ -160,17 +160,17 @@ Announce mode before continuing, for example: `Run-guided investigation mode: re
 
 ### Dispatch Protocol
 
-**INTEL:** Pass `INTEL_SOURCE_URL` or `INTEL_NL_INPUT` + `INTEL_TYPE`. Receive `INTEL_HANDOFF` with `selected_hypothesis`, `all_hypotheses`, `investigation_mode`. If `investigation_mode=all`, iterate all hypotheses; else proceed with selected.
+**INTEL:** Pass `INTEL_SOURCE_URL` or `INTEL_NL_INPUT` + `INTEL_TYPE` + `KNOWLEDGE_CONTEXT`. Receive `INTEL_HANDOFF` with `active_hypothesis`, `all_hypotheses`, `investigation_mode`. If `investigation_mode=all`, iterate all hypotheses; else proceed with active.
 
-**RUN:** Pass `SOURCE_RUN_DIR`. Receive `RUN_HANDOFF` with `selected_hypothesis`, `all_hypotheses`, `investigation_mode`. If `fallback_to_investigation: true`, switch to INVESTIGATION mode. If `investigation_mode=all`, iterate hypotheses sequentially. Else proceed with selected to `<hunt_technique_patterns>` + `<investigation_loop>`.
+**RUN:** Pass `SOURCE_RUN_DIR` + `KNOWLEDGE_CONTEXT`. Receive `RUN_HANDOFF` with `active_hypothesis`, `all_hypotheses`, `investigation_mode`. If `fallback_to_investigation: true`, switch to INVESTIGATION mode. If `investigation_mode=all`, iterate hypotheses sequentially. Else proceed with active to `<hunt_technique_patterns>` + `<investigation_loop>`.
 
-**INVESTIGATION:** Run `<mcp_detection>` first. Pass raw input + `MCP_MODE` + `working_tool`. Receive `INVESTIGATE_HANDOFF` with `active_hypothesis` (single, auto-proceed). Skip `<hunt_technique_patterns>`, go to `<investigation_loop>`.
+**INVESTIGATION:** Run `<mcp_detection>` first. Pass raw input + `MCP_MODE` + `working_tool` + `KNOWLEDGE_CONTEXT`. Receive `INVESTIGATE_HANDOFF` with `active_hypothesis` (single, auto-proceed). Skip `<hunt_technique_patterns>`, go to `<investigation_loop>`.
 
 **Dispatch:** Use the Agent tool with the appropriate subagent_type for the selected mode subagent.
 
 **Fallback:** If dispatch fails, run intake inline by reading the subagent file (`agents/subagents/scope-investigate-alert.md`, `scope-investigate-intel.md`, or `scope-investigate-run.md`).
 
-**After return:** Extract `investigation_context` and `active_hypothesis` (or `selected_hypothesis`) from the handoff.
+**After return:** Extract `investigation_context` and `active_hypothesis` from the handoff.
 </entry_point_detection>
 
 **Knowledge preflight:** Use the `KNOWLEDGE_CONTEXT` from `<environment_context>` to contextualize the current alert, entity, intel source, or investigation question. Recognize repeat actors, known-good trusts, prior false-positive patterns, deployed controls, and coverage gaps. Do not treat knowledge as ground truth.
@@ -274,8 +274,7 @@ Probe for Splunk MCP at startup — no analyst action required. Announce: `Check
 **Analyst override:** If analyst reports MCP is connected but probe failed, ask which tool name they use, attempt it, update accordingly.
 
 **After MCP detection:**
-1. Load environment knowledge through `skills/scope-knowledge-load/SKILL.md` — display summary or first-investigation message
-2. Dispatch `scope-investigate-alert` with MCP_MODE, working_tool, and raw input
+1. Dispatch `scope-investigate-alert` with MCP_MODE, working_tool, KNOWLEDGE_CONTEXT, and raw input
 
 **Run-guided mode note:** If MODE=RUN and MCP_MODE=MANUAL, the agent can produce a hypothesis report from run directory data alone without Splunk.
 </mcp_detection>
@@ -677,7 +676,7 @@ After displaying the narrative summary and event table, ask: `Investigation comp
 
 1. **Create run directory:** `mkdir -p ./investigations/investigate-$(date +%Y%m%d-%H%M%S)`
 2. **Write `$RUN_DIR/investigation.md`:** hypothesis verdict (if set) + narrative summary + event table + queries-run appendix (table of every SPL query with step name, full query, timestamp; skipped steps noted)
-3. **Write `$RUN_DIR/agent-log.jsonl`:** flush all accumulated evidence entries (api_call, claim records), one JSON per line
+3. **Write `$RUN_DIR/agent-log.jsonl`:** flush all accumulated `splunk_query`, `investigation_step`, and `coverage_check` records, one JSON per line
 4. **Update `./investigations/INDEX.md`:** append entry (create with header if missing). Columns: Run ID, Date, Alert Type, Steps Run (approved only), Directory
 5. **Update `./investigations/index.json`:** machine-readable index. Create with `{"runs": []}` if missing. Upsert by `run_id` with fields: run_id, date, alert_type, steps_run, directory
 6. **Post-investigation learning:** run the learning pipeline per `<error_handling>` section

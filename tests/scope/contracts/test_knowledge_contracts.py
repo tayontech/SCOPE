@@ -65,6 +65,24 @@ def test_knowledge_skills_define_load_and_update_contracts() -> None:
         assert status in update
 
 
+def test_knowledge_skills_do_not_persist_resource_identifiers() -> None:
+    load = read("skills/scope-knowledge-load/SKILL.md")
+    update = read("skills/scope-knowledge-update/SKILL.md")
+
+    assert "Do not write ARNs, account IDs, bucket names, role names, key IDs, or access key IDs" in update
+    for forbidden in [
+        "If an update contains an account ID",
+        "principals, roles, user agents, source IPs, AWS actions",
+        "Known-normal AssumeRole chains",
+        "external_account",
+        "bucket|secret",
+    ]:
+        assert forbidden not in update
+
+    assert "Resource identifiers are session-scoped" in load
+    assert "type: principal|role|ip|user_agent|event_name|bucket|secret|external_account" not in load
+
+
 def test_knowledge_directory_templates_exist() -> None:
     expected_files = [
         "knowledge/README.md",

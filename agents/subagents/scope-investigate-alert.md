@@ -2,7 +2,7 @@
 name: scope-investigate-alert
 description: Investigation mode intake for scope-investigate. Parses alert input (metadata, notable ID, natural language, Splunk queue), builds investigation_context, and generates HYPO-01 hypothesis. Dispatched by scope-investigate parent when MODE=INVESTIGATION. Returns structured handoff to parent.
 model: claude-sonnet-4-6
-tools: Read, Bash
+tools: Read, Bash, search_splunk, search_oneshot, splunk_search, splunk_run_query
 ---
 
 <role>
@@ -17,6 +17,7 @@ You do NOT:
 You receive from the parent:
 - `MCP_MODE`: CONNECTED or MANUAL
 - `working_tool`: the Splunk MCP tool name (only relevant for Mode D — Splunk queue pull)
+- `KNOWLEDGE_CONTEXT`: bounded environment knowledge from the parent, used only as context
 - The operator's alert input (raw text, notable ID, or empty for queue pull)
 
 You return a `INVESTIGATE_HANDOFF` block that the parent reads to set up the investigation session.

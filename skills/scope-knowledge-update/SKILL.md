@@ -21,11 +21,11 @@ The caller provides:
 
 ## Files To Update
 
-Create files from the templates in `knowledge/` when missing.
+Create files from the templates in `knowledge/` when missing. For `config/observations.md`, use `config/observations.example.md` when present.
 
 - `config/observations.md`: concise human-readable operational notes
-- `knowledge/observables.jsonl`: structured entities, indicators, TTPs, and AWS actions
-- `knowledge/baselines.json`: known-normal relationships, source IPs, user agents, roles, and expected behavior
+- `knowledge/observables.jsonl`: structured indicator or TTP patterns with resource identifiers removed or generalized
+- `knowledge/baselines.json`: known-normal behavioral patterns with resource identifiers removed or generalized
 - `knowledge/coverage-gaps.md`: missing indexes, fields, logs, denied AWS coverage, and blind spots
 - `knowledge/investigations/INV-*.md`: saved investigation records
 - `knowledge/research/R-*.md`: saved threat-intel or news research records
@@ -44,22 +44,23 @@ Every durable update must use one of:
 ## Safety Rules
 
 - Do not write secrets, access keys, session tokens, passwords, raw credential material, or private keys.
+- Do not write ARNs, account IDs, bucket names, role names, key IDs, or access key IDs. Resource identifiers are session-scoped.
 - Do not write unsupported claims.
 - Do not write run-specific noise unless it will help future investigations.
 - Do not promote a pattern to org-wide unless at least two distinct account sections support it.
 - Do not overwrite existing knowledge. Append or merge.
 - Dedupe before appending.
 - Every update must cite evidence: run directory, report path, query ID, event ID, finding ID, or analyst-approved note.
-- If an update contains an account ID, place it under that account or include the `account_id` field.
+- Generalize resource-specific evidence before persistence. Use service names, control categories, event patterns, and behavior classes instead of exact identifiers.
 - Use dates in `YYYY-MM-DD` format.
 
 ## Routing Rules
 
 Route updates by type:
 
-- Normal automation, known-good role chains, false positives, detection tuning notes -> `config/observations.md`
-- IOCs, principals, roles, user agents, source IPs, AWS actions, TTPs -> `knowledge/observables.jsonl`
-- Known-normal AssumeRole chains, expected event volume, service-account behavior -> `knowledge/baselines.json`
+- Normal automation classes, false positives, detection tuning notes -> `config/observations.md`
+- Generalized IOCs, user-agent families, event-name patterns, TTPs -> `knowledge/observables.jsonl`
+- Expected event volume, service-account behavior classes, approved automation patterns -> `knowledge/baselines.json`
 - Missing indexes, missing fields, logging disabled, AWS access denied, no data-event coverage -> `knowledge/coverage-gaps.md`
 - Completed investigations -> `knowledge/investigations/INV-*.md`
 - Threat intel/news article research -> `knowledge/research/R-*.md`

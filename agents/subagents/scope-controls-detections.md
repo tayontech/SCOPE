@@ -44,9 +44,9 @@ Read `$AUDIT_RUN_DIR/results.json` and extract the `attack_paths[]` array. For e
 - `category` — used to set detection category
 - `affected_resources` — specific ARNs to scope queries where useful
 
-No other files are required — results.json contains all the detection context needed.
+No other files are required to start — results.json contains the attack-path context needed. Optional environment files refine tuning when available.
 
-If results.json has no `attack_paths` array or it is empty, write a placeholder detections.md explaining that no attack paths are available, and return STATUS: complete with detections: 0.
+If results.json has no `attack_paths` array or it is empty, write a placeholder detections.md explaining that no attack paths are available, write `detections.json` as `[]`, and return STATUS: complete with detections: 0.
 
 ## Environment Context
 
@@ -269,7 +269,10 @@ Notes on `detections.json` format:
 
 **Derive the audit run ID:**
 ```bash
-AUDIT_RUN_ID=$(jq -r '.audit_runs_analyzed[0] // "unknown"' "$AUDIT_RUN_DIR/results.json" 2>/dev/null || basename "$AUDIT_RUN_DIR")
+AUDIT_RUN_ID=$(jq -r '.run_id // .metadata.run_id // empty' "$AUDIT_RUN_DIR/results.json" 2>/dev/null)
+if [ -z "$AUDIT_RUN_ID" ]; then
+  AUDIT_RUN_ID=$(basename "$AUDIT_RUN_DIR")
+fi
 ```
 
 ## SPL Lint Hook
@@ -286,7 +289,7 @@ When `config/index.json` is absent, the allowlist check is skipped and any named
 ## Error Handling
 
 - If results.json is missing → stop immediately, report STATUS: error
-- If `attack_paths` is empty → write placeholder detections.md, return STATUS: complete with detections: 0
+- If `attack_paths` is empty → write placeholder detections.md, write `detections.json` as `[]`, return STATUS: complete with detections: 0
 - If a specific attack path has empty `detection_opportunities` → derive events from context rather than skipping
 - If derived logic lacks production fidelity, emit `hunt_query` or `coverage_gap`, not an alert
 - Do not silently skip failures — surface every error with context
@@ -298,6 +301,7 @@ After writing both artifacts, print the return summary:
 ```
 STATUS: complete
 FILE: {controls_run_dir}/detections.md
+STRUCTURED_FILE: {controls_run_dir}/detections.json
 METRICS: {detections: N}
 ERRORS: []
 ```

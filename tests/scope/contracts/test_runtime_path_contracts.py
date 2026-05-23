@@ -143,6 +143,22 @@ def test_controls_prompts_reject_legacy_audit_module_paths() -> None:
     assert_contains("agents/subagents/scope-controls-validate.md", "$AUDIT_RUN_DIR/modules/iam/global.json")
 
 
+def test_exploit_and_investigate_use_runtime_module_paths() -> None:
+    for relative_path in [
+        "agents/scope-exploit.md",
+        "agents/subagents/scope-investigate-run.md",
+    ]:
+        body = read_repo_file(relative_path)
+        assert "$AUDIT_RUN_DIR/iam.json" not in body
+        assert "$SOURCE_RUN_DIR/iam.json" not in body
+        assert '"$AUDIT_RUN_DIR"/*.json' not in body
+        assert '"$SOURCE_RUN_DIR"/*.json' not in body
+
+    assert_contains("agents/scope-exploit.md", "$AUDIT_RUN_DIR/modules/iam/global.json")
+    assert_contains("agents/scope-exploit.md", "$AUDIT_RUN_DIR/modules/<service>/<region>.json")
+    assert_contains("agents/subagents/scope-investigate-run.md", "$SOURCE_RUN_DIR/modules/<service>/<region>.json")
+
+
 def test_investigate_command_replaces_scope_hunt() -> None:
     expected_paths = [
         "agents/scope-investigate.md",
@@ -174,3 +190,28 @@ def test_investigate_command_replaces_scope_hunt() -> None:
         assert "scope-investigate" in body, f"{relative_path} should use scope-investigate"
         assert "scope-hunt" not in body, f"{relative_path} should not reference scope-hunt"
         assert "scope:hunt" not in body, f"{relative_path} should not expose /scope:hunt"
+
+
+def test_investigate_handoffs_use_current_state_fields() -> None:
+    parent = read_repo_file("agents/scope-investigate.md")
+    alert = read_repo_file("agents/subagents/scope-investigate-alert.md")
+    run = read_repo_file("agents/subagents/scope-investigate-run.md")
+    intel = read_repo_file("agents/subagents/scope-investigate-intel.md")
+
+    assert "KNOWLEDGE_CONTEXT" in alert
+    assert "KNOWLEDGE_CONTEXT" in run
+    assert "KNOWLEDGE_CONTEXT" in intel
+    assert "tools: Read, Bash, search_splunk, search_oneshot, splunk_search, splunk_run_query" in alert
+    assert "Load bounded environment knowledge" in parent
+    assert "before dispatching any mode subagent" in parent
+    assert "api_call, claim records" not in parent
+    assert "claims, API calls, coverage" not in parent
+
+    for body in [run, intel]:
+        assert "active_hypothesis:" in body
+        assert "selected_hypothesis:" not in body
+
+    assert "hunt_run_dir" not in run
+    assert "hunt_run_type" not in run
+    assert "source_run_dir" in run
+    assert "source_run_type" in run

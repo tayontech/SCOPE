@@ -177,6 +177,7 @@ Wait for subagent to return its summary.
 Expected return:
   STATUS: complete|error
   FILE: {controls_run_dir}/detections.md
+  STRUCTURED_FILE: {controls_run_dir}/detections.json
   METRICS: {detections: N}
   ERRORS: [any issues]
 ```
@@ -297,6 +298,7 @@ printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "sc
 
 **Parse Round 1 return:**
 
+- If STATUS: fail (validator itself errored — missing files, unreadable artifacts): STOP. Report STATUS: error to operator. Do not proceed to Results Assembly.
 - If BLOCKS == 0 (STATUS: pass): proceed directly to Results Assembly.
 - If BLOCKS > 0: read validation-report.md to identify which subagent(s) produced BLOCK findings.
 
@@ -356,7 +358,7 @@ printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "sc
 
 - If STATUS: fail (validator itself errored — missing files, unreadable artifacts): STOP. Report STATUS: error to operator. Do not proceed to Results Assembly.
 - If BLOCKS == 0 (STATUS: pass): proceed to Results Assembly.
-- If BLOCKS > 0 (STATUS: partial): proceed to Results Assembly anyway — D-26 max 2 rounds cap reached. Report PARTIAL status to operator. The validation-report.md documents remaining issues.
+- If BLOCKS > 0 (STATUS: partial): STOP. Do not proceed to Results Assembly. Report STATUS: partial to operator because D-26 max 2 rounds cap was reached. The validation-report.md documents remaining issues.
 
 Capture VALIDATION_STATUS, VALIDATION_BLOCKS, VALIDATION_WARNS for results.json assembly.
 
@@ -599,10 +601,12 @@ NOTE: Validation PARTIAL — {N} block findings remain. See {CONTROLS_RUN_DIR}/v
 The last output from this orchestrator is the machine-parseable return summary consumed by the audit orchestrator's `<controls_auto_chain>` section:
 
 ```
-STATUS: complete
+STATUS: complete|partial
 CONTROLS_RUN_DIR: {controls_run_dir}
 METRICS: {scps: N, rcps: N, detections: N}
 ```
+
+Use `complete` only when validation passes. Use `partial` when Round 2 validation reaches the cap with remaining BLOCK findings.
 
 Where:
 - `scps` — GUARDRAILS_SCPS (from guardrails subagent METRICS)
@@ -615,6 +619,14 @@ If Wave 1 failed (any subagent returned STATUS: error):
 STATUS: error
 CONTROLS_RUN_DIR: {controls_run_dir}
 METRICS: {scps: 0, rcps: 0, detections: 0}
+```
+
+If Round 2 validation returned STATUS: partial:
+
+```
+STATUS: partial
+CONTROLS_RUN_DIR: {controls_run_dir}
+METRICS: {scps: N, rcps: N, detections: N}
 ```
 </return_summary>
 
@@ -634,8 +646,9 @@ Every controls run MUST produce ALL of the following files before reporting comp
 | 7 | `policy-replacements.json` | `$CONTROLS_RUN_DIR/policy-replacements.json` | Machine-readable policy replacement array for assembly |
 | 8 | `remediation-plan.md` | `$CONTROLS_RUN_DIR/remediation-plan.md` | Prioritized remediation items |
 | 9 | `validation-report.md` | `$CONTROLS_RUN_DIR/validation-report.md` | Adversarial review findings |
-| 10 | `policies/*.json` | `$CONTROLS_RUN_DIR/policies/` | Deployable SCP/RCP policy JSON files |
-| 11 | `agent-log.jsonl` | `$CONTROLS_RUN_DIR/agent-log.jsonl` | Provenance log |
+| 10 | `agent-log.jsonl` | `$CONTROLS_RUN_DIR/agent-log.jsonl` | Provenance log |
+
+`policies/*.json` under `$CONTROLS_RUN_DIR/policies/` is required only when `guardrails.json` contains one or more SCP/RCP entries. A run with no systemic guardrail patterns may report completion with `guardrails.json` as `[]` and no policy files.
 
 **Self-check before reporting completion:**
 

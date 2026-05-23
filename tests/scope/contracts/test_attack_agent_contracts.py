@@ -56,6 +56,7 @@ def test_attack_analyze_agent_contract() -> None:
         r"Dispatch `scope-research`[\s\S]{0,700}`?CALLER=attack-paths`?[\s\S]{0,700}`?SERVICE=[^`\n]+`?[\s\S]{0,700}`?PERMISSION_CONTEXT=[^`\n]+`?[\s\S]{0,700}`?ACCOUNT_CONTEXT=[^`\n]+`?[\s\S]{0,700}(enriches|enrich)[\s\S]{0,160}(never gates|does not gate)",
         "scope-research dispatch must include supported attack-paths caller handoff fields and stay non-gating",
     )
+    assert_matches(prompt, r"Use the Agent tool[\s\S]{0,120}subagent_type=\"scope-research\"")
 
     assert "skills/scope-attack-path-analysis/SKILL.md" in prompt
     assert "skills/scope-evidence-logging/SKILL.md" in prompt
@@ -136,6 +137,37 @@ def test_attack_analyze_agent_contract() -> None:
     assert "AWS IAM Policy Simulator" not in prompt
     assert 'METRICS: {"candidates": 0, "observations": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}' in prompt
     assert "ERRORS: []" in prompt
+
+
+def test_attack_verify_and_exploit_contract_regressions() -> None:
+    analyze = read("agents/subagents/scope-attack-analyze.md")
+    verify = read("agents/subagents/scope-verify.md")
+    exploit = read("agents/scope-exploit.md")
+
+    assert_matches(
+        analyze,
+        r"if `attack_paths\[\]` is non-empty[\s\S]{0,180}STATUS: error",
+        "analyze must not let stale final paths survive into candidate lint",
+    )
+
+    assert_matches(verify, r"^tools: Read, Grep, Glob, WebSearch, WebFetch$", "scope-verify should be read-only plus docs lookup")
+    assert "Do not call AWS APIs." in verify
+    assert_not_matches(verify, r"\b(Edit|Bash)\b", "scope-verify must not edit files or run shell commands")
+    assert_not_matches(verify, r"\bGuaranteed\b|\bSpeculative\b", "scope-verify must not use stale confidence taxonomy")
+    assert_matches(verify, r"validation_status[\s\S]{0,120}validated[\s\S]{0,120}conditional")
+    assert_matches(verify, r"unsupported[\s\S]{0,120}(strip|reject)")
+
+    assert "$AUDIT_RUN_DIR/modules/iam/global.json" in exploit
+    assert "$AUDIT_RUN_DIR/modules/<service>/<region>.json" in exploit
+    assert "$AUDIT_RUN_DIR/iam.json" not in exploit
+    assert_not_matches(exploit, r'for module_file in "\$AUDIT_RUN_DIR"/\*\.json')
+    assert_matches(exploit, r'find "\$AUDIT_RUN_DIR/modules"[\s\S]{0,220}cat "\$module_file"')
+    for text in [
+        "aws iam get-policy-version",
+        "aws iam get-user-policy",
+        "aws iam get-role-policy",
+    ]:
+        assert text in exploit
 
 
 def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
@@ -582,6 +614,45 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert "source_attack_paths: $source_attack_paths" not in controls
     assert "source_attack_path_context" not in controls
     assert "source_attack_paths: []" not in controls
+
+
+def test_controls_validation_and_artifact_contracts() -> None:
+    controls = read("agents/scope-controls.md")
+    detections = read("agents/subagents/scope-controls-detections.md")
+    validate = read("agents/subagents/scope-controls-validate.md")
+
+    assert_matches(
+        controls,
+        r"Round 1 return:[\s\S]{0,220}STATUS: fail[\s\S]{0,180}STOP[\s\S]{0,120}Do not proceed to Results Assembly",
+    )
+    assert_matches(
+        controls,
+        r"Round 2 return:[\s\S]{0,260}BLOCKS > 0[\s\S]{0,180}STOP[\s\S]{0,180}STATUS: partial",
+    )
+    assert_not_matches(controls, r"BLOCKS > 0 \(STATUS: partial\): proceed to Results Assembly anyway")
+    assert_matches(
+        controls,
+        r"STATUS: complete\|partial[\s\S]{0,220}complete[\s\S]{0,220}partial",
+    )
+    assert "STRUCTURED_FILE: {controls_run_dir}/detections.json" in controls
+
+    assert_matches(
+        detections,
+        r"If results\.json has no `attack_paths` array or it is empty[\s\S]{0,260}detections\.md[\s\S]{0,260}detections\.json[\s\S]{0,120}\[\]",
+    )
+    assert_matches(
+        detections,
+        r"If `attack_paths` is empty[\s\S]{0,220}detections\.md[\s\S]{0,220}detections\.json[\s\S]{0,120}\[\]",
+    )
+    assert "STRUCTURED_FILE: {controls_run_dir}/detections.json" in detections
+    assert_not_matches(detections, r"jq -r '\.audit_runs_analyzed\[0\]")
+    assert_matches(detections, r"\.run_id[\s\S]{0,120}basename \"\$AUDIT_RUN_DIR\"")
+
+    assert_not_matches(validate, r"Do NOT re-evaluate permissiveness")
+    assert_matches(
+        validate,
+        r"replacement policy[\s\S]{0,220}(more permissive|broader)[\s\S]{0,220}BLOCK",
+    )
 
 
 def test_controls_workers_own_structured_output_for_assembly() -> None:

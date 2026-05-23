@@ -217,8 +217,9 @@ jq . < "$CONTROLS_RUN_DIR/replacements/iam-replacement-FILENAME.json" > /dev/nul
 **BLOCK criteria:**
 
 - **BLOCK** if any replacement policy JSON is syntactically invalid
+- **BLOCK** if any replacement policy is more permissive or broader than the original policy; treat broader replacement policy grants as a BLOCK.
 
-Verify replacement policy JSON is syntactically valid. Check filenames correspond to roles in the IAM module data. Flag format issues. Do NOT re-evaluate permissiveness — that is the policy subagent's responsibility.
+Verify replacement policy JSON is syntactically valid. Check filenames correspond to roles in the IAM module data. Check that each replacement narrows or preserves permission scope and does not grant broader actions, resources, conditions, or principals than the original policy.
 
 **WARN criteria:**
 

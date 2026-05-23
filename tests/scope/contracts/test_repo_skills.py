@@ -39,6 +39,7 @@ def test_repo_attack_pipeline_skills_contract() -> None:
         "Do not call AWS APIs.",
     ]:
         assert text in attack
+    assert "transition" in attack
 
     for line in attack.splitlines():
         if re.search(r"(^|[^A-Za-z_])attack_paths\[\]", line):
@@ -133,5 +134,13 @@ def test_repo_exploit_playbook_skill_contract() -> None:
         "Establish Persistence",
         "Post-Exploitation",
         "IAM Policy Document",
+    ]:
+        assert text in playbook
+
+    for text in [
+        "Generate-only",
+        "Do not execute AWS CLI commands",
+        "Do not deploy or mutate AWS resources",
+        "Persistence and post-exploitation sections require explicit operator approval",
     ]:
         assert text in playbook
