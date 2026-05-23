@@ -646,7 +646,8 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     assert not re.search(r"GUARANTEED|CONDITIONAL", investigate_run), "investigation run intake must not use old uppercase confidence tier values"
     assert_not_matches(investigate_run, r"severity/confidence|Confidence:")
     assert_matches(investigate_run, r"steps\[\]\.action` as exploit command/action text")
-    assert_matches(investigate_run, r"steps\[\]\.visibility` as MGT/DATA/NONE")
+    assert_matches(investigate_run, r"step descriptions[\s\S]{0,80}affected resource context")
+    assert_matches(investigate_run, r"Do not depend on exploit playbook step tags")
     assert_matches(investigate_run, r"Derive CloudTrail event candidates from the AWS CLI command or API operation")
     assert "derived eventName candidate" in investigate_run
     assert_not_matches(investigate_run, r"steps\[\]\.action`? (?:—|-)\s*these are CloudTrail eventNames|eventName: \[step\.action\]")
