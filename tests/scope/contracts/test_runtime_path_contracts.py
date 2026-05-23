@@ -195,6 +195,41 @@ def test_investigate_command_replaces_scope_hunt() -> None:
         assert "scope:hunt" not in body, f"{relative_path} should not expose /scope:hunt"
 
 
+def test_investigate_prompt_uses_investigation_terminology() -> None:
+    body = read_repo_file("agents/scope-investigate.md")
+
+    stale_phrases = [
+        "<hunt_technique_patterns>",
+        "</hunt_technique_patterns>",
+        "Hunt Technique Patterns",
+        "hunt technique catalogue",
+        "active hunt technique pattern",
+        "Re-run this hunt session",
+    ]
+    for phrase in stale_phrases:
+        assert phrase not in body, f"scope-investigate should not expose stale phrase: {phrase!r}"
+
+    expected_phrases = [
+        "<investigation_technique_patterns>",
+        "</investigation_technique_patterns>",
+        "Investigation Technique Patterns",
+        "investigation technique catalogue",
+        "active investigation technique pattern",
+        "Re-run this investigation session",
+    ]
+    for phrase in expected_phrases:
+        assert phrase in body, f"scope-investigate should contain current phrase: {phrase!r}"
+
+
+def test_investigate_prompt_uses_declared_splunk_tools_for_index_discovery() -> None:
+    body = read_repo_file("agents/scope-investigate.md")
+
+    assert "get_indexes" not in body
+    assert "| rest /services/data/indexes" in body
+    assert "using `working_tool`" in body
+    assert "For RUN and INTEL modes, run this probe after subagent handoff" in body
+
+
 def test_investigate_handoffs_use_current_state_fields() -> None:
     parent = read_repo_file("agents/scope-investigate.md")
     alert = read_repo_file("agents/subagents/scope-investigate-alert.md")

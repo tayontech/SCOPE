@@ -162,9 +162,9 @@ Announce mode before continuing, for example: `Run-guided investigation mode: re
 
 **INTEL:** Pass `INTEL_SOURCE_URL` or `INTEL_NL_INPUT` + `INTEL_TYPE` + `KNOWLEDGE_CONTEXT`. Receive `INTEL_HANDOFF` with `active_hypothesis`, `all_hypotheses`, `investigation_mode`. If `investigation_mode=all`, iterate all hypotheses; else proceed with active.
 
-**RUN:** Pass `SOURCE_RUN_DIR` + `KNOWLEDGE_CONTEXT`. Receive `RUN_HANDOFF` with `active_hypothesis`, `all_hypotheses`, `investigation_mode`. If `fallback_to_investigation: true`, switch to INVESTIGATION mode. If `investigation_mode=all`, iterate hypotheses sequentially. Else proceed with active to `<hunt_technique_patterns>` + `<investigation_loop>`.
+**RUN:** Pass `SOURCE_RUN_DIR` + `KNOWLEDGE_CONTEXT`. Receive `RUN_HANDOFF` with `active_hypothesis`, `all_hypotheses`, `investigation_mode`. If `fallback_to_investigation: true`, switch to INVESTIGATION mode. If `investigation_mode=all`, iterate hypotheses sequentially. Else proceed with active to `<investigation_technique_patterns>` + `<investigation_loop>`.
 
-**INVESTIGATION:** Run `<mcp_detection>` first. Pass raw input + `MCP_MODE` + `working_tool` + `KNOWLEDGE_CONTEXT`. Receive `INVESTIGATE_HANDOFF` with `active_hypothesis` (single, auto-proceed). Skip `<hunt_technique_patterns>`, go to `<investigation_loop>`.
+**INVESTIGATION:** Run `<mcp_detection>` first. Pass raw input + `MCP_MODE` + `working_tool` + `KNOWLEDGE_CONTEXT`. Receive `INVESTIGATE_HANDOFF` with `active_hypothesis` (single, auto-proceed). Skip `<investigation_technique_patterns>`, go to `<investigation_loop>`.
 
 **Dispatch:** Use the Agent tool with the appropriate subagent_type for the selected mode subagent.
 
@@ -207,14 +207,14 @@ Store `active_hypothesis` in session memory after handoff receipt (or after inli
 The `iocs.ips` and `iocs.arns` fields (intel mode only) are used by the investigation loop to add `sourceIPAddress` and `userIdentity.arn` filters to Splunk queries.
 </hypothesis_engine>
 
-<hunt_technique_patterns>
-## Hunt Technique Patterns — Data Layer Reference
+<investigation_technique_patterns>
+## Investigation Technique Patterns — Data Layer Reference
 
 This section applies **only in MODE=RUN** (when an audit or exploit run directory was provided). It is skipped in MODE=INVESTIGATION (detection alert investigation does not use the technique catalogue — the hypothesis engine's alert type mapping table is sufficient).
 
 ### Loading the Catalogue
 
-After `active_hypothesis` is set and before entering `<investigation_loop>`, read the hunt technique catalogue:
+After `active_hypothesis` is set and before entering `<investigation_loop>`, read the investigation technique catalogue:
 
 ```bash
 cat config/hunt-techniques.json 2>/dev/null || echo '{}'
@@ -256,12 +256,12 @@ Confirm data event status before interpreting results.
 ### Extending the Catalogue
 
 New patterns are added by appending entries to the relevant category array in `config/hunt-techniques.json`. No changes to this section or the reasoning framework are required. The category key lookup (`adversary_goal` → category key) is the only coupling point between the agent and the data file.
-</hunt_technique_patterns>
+</investigation_technique_patterns>
 
 <mcp_detection>
 ## MCP Detection — Splunk Connection Check
 
-Probe for Splunk MCP at startup — no analyst action required. Announce: `Checking for Splunk MCP connection...`
+For INVESTIGATION mode, probe for Splunk MCP before dispatching `scope-investigate-alert` because alert intake may need Splunk access. For RUN and INTEL modes, run this probe after subagent handoff and before the first Splunk query. No analyst action is required. Announce: `Checking for Splunk MCP connection...`
 
 **Probe index:** Read `config/index.json` — use the first index from any group's `indexes[]` array as PROBE_INDEX. If missing, PROBE_INDEX="cloudtrail".
 
@@ -284,7 +284,7 @@ Probe for Splunk MCP at startup — no analyst action required. Announce: `Check
 
 **Trigger:** `config/index.json` does not exist AND MCP_MODE=CONNECTED. Skip when `config/index.json` already exists and no refresh was requested.
 
-If `config/index.json` does not exist and Splunk MCP is connected, discover available indexes: probe `get_indexes` (fall back to `| rest /services/data/indexes`), filter internal/ES indexes (prefixed with `_`, plus summary, notable, risk, ueba, cim_*, etc.), classify remaining indexes into type groups (aws_api, aws_network, identity, vcs, endpoint, network, cloud_platform), present proposed groupings to operator for confirmation, and write to `config/index.json` on approval. Unmatched indexes are listed for operator review — never discarded.
+If `config/index.json` does not exist and Splunk MCP is connected, discover available indexes by running `| rest /services/data/indexes` using `working_tool`. Filter internal/ES indexes (prefixed with `_`, plus summary, notable, risk, ueba, cim_*, etc.), classify remaining indexes into type groups (aws_api, aws_network, identity, vcs, endpoint, network, cloud_platform), present proposed groupings to operator for confirmation, and write to `config/index.json` on approval. Unmatched indexes are listed for operator review — never discarded.
 
 If operator requests a refresh when `config/index.json` already exists: re-run discovery, show only NEW indexes not already configured, merge on confirmation. Never remove existing entries.
 
@@ -330,7 +330,7 @@ Show the complete SPL query, pre-formatted, copy-pasteable:
 
 **3.5. PURPOSE Label (when active_hypothesis is set)**
 
-Before presenting the gate, state the query's hypothesis role. Derive this from the active hunt technique pattern's `cloudtrail_signals[].confirm_refute` field for the primary event in this query. In MODE=INVESTIGATION with no pattern loaded, omit this label.
+Before presenting the gate, state the query's hypothesis role. Derive this from the active investigation technique pattern's `cloudtrail_signals[].confirm_refute` field for the primary event in this query. In MODE=INVESTIGATION with no pattern loaded, omit this label.
 
 ```
 PURPOSE: This query is designed to [confirm / refute] the hypothesis by checking for
@@ -552,7 +552,7 @@ Determine the verdict from the `investigation_findings` accumulator:
 HYPOTHESIS VERDICT: UNABLE TO QUERY
   Hypothesis:  [active_hypothesis.name]
   Reason:      Splunk was not available. No CloudTrail queries were executed. The hypothesis has not been tested.
-  Next step:   Re-run this hunt session when Splunk is accessible, or query CloudTrail directly via AWS CLI.
+  Next step:   Re-run this investigation session when Splunk is accessible, or query CloudTrail directly via AWS CLI.
 ```
 
 ```
