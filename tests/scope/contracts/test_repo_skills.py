@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def read(path: str) -> str:
+    return (ROOT / path).read_text()
+
+
+def assert_frontmatter(body: str, name: str) -> None:
+    assert re.match(r"^---\n[\s\S]*?\n---\n", body), f"{name} must start with frontmatter"
+    assert re.search(rf"^name: {re.escape(name)}$", body, re.MULTILINE)
+    assert re.search(r"^description: Use when ", body, re.MULTILINE)
+
+
+def test_repo_attack_pipeline_skills_contract() -> None:
+    attack = read("skills/scope-attack-path-analysis/SKILL.md")
+    evidence = read("skills/scope-evidence-logging/SKILL.md")
+
+    assert_frontmatter(attack, "scope-attack-path-analysis")
+    assert_frontmatter(evidence, "scope-evidence-logging")
+
+    for text in [
+        "candidate_attack_paths[]",
+        "entry point -> new execution context -> new permission set -> impact",
+        "Only records with `attack_path_seed: true` can start `starting_position.type: \"public_endpoint\"` candidates.",
+        "Set `starting_position.id` to the exact `public_entrypoints[].id`.",
+        "Public endpoint facts whose only concrete action is invocation, TCP reachability, or DNS resolution.",
+        "role chaining",
+        "lateral movement",
+        "hops[]",
+        "security_observations[]",
+        "runtime_assumption",
+        "coverage_caveat",
+        "Do not call AWS APIs.",
+        "Existing CodeBuild project execution",
+        "Identity issuance",
+        "DynamoDB, or SSM",
+    ]:
+        assert text in attack
+    assert "transition" in attack
+
+    for line in attack.splitlines():
+        if re.search(r"(^|[^A-Za-z_])attack_paths\[\]", line):
+            assert re.search(r"(Do not|does not|scope-attack-validate owns promotion)", line, re.IGNORECASE), line
+    assert re.search(r"Do not (write|create|generate|promote)[\s\S]{0,120}(final\s+)?`?attack_paths\[\]`?", attack, re.IGNORECASE)
+    assert re.search(
+        r"Each hop must change (position|principal context|capability|reachable resource|permission set|execution context|impact)(, (position|principal context|capability|reachable resource|permission set|execution context|impact))*?, or (position|principal context|capability|reachable resource|permission set|execution context|impact)\.",
+        attack,
+    )
+
+    for pattern in [
+        r"public endpoint[\s\S]{0,160}AWS-level proof",
+        r"assume-role[\s\S]{0,120}stronger action",
+        r"pass-role[\s\S]{0,120}compute",
+        r"resource policy[\s\S]{0,120}external access[\s\S]{0,120}impact",
+        r"single posture facts",
+        r"permission lists without context change",
+        r"missing required hop",
+        r"data claims without target resource/action",
+    ]:
+        assert re.search(pattern, attack, re.IGNORECASE), pattern
+
+    allowed = {
+        "graph_edge",
+        "module_resource",
+        "policy_document",
+        "runtime_assumption",
+        "coverage_caveat",
+    }
+    for text in [
+        "valid evidence types",
+        "graph edge IDs from `$RUN_DIR/graph.json`",
+        "module files/resources under `$RUN_DIR/modules/**`",
+        "ARNs through the `arn` field",
+        "Every evidence object needs at least one of `id`, `source_path`, or `arn`.",
+        "No placeholders.",
+        "No nonexistent file paths.",
+        "module status",
+        "coverage check",
+        "field status",
+        "scope.attack.schema",
+    ]:
+        assert text in evidence
+    for evidence_type in allowed:
+        assert evidence_type in evidence
+
+    line = re.search(r"valid evidence types:\s*([^\n]+)", evidence, re.IGNORECASE)
+    assert line
+    listed = {value.strip("`") for value in re.findall(r"`([^`]+)`", line.group(1))}
+    assert listed == allowed
+    assert "arn" not in listed
+
+
+def test_repo_investigation_report_skill_contract() -> None:
+    report = read("skills/scope-investigation-report/SKILL.md")
+
+    assert_frontmatter(report, "scope-investigation-report")
+
+    for text in [
+        "INVESTIGATION_REPORT",
+        "`MODE`: `INVESTIGATION`, `RUN`, or `INTEL`",
+        "`investigation_findings`",
+        "`KNOWLEDGE_CONTEXT`",
+        "Present facts only.",
+        "Do not infer events that no query returned.",
+        "Prefix every follow-up option with `Consider:`.",
+        "Investigation Summary",
+        "Evidence Timeline",
+        "Investigation Gaps",
+        "Environment Context Used",
+        "Queries Run",
+        "knowledge_update_candidates",
+    ]:
+        assert text in report
+
+
+def test_repo_exploit_playbook_skill_contract() -> None:
+    playbook = read("skills/scope-exploit-playbook/SKILL.md")
+
+    assert_frontmatter(playbook, "scope-exploit-playbook")
+
+    for text in [
+        "EXPLOIT_PLAYBOOK",
+        "`TARGET_ARN`",
+        "`DISCOVERY_MODE`: `standalone` or `audit`",
+        "operator-approved paths",
+        "research results from `scope-research`",
+        "`AWS_CLI_REPLAY` from `scope-awscli-replay`",
+        "The top-level agent owns permission discovery, path reasoning, research dispatch, gates, artifact writes, and `results.json`.",
+        "Use actual ARNs, account IDs, resource names, and permissions from discovery.",
+        "Order steps by technical dependency, not quietness or stealth.",
+        "Use command blocks from `AWS_CLI_REPLAY.paths[].commands[]`.",
+        "Do not include CloudTrail event names, GuardDuty finding types, detection likelihood, OPSEC notes, SOC recommendations, numeric confidence scores, or stealth-ordering headers.",
+        "Establish Persistence",
+        "Post-Exploitation",
+        "IAM Policy Document",
+    ]:
+        assert text in playbook
+
+    for text in [
+        "Generate-only",
+        "Do not execute AWS CLI commands",
+        "Do not deploy or mutate AWS resources",
+        "Persistence and post-exploitation sections require explicit operator approval",
+    ]:
+        assert text in playbook
+
+
+def test_repo_detection_format_skill_contract() -> None:
+    detection_format = read("skills/scope-detection-format/SKILL.md")
+
+    assert_frontmatter(detection_format, "scope-detection-format")
+
+    for text in [
+        "format-only",
+        "FORMAT_BLOCKS",
+        "`detections.md`",
+        "`detections.json`",
+        "Do not decide alert vs hunt",
+        "Do not promote, reject, or downgrade detections",
+        "Do not change SPL logic",
+        "Do not invent required values",
+        "The caller owns detection quality",
+        "SPL in `detections.json` must be a single-line string",
+        "Markdown SPL blocks must use fenced `spl` code blocks",
+        "Dashboard-readable text must be concise",
+    ]:
+        assert text in detection_format
+
+    for field in [
+        "name",
+        "type",
+        "objective",
+        "spl",
+        "severity",
+        "category",
+        "mitre_technique",
+        "source_attack_paths",
+        "source_run_ids",
+        "promotion_decision",
+        "fidelity_rationale",
+        "noise_controls",
+        "expected_volume",
+        "validation_status",
+    ]:
+        assert f"`{field}`" in detection_format

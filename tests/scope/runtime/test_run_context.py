@@ -190,9 +190,29 @@ def test_resolve_run_directory_converts_started_at_to_utc_for_run_id(
     assert run_dir == tmp_path / run_id
 
 
-def test_resolve_run_directory_fails_if_exact_run_dir_exists(tmp_path: Path):
+def test_resolve_run_directory_allows_precreated_explicit_run_dir_with_gate_logs(tmp_path: Path):
     existing = tmp_path / "existing"
     existing.mkdir()
+    (existing / "agent-log.jsonl").write_text('{"event":"gate_1"}\n', encoding="utf-8")
+    (existing / "gate-2.log").write_text("approved\n", encoding="utf-8")
+    context = AccountContext(
+        account_id="123456789012",
+        account_name="prod",
+        account_owned=True,
+        account_registry_source=None,
+    )
+    started_at = datetime(2026, 5, 21, 0, 31, 47, tzinfo=timezone.utc)
+
+    run_dir, run_id = resolve_run_directory(context, started_at, run_dir=existing, output_dir=None)
+
+    assert run_dir == existing
+    assert run_id == "existing"
+
+
+def test_resolve_run_directory_fails_if_exact_run_dir_has_runtime_artifacts(tmp_path: Path):
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    (existing / "manifest.json").write_text("{}", encoding="utf-8")
     context = AccountContext(
         account_id="123456789012",
         account_name="prod",
@@ -203,6 +223,27 @@ def test_resolve_run_directory_fails_if_exact_run_dir_exists(tmp_path: Path):
 
     with pytest.raises(FileExistsError):
         resolve_run_directory(context, started_at, run_dir=existing, output_dir=None)
+
+
+def test_resolve_run_directory_uses_explicit_run_dir_name_as_run_id(tmp_path: Path):
+    context = AccountContext(
+        account_id="123456789012",
+        account_name="prod",
+        account_owned=True,
+        account_registry_source=None,
+    )
+    started_at = datetime(2026, 5, 21, 0, 31, 47, tzinfo=timezone.utc)
+    requested = tmp_path / "audit-20260524-144332-all"
+
+    run_dir, run_id = resolve_run_directory(
+        context,
+        started_at,
+        run_dir=requested,
+        output_dir=None,
+    )
+
+    assert run_id == "audit-20260524-144332-all"
+    assert run_dir == requested
 
 
 def test_resolve_run_directory_rejects_invalid_context_account_id(tmp_path: Path):

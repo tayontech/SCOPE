@@ -2,45 +2,17 @@
 
 ## Overview
 
-**What this enables:** SCOPE agents (`scope-hunt`, `scope-defend-splunk`) read this document before generating SPL queries. It establishes the command selection rules, behavioral patterns, and anti-patterns that govern every query the agents write. Following these patterns produces queries that run correctly at scale, avoid common performance traps, and return accurate results across any data source.
+**What this enables:** SCOPE agents (`scope-investigate`, `scope-controls-detections`) read this document before generating SPL queries. It establishes the command selection rules, behavioral patterns, and anti-patterns that govern every query the agents write. Following these patterns produces queries that run correctly at scale, avoid common performance traps, and return accurate results across any data source.
 
-**When to consult this document:** Before writing any SPL query — at the beginning of an investigation session, when selecting between `tstats`, `stats`, or `streamstats`, and when generating composite detection rules.
+**When to consult this document:** Before writing any SPL query — at the beginning of an investigation session, when selecting between `stats`, `eventstats`, `streamstats`, `bin`, or `timechart`, and when generating composite detection rules.
 
-**Research sources:** Splunk official documentation, the PEAK (Prepare-Execute-Act-Know) framework documented by Splunk Security, Splunk community performance threads, and Splunk Enterprise Security installation documentation. All patterns have been verified against Splunk 9.x behavior.
+**Research sources:** Splunk Cloud Platform Search Reference, Splunk MCP Server for Splunk Platform docs, and Splunk security detection engineering guidance. These patterns target Splunk Cloud as the SIEM for SCOPE investigations and controls detections.
 
 ---
 
 ## Command Selection Rules
 
-The three primary aggregation commands serve different purposes. Using the wrong command produces either incorrect results (tstats for payload fields) or poor performance (transaction for composite detections).
-
-### tstats — High-Speed Metadata Queries
-
-`tstats` operates on `.tsidx` index metadata files, not raw events. It reads only fields that were indexed at ingest time: `host`, `source`, `sourcetype`, `_time`, and any explicitly indexed custom fields.
-
-**Use tstats for:**
-- Rapid data availability checks: does this index have data in this time window?
-- Volume anomaly detection: did event count drop or spike versus a historical baseline?
-- Counting event classes by sourcetype for coverage analysis
-- IOC lookup speed when the IOC appears in an indexed field (e.g., `host`, `source`)
-
-**Hard limit:** tstats CANNOT access event payload fields like `eventName`, `sourceIPAddress`, `userIdentity.arn`, `actor.alternateId`, or any other search-time extracted field. Queries using tstats for payload fields return empty or incorrect results — this is a silent failure, not an error.
-
-Data availability check:
-
-```spl
-| tstats count where index=cloudtrail earliest=-24h latest=now by sourcetype
-```
-
-Volume anomaly detection (spike/drop vs. baseline):
-
-```spl
-| tstats count AS hourly_count dc(host) AS host_count
-    where index=cloudtrail
-    by _time span=1h
-| eventstats median(hourly_count) AS median_count
-| where hourly_count < (median_count * 0.5)
-```
+The primary detection commands serve different purposes. Use `stats` for aggregation, `eventstats` for inline baselines, `streamstats` for sliding windows, `bin` + `stats` for fixed windows, and `timechart` for trend or dashboard searches. Avoid commands that depend on accelerated data models or indexed-only fields unless the operator explicitly confirms that environment.
 
 ### stats — Primary Event Analysis Command
 
@@ -77,13 +49,45 @@ See the Composite Detection section for the full pattern.
 
 ---
 
+## Detection Building Blocks
+
+Use these Splunk Cloud SPL commands and functions when they improve fidelity, normalization, or operator usefulness. Do not add a command because it is available; each stage must support a detection objective.
+
+| Command or function | Detection use | Caveat |
+|---|---|---|
+| `search` with exact filters and `IN (...)` | Start every production detection with tight index, sourcetype, time, and action filters. | Use explicit field filters. Avoid raw string search unless the target field is unknown. |
+| `where` | Filter on computed predicates, thresholds, field-to-field comparisons, `cidrmatch`, `match`, and multivalue checks. | Quote literal strings. Field names with dots can require single quotes in expressions. |
+| `eval` with `case`, `if`, `coalesce`, `lower`, `replace` | Normalize actor, IP, account, resource, and result fields before aggregation. | Do not overwrite raw fields. Write normalized fields such as `normalized_actor`. |
+| `cidrmatch()` | Classify source IPs against private, VPN, scanner, corporate, cloud, or approved network ranges. | Keep inline CIDR sets small and operator-confirmed. |
+| `match()` | Detect regex-shaped values such as generated role names, encoded command strings, temp paths, suspicious user agents, or malformed resource IDs. | Anchor regexes when full-string matching matters. |
+| `rex field=<field>` | Extract missing fields from semi-structured payloads after initial filtering. | Filter first and target a specific field. Avoid broad `_raw` extraction. |
+| `spath input=<field>` | Extract nested JSON values from request parameters, payload fields, or vendor logs. | Use only when extraction is not already available through Splunk field extraction. |
+| `json_extract` / `json_extract_exact` | Pull JSON values inside an already-extracted string field from an `eval` expression. | Prefer `spath` when command-stage extraction is clearer. |
+| `fields + ...` | Keep only detection inputs before expensive stages. | Use `table` for final display, not mid-pipeline projection. |
+| Final `table` | Show alert evidence fields such as `_time`, actor, src, action, resource, reason, first_seen, and last_seen. | Keep it at the end so later commands do not lose fields. |
+| `fillnull value=<value> <field-list>` | Stabilize optional fields such as `errorCode`, `mfaUsed`, `userAgent`, or `src_ip`. | Always specify a field list. |
+| `dedup <entity> sortby -_time` | Keep latest event per entity for investigation views or evidence samples. | Do not use `dedup` as the detection threshold. |
+| `mvcount`, `mvfind`, `mvfilter`, `mvdedup` | Score aggregated action lists, check required sequence steps, and filter suspicious values inside arrays. | Handle null multivalue fields explicitly. |
+| `mvexpand <field> limit=<n>` | Expand arrays when each value needs independent matching. | Set `limit` where possible to avoid memory pressure. |
+| `bin _time span=<window>` + `stats` | Build fixed-window detections that preserve actor/resource rows. | Prefer this over `timechart` for alert rows. |
+| `timechart span=<window>` | Build coverage checks, volume baselines, and dashboard/trend searches. | Do not use as the core alert query when row-level evidence is required. |
+| `sort <limit> -<field>` | Rank final aggregate rows by count, latest event, or distinct action count. | Use `sort 0` only when the result set is already bounded. |
+
+Blocked by default:
+
+- Expensive correlation or fan-out commands: `join`, `append`, `appendcols`, `selfjoin`, `map`, and `transaction`.
+- Side-effect commands: `collect`, `mcollect`, `tscollect`, `outputcsv`, `outputlookup`, `delete`, `sendemail`, `sendalert`, `script`, and `run`.
+Use environment-dependent commands such as `rest`, `lookup`, `inputlookup`, and `tstats` only when the operator confirms the required Splunk Cloud permissions, lookup assets, or acceleration/indexed-field assumptions. Do not make generated detections depend on them by default.
+
+---
+
 ## Behavioral Baseline Patterns
 
 Behavioral baselines establish what "normal" looks like for a principal or resource over a historical window. Deviations from baseline indicate anomalous activity. This approach is formalized in the PEAK (Prepare-Execute-Act-Know) framework documented by Splunk Security.
 
 **Recommended baseline window:** 30-90 days of historical data. 30 days is the practical minimum. Shorter windows may not capture low-frequency legitimate activity (monthly batch jobs, quarterly access patterns).
 
-**Two-query approach:** Run the baseline query first, store results (lookup or join), then query the hunt window and compare.
+**Preferred approach:** Use `eventstats` for inline baselines when the current result set contains enough history. Do not generate detections that depend on lookup tables unless the operator explicitly provides the lookup name and fields.
 
 Baseline query (30-day history):
 
@@ -94,14 +98,15 @@ index=cloudtrail earliest=-30d latest=-1d
 | eval normal_threshold = baseline_count * 1.5
 ```
 
-Hunt window query with deviation detection:
+Inline deviation detection with `eventstats`:
 
 ```spl
-index=cloudtrail earliest=-24h latest=now
+index=cloudtrail earliest=-30d latest=now
     eventName=AssumeRole
-| stats count AS current_count by userIdentity.arn requestParameters.roleArn
-| join type=left userIdentity.arn [ | inputlookup baseline_assumerole.csv ]
-| where current_count > normal_threshold OR isnull(normal_threshold)
+| bin _time span=1d
+| stats count AS daily_count by _time userIdentity.arn requestParameters.roleArn
+| eventstats median(daily_count) AS median_count perc95(daily_count) AS p95_count by userIdentity.arn requestParameters.roleArn
+| where daily_count > p95_count AND daily_count > (median_count * 2)
 ```
 
 ---
@@ -224,74 +229,52 @@ Store results from each query and build the correlation narrative: "The same IP 
 
 ## Anti-Patterns
 
-Avoid these patterns in all generated SPL. The `scope-spl-lint.sh` hook enforces the BLOCK-level items automatically.
+Avoid these patterns in all generated SPL. The `scope-spl-lint.sh` hook enforces mechanical safety rules such as named indexes, time bounds, blocked side-effect commands, blocked environment-dependent commands, and blocked fan-out commands. Sequence-correlation choices such as `streamstats` versus `transaction` remain design guidance because regex lint cannot classify composite detection intent reliably.
 
 | Anti-Pattern | Why Bad | What to Use Instead |
 |---|---|---|
 | `\| transaction` in composite detections | Runs entirely on search head, no map-reduce, RAM explosion at scale | `\| streamstats time_window=... by actor_field` |
 | Leading wildcards: `eventName=*CreateUser*` | Forces full raw-text scan of every event | Exact match: `eventName=CreateUser` or `OR` list |
 | No time bounds: `index=cloudtrail eventName=...` | Unbounded scan — may scan months of data and timeout | Always specify `earliest=` and `latest=` |
-| `index=*` or omitting `index=` | Scans all indexes including internal ones | Always specify `index=<name>` from `config/index.json` |
+| `index=*` or omitting `index=` | Scans all indexes and can cross unrelated data sources | Always specify `index=<name>` from the MCP-discovered or operator-provided `index_catalog` |
 | `\| join` for cross-index correlation | Resource-intensive, 50k row cap, search head only | Separate queries; agent correlates results |
 | `\| append` for cross-index merging | 50k row cap, runs secondary search sequentially | Separate queries; agent correlates results |
-| tstats for event payload fields | tstats can only read indexed metadata — returns wrong or empty results | Use `stats` or `search` for eventName, userIdentity, etc. |
 | `eventSource="iam"` (shorthand) | Incorrect — CloudTrail uses full service endpoint | `eventSource="iam.amazonaws.com"` |
 | Verbose mode in automated searches | Returns all raw event data, floods network from indexers | Default or fast mode only |
-| High-cardinality `by` clause in tstats | Groups by fields with millions of distinct values causes memory pressure | Add additional filter terms to reduce cardinality first |
 
 ---
 
 ## Index Discovery
 
-When `config/index.json` does not exist, the agent enumerates available Splunk indexes using the `get_indexes` MCP tool, reasons about security relevance, and presents discovered groupings to the operator for confirmation before writing the file.
+When Splunk MCP is connected, the agent enumerates available Splunk indexes with `splunk_get_indexes`, reasons about security relevance, and keeps the approved grouping in session memory as `index_catalog`. Do not discover indexes with SPL `rest` commands. If `splunk_get_indexes` is unavailable, ask the operator to provide a temporary index list for the session.
 
-**Internal indexes to exclude during discovery.** These are Splunk Enterprise Security platform indexes — not operator data sources. Never group them as security-relevant data:
+`index_catalog` is the only SCOPE index-selection contract. It can come from Splunk MCP discovery or direct operator input. There is no static index configuration file.
 
-- `notable` — ES finding events
-- `notable_summary` — ES stats summaries
-- `risk` — ES risk modifier events
-- `threat_activity` — ES threat list matches
-- `ioc` — ES threat intelligence
-- `ers` — entity risk scoring
-- `ueba` — user behavior analytics
-- `ueba_summaries` — UEBA summaries
-- `endpoint_summary` — endpoint protection summary
-- `audit_summary` — audit data protection
-- `_internal` — Splunk platform internal
-- `_audit` — Splunk audit trail
-- `_introspection` — Splunk health metrics
-- `summary` — summary index (Splunk default)
-- `history` — Splunk search history
+Exclude Splunk platform indexes that start with `_` from normal security-data grouping unless the operator explicitly selects one. Do not assume any prebuilt alert index or field schema exists in Splunk Cloud.
 
-**`main` index handling:** The `main` index is not automatically excluded — operators may route security data there. Flag it to the operator: "The 'main' index appears to contain data. Would you like to include it in a group?" Do not silently include or exclude it.
-
-**ES internal indexes in SPL are always valid.** The `scope-spl-lint.sh` index allowlist check must skip ES internal indexes (notably `index=notable` used by `scope-hunt-investigate.md`). These are correct uses, not allowlist violations.
+Treat the `main` index as operator-owned. If it appears during discovery, ask whether it contains security data. Do not silently include or exclude it.
 
 ---
 
 ## MCP Tool Reference
 
-The Splunkbase app 7931 (MCP Server for Splunk Platform, version 1.0.2+) exposes these tools relevant to SCOPE query generation:
+Splunk MCP Server for Splunk Platform 1.1 exposes these tools relevant to SCOPE query generation:
 
-### get_indexes
+### splunk_get_indexes
 
-Enumerates all available Splunk indexes. Use at startup when `config/index.json` does not exist to drive the index discovery flow. Filter internal indexes (see Index Discovery section) before presenting to the operator.
-
-When the tool is unavailable (older app version): fall back to `search_oneshot` with:
-
-```spl
-| rest /services/data/indexes | fields title
-```
-
-### validate_spl
-
-Validates SPL syntax before execution. Use before running complex or expensive queries to catch syntax errors without consuming Splunk resources. Does not check semantic correctness — a syntactically valid query may still return incorrect results for the wrong index.
+Lists Splunk indexes. Use this for connected-mode runtime discovery before generating SPL.
 
 ### saia_optimize_spl
 
 Splunk's own SPL optimizer. Optional — useful for complex queries, not required for routine detection queries. The optimizer knows the target instance's configuration and can improve query performance based on actual index structure. Use for multi-stage pipelines or queries with high expected result counts.
 
-**Primary query execution:** Use `search_oneshot` or `search_splunk` for all actual query execution. The existing 4-tool probe sequence in `scope-hunt.md` already determines which tool to use based on connectivity.
+### splunk_run_query
+
+Primary SPL execution tool for Splunk MCP 1.1. SCOPE also probes older local tool names for backwards compatibility, then stores one `working_tool` for the session.
+
+### splunk_run_saved_search
+
+Runs saved searches when the beta saved-search tool is enabled by the Splunk MCP admin.
 
 ---
 
@@ -316,5 +299,3 @@ Lazy field sampling with bounded fallback:
 ```spl
 index=<target_index> earliest=-30d latest=now | head 1
 ```
-
-**Exception:** The `index=notable` query in `scope-hunt-investigate.md` operates without explicit time bounds by design — the notable index is always queried for recent unresolved findings, and Splunk ES manages its own retention. This is the only acceptable exception.

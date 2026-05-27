@@ -133,3 +133,104 @@ def test_apigateway_extracts_rest_lambda_integrations():
     assert envelope.resources[0]["lambda_integrations"] == [
         "arn:aws:lambda:us-east-1:123456789012:function:RestFunction"
     ]
+
+
+def test_apigateway_marks_regional_rest_api_as_public_endpoint():
+    rest = FakeClient(
+        {
+            "get_rest_apis": {
+                "items": [
+                    {
+                        "id": "abc123def4",
+                        "name": "PublicRestApi",
+                        "endpointConfiguration": {"types": ["REGIONAL"]},
+                    }
+                ]
+            },
+            "get_authorizers": {"items": []},
+            "get_stages": {"item": [{"stageName": "prod"}]},
+            "get_resources": {"items": []},
+        }
+    )
+    v2 = FakeClient({"get_apis": {"Items": []}})
+
+    envelope = run(FakeFactory(apigateway=rest, apigatewayv2=v2), "us-east-1")
+
+    api = envelope.resources[0]
+    assert api["endpoint_configuration"] == {"types": ["REGIONAL"]}
+    assert api["public_endpoint"] is True
+
+
+def test_apigateway_marks_disabled_v2_execute_api_endpoint_not_public():
+    rest = FakeClient({"get_rest_apis": {"items": []}})
+    v2 = FakeClient(
+        {
+            "get_apis": {
+                "Items": [
+                    {
+                        "ApiId": "zyxwvuts12",
+                        "Name": "PrivateHttpApi",
+                        "ProtocolType": "HTTP",
+                        "DisableExecuteApiEndpoint": True,
+                    }
+                ]
+            },
+            "get_authorizers": {"Items": []},
+            "get_stages": {"Items": []},
+            "get_integrations": {"Items": []},
+        }
+    )
+
+    envelope = run(FakeFactory(apigateway=rest, apigatewayv2=v2), "us-east-1")
+
+    api = envelope.resources[0]
+    assert api["disable_execute_api_endpoint"] is True
+    assert api["public_endpoint"] is False
+
+
+def test_apigateway_preserves_rest_resource_policy_statements():
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "VpceInvoke",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "execute-api:Invoke",
+                "Resource": "arn:aws:execute-api:us-east-1:123456789012:abc123def4/*/*/*",
+                "Condition": {
+                    "StringEquals": {
+                        "aws:SourceArn": "arn:aws:vpce:us-east-1:123456789012:vpce/vpce-abc123"
+                    }
+                },
+            }
+        ],
+    }
+    rest = FakeClient(
+        {
+            "get_rest_apis": {
+                "items": [
+                    {
+                        "id": "abc123def4",
+                        "name": "PrivateRestApi",
+                        "policy": json.dumps(policy),
+                    }
+                ]
+            },
+            "get_authorizers": {"items": []},
+            "get_stages": {"item": [{"stageName": "prod"}]},
+            "get_resources": {"items": []},
+        }
+    )
+    v2 = FakeClient({"get_apis": {"Items": []}})
+
+    envelope = run(FakeFactory(apigateway=rest, apigatewayv2=v2), "us-east-1")
+
+    api = envelope.resources[0]
+    assert api["resource_policy_document"] == policy
+    assert api["resource_policy_statements"][0]["sid"] == "VpceInvoke"
+    assert api["resource_policy_statements"][0]["normalized_principals"] == ["*"]
+    assert api["resource_policy_statements"][0]["normalized_actions"] == ["execute-api:Invoke"]
+    assert api["resource_policy_statements"][0]["source_arns"] == [
+        "arn:aws:vpce:us-east-1:123456789012:vpce/vpce-abc123"
+    ]

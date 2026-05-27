@@ -43,6 +43,9 @@
           "is_wildcard": false,
           "has_external_id": false,
           "has_mfa_condition": false,
+          "actions": [
+            "sts:AssumeRole"
+          ],
           "conditions": {}
         }
       ],

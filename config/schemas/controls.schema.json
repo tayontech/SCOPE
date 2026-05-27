@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scope-controls-results",
+  "title": "SCOPE Controls Results",
+  "description": "Schema for controls phase results.json — six-subagent architecture. Validated by scope-schema-validate hook.",
+  "type": "object",
+  "required": ["account_id", "source", "region", "timestamp", "summary", "audit_runs_analyzed", "org_wide_issues", "detections", "dashboards", "policy_replacements", "remediation", "validation"],
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "pattern": "^\\d{12}$",
+      "description": "12-digit AWS account ID — primary account (first or only audit run consumed)"
+    },
+    "accounts_analyzed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^\\d{12}$"
+      },
+      "description": "All AWS account IDs analyzed in this controls run — present only when multi-run mode spans multiple accounts"
+    },
+    "source": {
+      "const": "controls"
+    },
+    "region": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "audit_runs_analyzed": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Run IDs of audit runs consumed by this controls run"
+    },
+    "summary": {
+      "type": "object",
+      "required": ["org_wide_issues", "detections", "dashboards", "policy_replacements", "remediation_items", "validation_status", "severity"],
+      "properties": {
+        "org_wide_issues": { "type": "integer", "description": "Count of advisory org-wide issues identified" },
+        "detections": { "type": "integer", "description": "Count of SPL detections generated" },
+        "dashboards": { "type": "integer", "description": "Count of monitoring dashboard ideas generated" },
+        "policy_replacements": { "type": "integer", "description": "Count of IAM replacement policies generated" },
+        "remediation_items": { "type": "integer", "description": "Count of prioritized remediation items" },
+        "validation_status": { "type": "string", "enum": ["pass", "partial", "fail"] },
+        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
+      }
+    },
+    "org_wide_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "severity", "scope", "evidence", "source_attack_paths", "source_public_exposure_findings", "source_run_ids", "widespread_rationale", "recommended_next_step"],
+        "properties": {
+          "name": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "scope": { "type": "string", "enum": ["account", "multi-account", "service", "identity", "region", "unknown"] },
+          "evidence": { "type": "array", "items": { "type": "string" } },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "source_public_exposure_findings": { "type": "array", "items": { "type": "string" } },
+          "source_run_ids": { "type": "array", "items": { "type": "string" } },
+          "affected_services": { "type": "array", "items": { "type": "string" } },
+          "affected_resources": { "type": "array", "items": { "type": "string" } },
+          "widespread_rationale": { "type": "string" },
+          "recommended_next_step": { "type": "string" },
+          "coverage_caveats": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "detections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "objective", "spl", "severity", "category", "mitre_technique", "source_attack_paths", "source_public_exposure_findings", "source_run_ids", "promotion_decision", "fidelity_rationale", "noise_controls", "expected_volume", "validation_status"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["atomic", "composite", "hunt_query", "coverage_gap"] },
+          "objective": { "type": "string", "description": "Attacker progress or defensive visibility goal this detection covers" },
+          "spl": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "category": { "type": "string" },
+          "mitre_technique": { "type": "string", "pattern": "^T\\d{4}" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "source_public_exposure_findings": { "type": "array", "items": { "type": "string" } },
+          "source_run_ids": { "type": "array", "items": { "type": "string" } },
+          "covered_hops": { "type": "array", "items": { "type": "string" } },
+          "promotion_decision": { "type": "string", "enum": ["alert", "hunt_query", "coverage_gap", "reject"] },
+          "fidelity_rationale": { "type": "string", "description": "Why this will be high signal in production" },
+          "noise_controls": { "type": "array", "items": { "type": "string" }, "description": "Context filters, exclusions, and scoping that prevent noisy alerts" },
+          "expected_volume": { "type": "string", "enum": ["low", "medium", "high", "unknown"] },
+          "validation_status": { "type": "string", "enum": ["not_validated", "validated", "too_noisy", "failed"] },
+          "coverage_caveats": { "type": "array", "items": { "type": "string" } },
+          "tuning_guidance": { "type": "string" }
+        }
+      }
+    },
+    "dashboards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "objective", "why_dashboard_not_detection", "severity", "category", "source_attack_paths", "source_public_exposure_findings", "source_run_ids", "suggested_panels", "required_data_sources", "useful_fields", "refresh_cadence", "owner", "coverage_caveats", "promotion_triggers"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["monitoring_dashboard", "review_dashboard", "coverage_dashboard", "trend_dashboard"] },
+          "objective": { "type": "string" },
+          "why_dashboard_not_detection": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "category": { "type": "string" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "source_public_exposure_findings": { "type": "array", "items": { "type": "string" } },
+          "source_run_ids": { "type": "array", "items": { "type": "string" } },
+          "suggested_panels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["title", "visualization", "question", "fields"],
+              "properties": {
+                "title": { "type": "string" },
+                "visualization": { "type": "string", "enum": ["table", "timechart", "bar", "single_value", "heatmap"] },
+                "question": { "type": "string" },
+                "fields": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          },
+          "required_data_sources": { "type": "array", "items": { "type": "string" } },
+          "useful_fields": { "type": "array", "items": { "type": "string" } },
+          "refresh_cadence": { "type": "string", "enum": ["hourly", "daily", "weekly", "monthly", "on_demand"] },
+          "owner": { "type": "string" },
+          "coverage_caveats": { "type": "array", "items": { "type": "string" } },
+          "promotion_triggers": { "type": "array", "items": { "type": "string" } },
+          "query_sketch": { "type": "string" }
+        }
+      }
+    },
+    "policy_replacements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role_name", "file", "original_policy_arn", "replacement_policy_json", "source_attack_paths", "staleness_reasoning"],
+        "properties": {
+          "role_name": { "type": "string" },
+          "file": { "type": "string", "description": "Relative path e.g. replacements/iam-replacement-MyRole.json" },
+          "original_policy_arn": { "type": "string" },
+          "replacement_policy_json": { "type": "object" },
+          "source_attack_paths": { "type": "array", "items": { "type": "string" } },
+          "staleness_reasoning": { "type": "string", "description": "Reasoning about why permissions are stale — no fixed thresholds per D-21" },
+          "boundary_considerations": { "type": "string", "description": "How permission boundaries or existing org controls were accounted for per D-22" }
+        }
+      }
+    },
+    "remediation": {
+      "type": "object",
+      "required": ["file", "items"],
+      "properties": {
+        "file": { "type": "string", "description": "Path to remediation-plan.md" },
+        "items": { "type": "integer", "description": "Count of prioritized remediation items" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["status", "blocks", "warns"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "partial", "fail"] },
+        "blocks": { "type": "integer" },
+        "warns": { "type": "integer" },
+        "file": { "type": "string", "description": "Path to validation-report.md" }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["complete", "partial"],
+      "description": "Run completion status — 'partial' when coverage gate thresholds were not met after retry"
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Coverage gap error messages — populated when status is partial"
+    }
+  }
+}

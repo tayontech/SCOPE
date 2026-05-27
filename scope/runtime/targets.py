@@ -18,16 +18,19 @@ ARN_PATTERN = re.compile(
 SUPPORTED_SERVICES = {
     "apigateway",
     "bedrock",
+    "cloudfront",
     "codebuild",
     "cognito-idp",
     "cognito-identity",
     "dynamodb",
     "ec2",
+    "ecs",
     "elasticloadbalancing",
     "iam",
     "kms",
     "lambda",
     "rds",
+    "route53",
     "s3",
     "secretsmanager",
     "sns",
@@ -43,21 +46,26 @@ SERVICE_MODULES = {
     "secretsmanager": "secrets",
 }
 
-NO_REGION_MODULES = {"iam", "s3", "sts"}
+NO_REGION_MODULES = {"cloudfront", "iam", "route53", "s3", "sts"}
 
 RESOURCE_TYPE_ALIASES = {
     ("apigateway", "restapis"): {"apigateway_rest_api", "apigateway_restapis"},
     ("bedrock", "agent"): {"bedrock_agent"},
+    ("cloudfront", "distribution"): {"cloudfront_distribution"},
     ("codebuild", "project"): {"codebuild_project"},
     ("cognito-idp", "userpool"): {"cognito_user_pool", "cognito_userpool"},
     ("cognito-identity", "identitypool"): {"cognito_identity_pool", "cognito_identitypool"},
     ("dynamodb", "table"): {"dynamodb_table"},
     ("ec2", "instance"): {"ec2_instance"},
+    ("ecs", "cluster"): {"ecs_cluster"},
+    ("ecs", "service"): {"ecs_service"},
+    ("ecs", "task-definition"): {"ecs_task_definition"},
     ("elasticloadbalancing", "loadbalancer"): {"ec2_load_balancer", "elb_load_balancer"},
     ("iam", "role"): {"iam_role"},
     ("kms", "key"): {"kms_key"},
     ("lambda", "function"): {"lambda_function"},
     ("rds", "db"): {"rds_db", "rds_instance"},
+    ("route53", "hostedzone"): {"route53_hosted_zone"},
     ("s3", "bucket"): {"s3_bucket"},
     ("secretsmanager", "secret"): {"secrets_secret", "secretsmanager_secret"},
     ("sns", "topic"): {"sns_topic"},

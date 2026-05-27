@@ -20,6 +20,8 @@
       "function_url_status": "absent",
       "resource_policy_principals": [],
       "resource_policy_status": "absent",
+      "event_source_mappings": [],
+      "event_source_mappings_status": "present",
       "env_var_names": [
         "LOG_LEVEL",
         "DB_HOST"

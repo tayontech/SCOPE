@@ -1,0 +1,57 @@
+{
+  "scope-safety-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-safety-guard.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "scope-spl-lint": {
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-spl-lint.sh"
+          },
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-schema-validate.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "scope-shell-postcheck": {
+    "PostToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-schema-validate.sh"
+          },
+          {
+            "type": "command",
+            "command": "__HOOKS_DIR__/scope-agent-logger.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "scope-artifact-check": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "__HOOKS_DIR__/scope-artifact-check.sh"
+      }
+    ]
+  }
+}

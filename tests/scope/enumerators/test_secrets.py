@@ -122,3 +122,41 @@ def test_secrets_resource_not_found_between_list_and_policy_is_not_error():
     assert envelope.errors == []
     coverage = next(entry for entry in envelope.coverage if entry.check == "resource_policy")
     assert coverage.status == "complete"
+
+
+def test_secrets_preserves_resource_policy_statements():
+    secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:shared-AbCdEf"
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "CrossAccountRead",
+                "Effect": "Allow",
+                "Principal": {"AWS": "arn:aws:iam::999999999999:role/Reader"},
+                "Action": "secretsmanager:GetSecretValue",
+                "Resource": secret_arn,
+            }
+        ],
+    }
+    secrets = FakeClient(
+        {
+            "list_secrets": {
+                "SecretList": [
+                    {
+                        "Name": "shared",
+                        "ARN": secret_arn,
+                        "RotationEnabled": True,
+                    },
+                ],
+            },
+            "get_resource_policy": {"ResourcePolicy": json.dumps(policy)},
+        }
+    )
+
+    envelope = run(FakeFactory(secrets=secrets), "us-east-1")
+
+    secret = envelope.resources[0]
+    assert secret["resource_policy_document"] == policy
+    assert secret["resource_policy_principals"] == ["arn:aws:iam::999999999999:role/Reader"]
+    assert secret["resource_policy_statements"][0]["normalized_actions"] == ["secretsmanager:GetSecretValue"]
+    assert secret["resource_policy_statements"][0]["is_cross_account"] is True

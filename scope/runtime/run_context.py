@@ -7,6 +7,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ACCOUNT_ID_PATTERN = re.compile(r"^[0-9]{12}$")
+RUNTIME_ARTIFACT_NAMES = {
+    ".module-runs",
+    "aws-cli-replay.json",
+    "controls",
+    "findings.md",
+    "graph.json",
+    "manifest.json",
+    "modules",
+    "resources.jsonl",
+    "results.json",
+    "summary.json",
+}
 
 
 @dataclass(frozen=True)
@@ -83,12 +95,20 @@ def resolve_run_directory(
     run_dir: Path | None,
     output_dir: Path | None,
 ) -> tuple[Path, str]:
-    run_id = build_run_id(context, started_at)
     if run_dir is not None:
         resolved = run_dir
+        run_id = safe_slug(resolved.name)
     else:
+        run_id = build_run_id(context, started_at)
         parent = output_dir or Path("runs")
         resolved = parent / run_id
     if resolved.exists():
-        raise FileExistsError(f"Run directory already exists: {resolved}")
+        if run_dir is None or not _explicit_run_dir_can_be_reused(resolved):
+            raise FileExistsError(f"Run directory already exists: {resolved}")
     return resolved, run_id
+
+
+def _explicit_run_dir_can_be_reused(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    return not any((path / name).exists() for name in RUNTIME_ARTIFACT_NAMES)

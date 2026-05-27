@@ -5,20 +5,6 @@
   "status": "complete",
   "resources": [
     {
-      "resource_type": "bedrock_model",
-      "resource_id": "anthropic.claude-3-sonnet-20240229-v1:0",
-      "arn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
-      "region": "us-east-1",
-      "model_name": "Claude 3 Sonnet",
-      "provider": "Anthropic",
-      "model_arn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
-      "input_modalities": ["TEXT"],
-      "output_modalities": ["TEXT"],
-      "customizations_supported": [],
-      "inference_types": ["ON_DEMAND"],
-      "findings": []
-    },
-    {
       "resource_type": "bedrock_custom_model",
       "resource_id": "my-custom-model",
       "arn": "arn:aws:bedrock:us-east-1:123456789012:custom-model/my-custom-model",

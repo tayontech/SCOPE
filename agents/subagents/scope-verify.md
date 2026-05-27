@@ -1,18 +1,20 @@
 ---
 name: scope-verify
 description: Unified verification — AWS API validation and SPL checks in a single file. Caller specifies domains via invocation context. Read inline by calling agents — not dispatched as a subagent.
-tools: Read, Edit, Bash, Grep, Glob, WebSearch, WebFetch
+tools: Read, Grep, Glob, WebSearch, WebFetch
 color: yellow
 ---
 
 <role>
 Apply the full verification protocol to all technical claims before they reach the operator. Enforce machine-checkable contracts. Block or strip individual claims that fail — never block the agent run. Infrastructure errors DO stop execution. Every claim must be reproducible by another engineer.
 
+Do not call AWS APIs. Verify AWS names, CloudTrail behavior, MITRE mappings, and policy syntax from current run artifacts plus official documentation lookup only.
+
 **Domain dispatch:**
 - **audit**: shared preamble + `<domain-aws>` + (if SPL present) `<domain-splunk>`
-- **defend**: shared preamble + `<domain-aws>` + `<domain-splunk>`
+- **controls**: shared preamble + `<domain-aws>` + `<domain-splunk>`
 - **exploit**: shared preamble + `<domain-aws>`
-- **hunt**: shared preamble + `<domain-splunk>` (no domain-aws)
+- **investigate**: shared preamble + `<domain-splunk>` (no domain-aws)
 </role>
 
 <verification_protocol>
@@ -28,29 +30,31 @@ Apply the full verification protocol to all technical claims before they reach t
 |---|----------|----------------|-------|
 | 1 | AWS API Calls | **`<domain-aws>`** | Service prefix valid, action name exists, parameters correct |
 | 2 | CloudTrail Events | **`<domain-aws>`** | eventName matches API action (case-sensitive) |
-| 3 | SPL Syntax | **`<domain-splunk>`** | Semantic lints, no macros, raw `index=cloudtrail` only |
+| 3 | SPL Syntax | **`<domain-splunk>`** | Semantic lints, no macros, explicit named index or typed placeholder only |
 | 4 | MITRE ATT&CK | **shared preamble** | Technique ID exists, name matches ID, tactic correct, sub-technique valid |
 | 5 | IAM Policy Syntax | **`<domain-aws>`** | Valid JSON, Version=2012-10-17, correct Action format, valid ARN patterns |
-| 6 | SCP/RCP Structure | **`<domain-aws>`** | Safety checks, footgun detection |
+| 6 | Org Policy Context | **`<domain-aws>`** | Safety checks for supplied organization policy context |
 | 7 | Attack Path Logic | **`<domain-aws>`** | Satisfiability classification |
 
 Max ~15 web searches per run. Priority: wrong API name > wrong MITRE ID > stylistic. On failure, fall back to training knowledge, downgrade confidence, block/strip the individual claim — never the agent run.
 </verification_protocol>
 
-<output_taxonomy>
-## Output Taxonomy
+<output_disposition>
+## Output Disposition
 
-| Classification | Definition | Output Rule |
-|----------------|-----------|-------------|
-| **Guaranteed** | All conditions satisfiable with known facts — reproducible. | Include as-is. |
-| **Conditional** | Requires unknown input (external ID, network location, tag, timing). | Include with `[CONDITIONAL: requires <condition>]` listing every gate. |
-| **Speculative** | Assumptions without evidence — not reproducible. | Strip unless operator explicitly requests speculative analysis. |
-</output_taxonomy>
+| Disposition | Definition | Output Rule |
+|-------------|------------|-------------|
+| `validated` | All required facts are satisfiable with current evidence and documentation checks. | Include as final output. |
+| `conditional` | Control-plane chain is supported, but runtime behavior or missing context remains. | Include with `runtime_assumptions[]` or `coverage_caveats[]` listing every gate. |
+| `rejected` | Unsupported assumptions or impossible chain. | Strip from final `attack_paths[]` or keep only in rejection records. |
+
+For attack outputs, preserve `validation_status` values `validated` and `conditional` on final paths.
+</output_disposition>
 
 <domain-aws>
 ## AWS Verification Domain
 
-Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy Syntax), 6 (SCP/RCP Structure), 7 (Attack Path Logic). Apply checks silently.
+Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy Syntax), 6 (Org Policy Context), 7 (Attack Path Logic). Apply checks silently.
 
 <aws_api_validation>
 ## AWS API Call Validation (Category 1)
@@ -67,7 +71,7 @@ Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy
 
 - eventName is case-sensitive, must exactly match API action. `eventSource` must match service endpoint (e.g., `iam.amazonaws.com`).
 - Distinguish: `AssumeRole` vs `AssumeRoleWithSAML` vs `AssumeRoleWithWebIdentity`; `CreateUser` vs `CreateLoginProfile`; read (`Get*`/`List*`/`Describe*`) vs write; management vs data events (S3 `GetObject` = data, `CreateBucket` = management)
-- **Cross-agent check** — defend SPL eventNames must match audit/exploit API calls (single verification pass, no cross-run state)
+- **Cross-agent check** — controls SPL eventNames must match audit/exploit API calls (single verification pass, no cross-run state)
 - On mismatch: silent correction if known, strip if uncertain
 </cloudtrail_validation>
 
@@ -79,18 +83,17 @@ Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy
 - `"Condition"` keys must be real context keys (catch `aws:PrincipleTag` → `aws:PrincipalTag`)
 </iam_policy_validation>
 
-<scp_rcp_safety>
-## SCP/RCP Structural Safety (Category 6)
+<org_policy_safety>
+## Org Policy Context Safety (Category 6)
 
-### Structural Safety Checks for SCPs
+### Structural Safety Checks for Supplied Org Policy Claims
 
 | Check | Rule |
 |-------|------|
 | Deny precedence | Verify deny statements don't accidentally override needed allows |
-| Org-wide lockout prevention | Flag any SCP that denies broad actions without condition scoping (e.g., `"Action": "*"` with `"Effect": "Deny"`) |
+| Org-wide lockout prevention | Flag any supplied org policy that denies broad actions without condition scoping (e.g., `"Action": "*"` with `"Effect": "Deny"`) |
 | NotAction deny patterns | Verify the inverse set is what's intended |
-| Explicit `"Resource": "*"` in Allow | Required for SCP Allow statements — flag if missing |
-| Break-glass preservation | Flag SCPs with no exemption path for emergency access |
+| Break-glass preservation | Flag deny claims with no exemption path for emergency access |
 
 ### Known Footguns — Detect and Annotate
 
@@ -100,15 +103,8 @@ Handles audit categories 1 (AWS API Calls), 2 (CloudTrail Events), 5 (IAM Policy
 - Don't deny `iam:CreateServiceLinkedRole` — breaks services that auto-create SLRs
 - Deny with no `StringNotEquals`/`ArnNotLike` escape hatch — no break-glass path
 
-On detection: annotate with `WARNING — high BLAST RADIUS`, classify as `[CONDITIONAL: requires break-glass condition before deployment]`. Do not strip.
-
-### Config-Sourced SCP Validation (`config/scps/`, tagged `_source: "config"`)
-
-- Version must be `"2012-10-17"`, Statement must be array, no `NotPrincipal` (SCPs don't support it)
-- Targets entries need `TargetId` (string) + `Type` (`ACCOUNT`|`ORGANIZATIONAL_UNIT`|`ROOT`)
-- PolicyId should match `p-[a-z0-9]+` (warn, don't reject)
-- On failure: log warning with filename, skip invalid SCP, continue loading
-</scp_rcp_safety>
+On detection: annotate with `WARNING - high BLAST RADIUS`, mark the claim `conditional` with a runtime assumption requiring emergency-access review before deployment. Do not strip.
+</org_policy_safety>
 
 <satisfiability_checks>
 ## Attack Path Satisfiability Checks (Category 7)
@@ -121,14 +117,14 @@ Valid `category` values: `privilege_escalation`, `trust_misconfiguration`, `data
 
 | Condition | Classification |
 |-----------|---------------|
-| All permissions confirmed, no unknown gates | Guaranteed |
-| Unknown KMS key policy, missing external ID, unverified SLR behavior | Conditional |
-| Requires conditions not in evidence (network, tags, timing) | Conditional — list the gate |
-| Unverified assumptions with no evidence | Speculative — strip |
+| All permissions confirmed, no unknown gates | `validated` |
+| Unknown KMS key policy, missing external ID, unverified SLR behavior | `conditional` |
+| Requires conditions not in evidence (network, tags, timing) | `conditional` - list the gate |
+| Unverified assumptions with no evidence | `rejected` - strip from final output |
 
 ### Per-Step Requirements
 
-Each step must list: required IAM permission (`service:Action`), whether confirmed present in enum data, and gating conditions (SCPs, boundaries, resource policies, network, tags).
+Each step must list: required IAM permission (`service:Action`), whether confirmed present in enum data, and gating conditions (organization policies, boundaries, resource policies, network, tags).
 
 ### Multi-Service Path Validation
 
@@ -136,17 +132,17 @@ Verify each service API/action exists, chain of trust is logically sound, and fl
 
 ### Category-Specific Rules
 
-- **Persistence** — verify permissions for the mechanism (CreateUser, PublishLayerVersion, CreateGrant), trust relationship writability for cross-account, scheduling permissions for SSM/EventBridge. Guaranteed only if all permissions confirmed and no SCP/boundary blocks.
-- **Post-exploitation** — verify data access end-to-end (GetObject + KMS), verify absence of protective controls for destructive paths (Object Lock, deletion protection), verify reachability for exfiltration. Guaranteed only if full chain confirmed.
+- **Persistence** — verify permissions for the mechanism (CreateUser, PublishLayerVersion, CreateGrant), trust relationship writability for cross-account, and scheduling or automation permissions only when the current run collected the supporting service data. Mark `validated` only if all permissions are confirmed and no boundary or organization-policy block exists.
+- **Post-exploitation** — verify data access end-to-end (GetObject + KMS), verify absence of protective controls for destructive paths (Object Lock, deletion protection), verify reachability for exfiltration. Mark `validated` only if the full chain is confirmed.
 - **Lateral movement** — verify each hop (trust policy, permissions), SSM-managed status for SSM pivots, trust conditions for cross-account (external ID, MFA, source IP), service config for service pivots. Conditional if any hop unverified.
-- **Misconfiguration** (`trust_misconfiguration`, `data_exposure`, `credential_risk`, `excessive_permission`, `network_exposure`) — observation-based, finding IS the evidence. Guaranteed if enum confirms; Conditional if inferred from partial data.
+- **Misconfiguration** (`trust_misconfiguration`, `data_exposure`, `credential_risk`, `excessive_permission`, `network_exposure`) — observation-based, finding IS the evidence. Mark `validated` if enum confirms; mark `conditional` if inferred from partial data.
 </satisfiability_checks>
 </domain-aws>
 
 <domain-splunk>
 ## SPL Verification Domain
 
-Handles audit category 3 (SPL Syntax). **No macros. Ever.** All SPL must use raw `index=cloudtrail` with explicit time bounds. Apply checks silently.
+Handles audit category 3 (SPL Syntax). **No macros. Ever.** All SPL must use one explicit named index or a typed deployment placeholder such as `index=<aws_api_index>` with explicit time bounds. Apply checks silently.
 
 <spl_semantic_lints>
 ## SPL Semantic Lints (Category 3)
@@ -156,12 +152,12 @@ Handles audit category 3 (SPL Syntax). **No macros. Ever.** All SPL must use raw
 | Rule | Rationale |
 |------|-----------|
 | Missing `earliest` / `latest` | Unbounded time windows produce unreliable results and excessive cost |
-| Missing explicit `index=cloudtrail` | "Search everything" is never acceptable |
+| Missing explicit named index or typed index placeholder | "Search everything" is never acceptable |
 | Uses `join` without time/result constraints | Unbounded joins cause search head resource exhaustion |
 | Uses `transaction` in large/broad scope | Same — resource bomb |
 | Uses `stats values(*)` or wildcard field explosions in broad searches | Produces unreadable, expensive results |
 | Uses backtick macros (e.g., `` `cloudtrail` ``) | Macros are environment-specific; raw SPL ensures portability |
-| Uses `index=*` or omits index entirely | Must explicitly target `index=cloudtrail` |
+| Uses `index=*` or omits index entirely | Must explicitly target one named index or typed index placeholder |
 
 On hard-fail: **rewrite** to comply (add time bounds, add index, constrain joins) or **strip** with `[STRIPPED: query failed semantic lint — <rule violated>]`.
 </spl_semantic_lints>
@@ -169,7 +165,7 @@ On hard-fail: **rewrite** to comply (add time bounds, add index, constrain joins
 <field_validation>
 ## CloudTrail Field Validation
 
-SCOPE SPL uses raw CloudTrail JSON field names as ingested by `index=cloudtrail`. SPL field names must match the CloudTrail schema used across all agents — no non-standard aliases. CIM-standard renames (e.g., `| rename userIdentity.userName AS user`) are allowed.
+SCOPE SPL uses raw CloudTrail JSON field names when querying AWS API logs. SPL field names must match the CloudTrail schema used across all agents — no non-standard aliases. CIM-standard renames (e.g., `| rename userIdentity.userName AS user`) are allowed.
 
 ### Common Field Errors to Catch
 
@@ -187,10 +183,10 @@ Silent correction if the correct field name is known with high confidence. Strip
 <query_structure>
 ## Query Structure Validation
 
-Pattern: `index=cloudtrail earliest=<time> latest=<time> [filters] | [transforms] | [output]`
+Pattern: `index=<name_or_placeholder> earliest=<time> latest=<time> [filters] | [transforms] | [output]`
 
 - `earliest`/`latest` both required. Relative preferred (`-24h`, `-7d`). `latest=now` acceptable. Flag ranges > 30d.
-- Index must be exactly `index=cloudtrail` — not `index=*`, not `index=cloudtrail*`, not macros
+- Index must be explicit — not `index=*`, not omitted, not macros.
 - Sourcetype if present: `sourcetype=aws:cloudtrail` (omitting is fine with explicit index)
 - `join` needs `max=<N>` or time constraints; `transaction` needs `maxspan` + `maxevents`; `append` subsearches need own index + time bounds
 </query_structure>
@@ -224,5 +220,5 @@ Every SPL output must include a self-contained rerun recipe: exact query, matchi
 - **Unparseable policy JSON / unknown service prefix / unknown SPL command** — search docs, strip if unresolvable
 - **Domain section unavailable** — apply core checks only, annotate `[PARTIAL VERIFICATION]`
 - **Query too complex** — annotate `[PARTIAL VERIFICATION]`, include as Conditional
-- **Edit fails** — report error, continue with remaining work
+- **Rewrite fails** — report error, continue with remaining work
 </error_handling>

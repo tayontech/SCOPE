@@ -7,6 +7,7 @@ from urllib.parse import unquote
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["get_rest_apis", "get_apis"]
@@ -54,6 +55,8 @@ def _enumerate_rest(factory: Any, rest: Any, region: str, tracker: CoverageTrack
     for api in apis:
         api_id = api.get("id")
         api_arn = f"arn:aws:apigateway:{region}::/restapis/{api_id}"
+        resource_policy = _parse_resource_policy(api.get("policy"))
+        endpoint_configuration = api.get("endpointConfiguration")
         finding = {
             "resource_type": "apigateway_rest_api",
             "resource_id": api_id,
@@ -61,15 +64,21 @@ def _enumerate_rest(factory: Any, rest: Any, region: str, tracker: CoverageTrack
             "region": region,
             "name": api.get("name"),
             "api_type": "REST",
+            "endpoint_configuration": endpoint_configuration if isinstance(endpoint_configuration, dict) else None,
+            "public_endpoint": _rest_public_endpoint(endpoint_configuration),
             "authorizers": [],
             "authorizers_status": None,
             "stages": [],
             "stages_status": None,
             "lambda_integrations": [],
             "lambda_integrations_status": None,
-            "resource_policy": _parse_resource_policy(api.get("policy")),
+            "resource_policy": resource_policy,
             "findings": [],
         }
+        normalized_policy = normalize_resource_policy(resource_policy, account_id=factory.account_id)
+        if normalized_policy:
+            finding["resource_policy_document"] = normalized_policy["document"]
+            finding["resource_policy_statements"] = normalized_policy["statements"]
 
         try:
             response = rest.get_authorizers(restApiId=api_id)
@@ -118,6 +127,7 @@ def _enumerate_v2(factory: Any, v2: Any, region: str, tracker: CoverageTracker) 
         api_id = api.get("ApiId")
         protocol_type = api.get("ProtocolType")
         api_arn = f"arn:aws:apigateway:{region}::/apis/{api_id}"
+        disable_execute_api_endpoint = api.get("DisableExecuteApiEndpoint")
         finding = {
             "resource_type": "apigateway_websocket_api" if protocol_type == "WEBSOCKET" else "apigateway_http_api",
             "resource_id": api_id,
@@ -125,6 +135,8 @@ def _enumerate_v2(factory: Any, v2: Any, region: str, tracker: CoverageTracker) 
             "region": region,
             "name": api.get("Name"),
             "api_type": protocol_type,
+            "disable_execute_api_endpoint": disable_execute_api_endpoint,
+            "public_endpoint": _v2_public_endpoint(disable_execute_api_endpoint),
             "authorizers": [],
             "authorizers_status": None,
             "stages": [],
@@ -198,6 +210,26 @@ def _parse_resource_policy(policy: str | None) -> str | None:
             return candidate
         except json.JSONDecodeError:
             continue
+    return None
+
+
+def _rest_public_endpoint(endpoint_configuration: Any) -> bool | None:
+    if not isinstance(endpoint_configuration, dict):
+        return None
+    types = endpoint_configuration.get("types")
+    if not isinstance(types, list):
+        return None
+    normalized = {str(endpoint_type).upper() for endpoint_type in types}
+    if normalized.intersection({"EDGE", "REGIONAL"}):
+        return True
+    if normalized == {"PRIVATE"}:
+        return False
+    return None
+
+
+def _v2_public_endpoint(disable_execute_api_endpoint: Any) -> bool | None:
+    if isinstance(disable_execute_api_endpoint, bool):
+        return not disable_execute_api_endpoint
     return None
 
 

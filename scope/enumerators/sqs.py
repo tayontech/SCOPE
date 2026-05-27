@@ -5,6 +5,7 @@ from typing import Any
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["list_queues"]
@@ -118,6 +119,10 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
 
             queue_finding["arn"] = queue_arn
             queue_finding["resource_policy"] = {"principals": principals} if principals else None
+            normalized_policy = normalize_resource_policy(attributes.get("Policy"), account_id=factory.account_id)
+            if normalized_policy is not None:
+                queue_finding["resource_policy_document"] = normalized_policy["document"]
+                queue_finding["resource_policy_statements"] = normalized_policy["statements"]
             queue_finding["fifo"] = attributes.get("FifoQueue") == "true"
             queue_finding["dlq_arn"] = _extract_dlq_arn(attributes.get("RedrivePolicy"))
             queue_finding["kms_key_id"] = attributes.get("KmsMasterKeyId")

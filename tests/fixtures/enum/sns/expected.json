@@ -8,6 +8,8 @@
       "resource_policy": null,
       "kms_key_id": null,
       "subscriptions_confirmed": 2,
+      "subscriptions": [],
+      "subscriptions_status": "present",
       "topic_attributes_status": "present",
       "findings": []
     }
@@ -25,6 +27,15 @@
     },
     {
       "check": "topic_attributes",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "topic_subscriptions",
       "scope": "per_resource",
       "status": "complete",
       "succeeded": 1,

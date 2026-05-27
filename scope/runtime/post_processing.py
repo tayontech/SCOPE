@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from scope.runtime.run_context import AccountContext
+from scope.runtime.graph import build_graph_from_run, write_graph
 
 
 def _derive_region(modules: list[dict[str, Any]]) -> str:
@@ -17,18 +17,8 @@ def _derive_region(modules: list[dict[str, Any]]) -> str:
     return "global"
 
 
-def _default_graph_script() -> Path:
-    return Path(__file__).resolve().parents[2] / "bin" / "extract-graph.js"
-
-
 def _empty_graph() -> dict[str, list[Any]]:
     return {"nodes": [], "edges": []}
-
-
-def _write_graph(run_dir: Path, graph: dict[str, Any]) -> Path:
-    path = run_dir / "graph.json"
-    path.write_text(json.dumps(graph, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
 
 
 def _graph_error(message: str, **details: Any) -> dict[str, Any]:
@@ -37,55 +27,27 @@ def _graph_error(message: str, **details: Any) -> dict[str, Any]:
     return error
 
 
-def _is_graph_shape(value: Any) -> bool:
-    return isinstance(value, dict) and isinstance(value.get("nodes"), list) and isinstance(
-        value.get("edges"), list
-    )
-
-
 def build_graph(
     run_dir: Path, graph_script: Path | None = None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    script = graph_script or _default_graph_script()
-
-    try:
-        result = subprocess.run(
-            ["node", str(script), str(run_dir)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
+    if graph_script is not None:
         graph = _empty_graph()
-        _write_graph(run_dir, graph)
-        return graph, [_graph_error("graph builder failed to start", error=str(exc))]
-
-    if result.returncode != 0:
-        graph = _empty_graph()
-        _write_graph(run_dir, graph)
+        write_graph(run_dir, graph)
         return graph, [
             _graph_error(
-                "graph builder failed",
-                returncode=result.returncode,
-                stderr=result.stderr.strip(),
-                stdout=result.stdout.strip(),
+                "external graph scripts are no longer supported",
+                graph_script=str(graph_script),
             )
         ]
 
     try:
-        graph = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
+        graph = build_graph_from_run(run_dir)
+    except Exception as exc:
         graph = _empty_graph()
-        _write_graph(run_dir, graph)
-        return graph, [_graph_error("graph builder emitted invalid JSON", error=str(exc))]
+        write_graph(run_dir, graph)
+        return graph, [_graph_error("python graph builder failed", error=str(exc))]
 
-    if not _is_graph_shape(graph):
-        graph = _empty_graph()
-        _write_graph(run_dir, graph)
-        return graph, [_graph_error("graph builder emitted invalid graph shape")]
-
-    _write_graph(run_dir, graph)
+    write_graph(run_dir, graph)
     return graph, []
 
 
@@ -129,7 +91,12 @@ def build_results(
         },
         "modules": modules,
         "failed_items": summary.get("failed_items", []),
+        "public_exposure_findings": [],
+        "candidate_attack_paths": [],
+        "attack_validation": [],
         "attack_paths": [],
+        "attack_path_groups": [],
+        "security_observations": [],
         "principals": [],
         "trust_relationships": [],
         "coverage_gaps": [],
@@ -143,6 +110,10 @@ def write_results(run_dir: Path, results: dict[str, Any]) -> Path:
     path = run_dir / "results.json"
     path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
+
+
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def run_post_processing(
@@ -197,6 +168,70 @@ def run_post_processing(
     return results
 
 
+def _legacy_runs_to_reports(runs: Any) -> list[dict[str, Any]]:
+    if not isinstance(runs, list):
+        return []
+    reports: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for run in runs:
+        if not isinstance(run, dict) or run.get("source") != "audit":
+            continue
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            continue
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        file_name = run.get("file") if isinstance(run.get("file"), str) else f"{run_id}.json"
+        report: dict[str, Any] = {
+            "report_id": run_id,
+            "created_at": run.get("date") or run.get("created_at") or "",
+            "target": run.get("target") or "",
+            "risk": run.get("risk") or "low",
+            "status": run.get("status") or "complete",
+            "audit": {
+                "run_id": run_id,
+                "file": file_name,
+            },
+        }
+        if isinstance(run.get("account_id"), str):
+            report["account_id"] = run["account_id"]
+        reports.append(report)
+    return reports
+
+
+def _load_dashboard_index(index_path: Path) -> dict[str, Any]:
+    if not index_path.exists():
+        return {"version": "2.0.0", "reports": []}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"version": "2.0.0", "reports": []}
+    if not isinstance(index, dict):
+        return {"version": "2.0.0", "reports": []}
+    reports = index.get("reports")
+    if not isinstance(reports, list):
+        reports = _legacy_runs_to_reports(index.get("runs"))
+    return {
+        "version": "2.0.0",
+        "reports": [report for report in reports if isinstance(report, dict)],
+    }
+
+
+def _upsert_report(index: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    reports = [
+        existing
+        for existing in index.get("reports", [])
+        if isinstance(existing, dict) and existing.get("report_id") != report["report_id"]
+    ]
+    reports.insert(0, report)
+    return {
+        "version": "2.0.0",
+        "updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "reports": reports,
+    }
+
+
 def export_dashboard_results(
     *,
     project_root: Path,
@@ -213,38 +248,20 @@ def export_dashboard_results(
     shutil.copy2(results_path, export_path)
 
     index_path = public_dir / "index.json"
-    if index_path.exists():
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            index = {"version": "1.1.0", "runs": []}
-    else:
-        index = {"version": "1.1.0", "runs": []}
-
-    if not isinstance(index, dict):
-        index = {"version": "1.1.0", "runs": []}
-    raw_runs = index.get("runs", [])
-    if not isinstance(raw_runs, list):
-        raw_runs = []
-    runs = [run for run in raw_runs if isinstance(run, dict) and run.get("run_id") != run_id]
-    runs.insert(
-        0,
-        {
+    index = _load_dashboard_index(index_path)
+    report = {
+        "report_id": run_id,
+        "created_at": _utc_iso(started_at),
+        "account_id": account.account_id,
+        "target": account.account_name or account.account_id,
+        "risk": "low",
+        "status": summary.get("status", "error"),
+        "audit": {
             "run_id": run_id,
-            "date": started_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "source": "audit",
-            "target": account.account_name or account.account_id,
-            "risk": "low",
-            "status": summary.get("status", "error"),
             "file": f"{run_id}.json",
         },
-    )
-
-    index = {
-        "version": "1.1.0",
-        "updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "runs": runs,
     }
+    index = _upsert_report(index, report)
     index_path.write_text(
         json.dumps(index, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

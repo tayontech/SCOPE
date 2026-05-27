@@ -55,6 +55,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "__HOOKS_DIR__/scope-schema-validate.sh"
+          },
+          {
+            "type": "command",
             "command": "__HOOKS_DIR__/scope-agent-logger.sh"
           }
         ]

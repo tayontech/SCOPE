@@ -17,7 +17,7 @@ set -euo pipefail
 # Avoids jq overhead on non-AWS commands.
 # Match 'aws ' anywhere — covers both direct 'aws ...' and 'VAR=value aws ...'
 INPUT=$(cat /dev/stdin)
-if ! echo "$INPUT" | grep -q 'aws '; then
+if ! grep -q 'aws ' <<<"$INPUT"; then
   echo '{"decision":"allow"}'
   exit 0
 fi
@@ -33,7 +33,7 @@ fi
 
 # Guard 2: Only process commands that invoke the AWS CLI.
 # Allow leading VAR=value assignments (e.g., AWS_PROFILE=prod aws ...).
-if ! echo "$COMMAND" | grep -qE '(^|\s)([A-Za-z_][A-Za-z_0-9]*=[^ ]*\s+)*aws\s'; then
+if ! grep -qE '(^|[[:space:]])([A-Za-z_][A-Za-z_0-9]*=[^ ]*[[:space:]]+)*aws[[:space:]]' <<<"$COMMAND"; then
   echo '{"decision":"allow"}'
   exit 0
 fi
@@ -87,7 +87,7 @@ MODIFIED=$(jq -rn --arg cmd "$COMMAND" '
   else
     $cmd[$bounds.start:$bounds.end] as $aws_part |
     # Guard 3: idempotency — only check the aws subcommand for existing --output
-    if ($aws_part | test("--output\\s+(json|text|table|yaml|yaml-stream)")) then $cmd
+    if ($aws_part | test("--output(=|\\s+)(json|text|table|yaml|yaml-stream)")) then $cmd
     else
       $cmd[0:$bounds.end] + " --output json" +
       (if $bounds.end < ($cmd | length) then " " + $cmd[$bounds.end:] else "" end)

@@ -9,10 +9,11 @@
 # Design:
 # 1. Parse command from JSON input
 # 2. Path sanitization — blocks commands referencing paths outside allowed prefixes
-# 3. AWS fast-path — exit early if no 'aws' in command (remaining checks are AWS-only)
-# 4. Block eval/xargs wrappers hiding AWS calls
-# 5. Strip heredocs and quotes to get executable text
-# 6. Check executable text against destructive AWS patterns
+# 3. Block command wrappers hiding AWS calls
+# 4. Strip heredocs and quotes to get executable text
+# 5. Block destructive IaC operations
+# 6. AWS fast-path — exit early if no executable AWS command remains
+# 7. Check executable text against destructive AWS patterns
 
 set -euo pipefail
 
@@ -20,7 +21,18 @@ set -euo pipefail
 INPUT=$(cat /dev/stdin)
 
 # Parse command from JSON
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || COMMAND=""
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // .toolCall.args.CommandLine // empty' 2>/dev/null) || COMMAND=""
+IS_ANTIGRAVITY=$(echo "$INPUT" | jq -r 'has("toolCall")' 2>/dev/null || echo "false")
+
+block() {
+  local reason="$1"
+  if [ "$IS_ANTIGRAVITY" = "true" ]; then
+    jq -n --arg reason "$reason" '{decision: "deny", reason: $reason}'
+    exit 0
+  fi
+  echo "$reason" >&2
+  exit 2
+}
 
 # Empty command — allow
 [ -z "$COMMAND" ] && exit 0
@@ -30,17 +42,16 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || C
 # =============================================================================
 
 # Path traversal detection — block any command containing ../
-if echo "$COMMAND" | grep -qE '\.\./' ; then
-  echo "SCOPE Safety Guard: Blocked — path traversal (..) detected. Use direct paths within allowed prefixes." >&2
-  exit 2
+if grep -qE '\.\./' <<<"$COMMAND" ; then
+  block "SCOPE Safety Guard: Blocked — path traversal (..) detected. Use direct paths within allowed prefixes."
 fi
 
 # Extract all relative path references (./something/)
-PATHS=$(echo "$COMMAND" | grep -oE '\./[a-zA-Z0-9_.-]+/' | sort -u) || true
+PATHS=$(grep -oE '\./[a-zA-Z0-9_.-]+/' <<<"$COMMAND" | sort -u) || true
 
 if [ -n "$PATHS" ]; then
   # Allowed output directories (operator-provided run paths land here)
-  ALLOWED_PREFIXES=('./audit/' './exploit/' './hunt/' './data/' './engagements/')
+  ALLOWED_PREFIXES=('./runs/' './exploit/' './investigations/' './engagements/')
 
   # Internal project directories (never block — not operator-provided)
   INTERNAL_PREFIXES=('./config/' './bin/' './agents/' './dashboard/' './tests/' './node_modules/' './.planning/' './.claude/' './.git/' './.codex/' './.gemini/')
@@ -68,27 +79,27 @@ if [ -n "$PATHS" ]; then
     done
 
     if ! $is_allowed; then
-      echo "SCOPE Safety Guard: Blocked — path outside allowed prefixes: '$p'. Allowed: ./audit/, ./exploit/, ./hunt/, ./data/, ./engagements/" >&2
-      exit 2
+      block "SCOPE Safety Guard: Blocked — path outside allowed prefixes: '$p'. Allowed: ./runs/, ./exploit/, ./investigations/, ./engagements/"
     fi
   done <<< "$PATHS"
 fi
 
-# =============================================================================
-# AWS FAST-PATH — if no 'aws' in command, skip destructive pattern checks
-# =============================================================================
-
-if ! echo "$COMMAND" | grep -qiE 'aws[[:space:]]'; then
-  exit 0
-fi
-
 # Block dangerous command wrappers that can hide AWS calls from text inspection.
 # eval can construct any command from string arguments; xargs can pipe args into aws.
-if echo "$COMMAND" | grep -qEi '(^|\s|;|&&|\|\|)(eval|xargs)\s'; then
-  # Check if aws appears anywhere in the command — if so, block
-  if echo "$COMMAND" | grep -qi 'aws'; then
-    echo "SCOPE Safety Guard: Blocked — 'eval' or 'xargs' with AWS CLI detected. These wrappers can hide destructive operations from static analysis. Run the AWS command directly." >&2
-    exit 2
+if grep -qiE 'aws[[:space:]]' <<<"$COMMAND"; then
+  if grep -qEi '(^|[[:space:]]|;|&&|\|\|)(eval|xargs)[[:space:]]' <<<"$COMMAND"; then
+    block "SCOPE Safety Guard: Blocked — 'eval' or 'xargs' with AWS CLI detected. These wrappers can hide destructive operations from static analysis. Run the AWS command directly."
+  fi
+
+  # shell -c and language eval wrappers execute AWS from quoted strings. The
+  # quote stripper below would hide those strings, so block wrapper execution when
+  # AWS appears anywhere in the submitted command.
+  if grep -qEi '(^|[[:space:]]|;|&&|\|\|)(bash|sh|zsh|fish)[[:space:]]+-c[[:space:]]' <<<"$COMMAND"; then
+    block "SCOPE Safety Guard: Blocked — shell -c with AWS CLI detected. Run the AWS command directly."
+  fi
+
+  if grep -qEi '(^|[[:space:]]|;|&&|\|\|)(python|python3|node|perl|ruby)[[:space:]]+(-c|-e)[[:space:]]' <<<"$COMMAND"; then
+    block "SCOPE Safety Guard: Blocked — code-eval wrapper with AWS CLI detected. Run the AWS command directly."
   fi
 fi
 
@@ -101,7 +112,7 @@ fi
 # Step 1: Strip heredoc bodies. Heredocs span multiple lines:
 #   cat <<EOF\n..body..\nEOF  (also <<'EOF', <<"EOF", <<-EOF)
 # Use awk to detect the delimiter and skip all lines until the closing delimiter.
-STRIPPED=$(echo "$COMMAND" | awk '
+STRIPPED=$(awk '
   /<<-?[ ]*[\x27"\\]?[A-Za-z_]/ {
     # Extract the delimiter word from the <<DELIM pattern
     line = $0
@@ -127,7 +138,7 @@ STRIPPED=$(echo "$COMMAND" | awk '
     }
   }
   { print }
-' 2>/dev/null) || STRIPPED="$COMMAND"
+' <<<"$COMMAND" 2>/dev/null) || STRIPPED="$COMMAND"
 
 # Step 2: Strip quoted strings using jq character walker.
 EXECUTABLE=$(jq -rn --arg cmd "$STRIPPED" '
@@ -144,6 +155,34 @@ EXECUTABLE=$(jq -rn --arg cmd "$STRIPPED" '
     end | .i += 1
   ) | .out
 ' 2>/dev/null) || EXECUTABLE="$STRIPPED"
+
+# IaC tools mutate cloud state without the AWS CLI token, so check them before
+# the AWS fast-path.
+IAC_PATTERNS=(
+  '(^|[[:space:]]|;|&&|\|\|)terraform[[:space:]]+(apply|destroy|import)'
+  '(^|[[:space:]]|;|&&|\|\|)cdk[[:space:]]+deploy'
+  '(^|[[:space:]]|;|&&|\|\|)pulumi[[:space:]]+(up|destroy)'
+)
+
+for pattern in "${IAC_PATTERNS[@]}"; do
+  if grep -qEi "$pattern" <<<"$EXECUTABLE"; then
+    MATCHED_OP=$(grep -oEi "$pattern" <<<"$EXECUTABLE" | sed -n '1p' | sed 's/^[[:space:];&|]*//')
+    block "SCOPE Safety Guard: Blocked destructive IaC operation — '$MATCHED_OP'. SCOPE agents are read-only. Generate reviewable plans instead of applying changes."
+  fi
+done
+
+# AWS fast-path — if no executable AWS command remains, skip AWS checks.
+if ! grep -qiE '(^|[[:space:]]|;|&&|\|\|)aws[[:space:]]' <<<"$EXECUTABLE"; then
+  exit 0
+fi
+
+# AWS CLI global options may appear before the service, such as
+# `aws --profile prod --region us-east-1 iam create-user`. Strip known global
+# options for destructive-pattern matching while preserving the original command
+# in the block message context.
+NORMALIZED_EXECUTABLE=$(sed -E '
+  s/(^|[[:space:];&|])aws([[:space:]]+--(profile|region|endpoint-url|output|query|ca-bundle|cli-input-json|cli-binary-format|color)[= ][^[:space:]]+|[[:space:]]+--(no-cli-pager|no-paginate|no-sign-request|no-verify-ssl|debug|cli-auto-prompt|no-cli-auto-prompt))*[[:space:]]+/\1aws /g
+' <<<"$EXECUTABLE")
 
 # Destructive patterns — each requires `aws <service>` prefix to match.
 # This ensures we only catch actual AWS CLI invocations, not documentation text.
@@ -174,18 +213,13 @@ DESTRUCTIVE_PATTERNS=(
   'aws\s+cognito-idp\s+(create-|delete-|update-|admin-create-|admin-delete-|admin-set-|admin-update-)'
   'aws\s+glue\s+(create-|delete-|update-|batch-delete-|start-|stop-)'
   'aws\s+acm\s+(delete-|import-|request-|renew-)'
-  # IaC tools
-  'terraform\s+(apply|destroy|import)'
-  'cdk\s+deploy'
-  'pulumi\s+(up|destroy)'
 )
 
 # Check the quote-stripped executable text for destructive patterns.
 for pattern in "${DESTRUCTIVE_PATTERNS[@]}"; do
-  if echo "$EXECUTABLE" | grep -qEi "$pattern"; then
-    MATCHED_OP=$(echo "$EXECUTABLE" | grep -oEi "$pattern" | head -1)
-    echo "SCOPE Safety Guard: Blocked destructive AWS operation — '$MATCHED_OP'. SCOPE agents are read-only. Use /scope:exploit to generate playbooks without execution." >&2
-    exit 2
+  if grep -qEi "$pattern" <<<"$NORMALIZED_EXECUTABLE"; then
+    MATCHED_OP=$(grep -oEi "$pattern" <<<"$NORMALIZED_EXECUTABLE" | sed -n '1p')
+    block "SCOPE Safety Guard: Blocked destructive AWS operation — '$MATCHED_OP'. SCOPE agents are read-only. Use /scope:exploit to generate playbooks without execution."
   fi
 done
 

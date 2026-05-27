@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "splunk-mcp-server": {
+      "command": "sh",
+      "args": ["-c", "npx -y mcp-remote \"$SPLUNK_URL\" --header \"Authorization: Bearer $SPLUNK_TOKEN\""],
+      "env": {
+        "SPLUNK_URL": "$SPLUNK_URL",
+        "SPLUNK_TOKEN": "$SPLUNK_TOKEN"
+      }
+    }
+  }
+}

@@ -5,6 +5,7 @@ from typing import Any
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["list_tables"]
@@ -83,6 +84,10 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             policy = response.get("Policy")
             if policy:
                 finding["resource_policy"] = _parse_policy(policy)
+                normalized_policy = normalize_resource_policy(policy, account_id=factory.account_id)
+                if normalized_policy:
+                    finding["resource_policy_document"] = normalized_policy["document"]
+                    finding["resource_policy_statements"] = normalized_policy["statements"]
                 finding["resource_policy_status"] = "present"
             else:
                 finding["resource_policy_status"] = "absent"

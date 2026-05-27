@@ -114,3 +114,45 @@ def test_sqs_queue_attributes_access_denied_marks_queue_partial():
     coverage = next(entry for entry in envelope.coverage if entry.check == "queue_attributes")
     assert coverage.status == "partial"
     assert coverage.failed == 1
+
+
+def test_sqs_preserves_resource_policy_statements_and_conditions():
+    queue_url = "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue"
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "AllowTopicSend",
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": "sqs:SendMessage",
+                "Resource": "arn:aws:sqs:us-east-1:123456789012:test-queue",
+                "Condition": {
+                    "ArnEquals": {
+                        "aws:SourceArn": "arn:aws:sns:us-east-1:123456789012:test-topic"
+                    }
+                },
+            }
+        ],
+    }
+    sqs = FakeClient(
+        {
+            "list_queues": {"QueueUrls": [queue_url]},
+            "get_queue_attributes": {
+                "Attributes": {
+                    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:test-queue",
+                    "Policy": json.dumps(policy),
+                },
+            },
+        }
+    )
+
+    envelope = run(FakeFactory(sqs=sqs), "us-east-1")
+
+    queue = envelope.resources[0]
+    assert queue["resource_policy_document"] == policy
+    assert queue["resource_policy"] == {"principals": ["*"]}
+    assert queue["resource_policy_statements"][0]["normalized_actions"] == ["sqs:SendMessage"]
+    assert queue["resource_policy_statements"][0]["source_arns"] == [
+        "arn:aws:sns:us-east-1:123456789012:test-topic"
+    ]

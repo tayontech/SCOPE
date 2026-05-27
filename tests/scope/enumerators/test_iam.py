@@ -328,6 +328,7 @@ def test_iam_preserves_oidc_trust_conditions_without_risk():
         "is_wildcard": False,
         "has_external_id": False,
         "has_mfa_condition": False,
+        "actions": ["sts:AssumeRoleWithWebIdentity"],
         "conditions": trust_policy["Statement"][0]["Condition"],
     }
     assert "risk" not in trust
@@ -336,6 +337,66 @@ def test_iam_preserves_oidc_trust_conditions_without_risk():
     assert oidc["url"] == "token.actions.githubusercontent.com"
     assert oidc["assumed_role_arns"] == ["arn:aws:iam::123456789012:role/GitHubActionsRole"]
     assert_facts_only_resources(envelope.resources)
+
+
+def test_iam_ignores_trust_statement_without_sts_assume_action():
+    trust_policy = {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": "arn:aws:iam::123456789012:user/Alice"},
+                "Action": "s3:GetObject",
+            },
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": "arn:aws:iam::123456789012:user/Bob"},
+                "Action": "sts:AssumeRole",
+                "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}},
+            },
+        ]
+    }
+    iam = FakeClient(
+        {
+            "get_account_authorization_details": {
+                "UserDetailList": [],
+                "RoleDetailList": [
+                    {
+                        "RoleName": "AppRole",
+                        "Arn": "arn:aws:iam::123456789012:role/AppRole",
+                        "Path": "/",
+                        "AssumeRolePolicyDocument": json.dumps(trust_policy),
+                        "AttachedManagedPolicies": [],
+                        "RolePolicyList": [],
+                        "PermissionsBoundary": None,
+                        "RoleLastUsed": None,
+                    }
+                ],
+                "GroupDetailList": [],
+                "Policies": [],
+                "IsTruncated": False,
+            },
+            "generate_credential_report": {"State": "COMPLETE"},
+            "get_credential_report": {"Content": "user,mfa_active,password_last_used\n<root_account>,true,N/A"},
+            "list_open_id_connect_providers": {"OpenIDConnectProviderList": []},
+            "generate_service_last_accessed_details": {"JobId": "job-role-456"},
+            "get_service_last_accessed_details": {"JobStatus": "COMPLETED", "ServicesLastAccessed": []},
+        }
+    )
+
+    envelope = run(FakeFactory(iam=iam), "global")
+
+    role = next(resource for resource in envelope.resources if resource["resource_type"] == "iam_role")
+    assert role["trust_relationships"] == [
+        {
+            "principal": "arn:aws:iam::123456789012:user/Bob",
+            "trust_type": "same-account",
+            "is_wildcard": False,
+            "has_external_id": False,
+            "has_mfa_condition": True,
+            "actions": ["sts:AssumeRole"],
+            "conditions": {"Bool": {"aws:MultiFactorAuthPresent": "true"}},
+        }
+    ]
 
 
 def test_iam_attached_policy_documents_follow_inventory_rules():
@@ -400,6 +461,55 @@ def test_iam_attached_policy_documents_follow_inventory_rules():
         {"name": "CustomerManagedPolicy", "arn": customer_policy_arn, "document": customer_policy_doc},
         {"name": "ReadOnlyAccess", "arn": aws_policy_arn, "document": None},
     ]
+
+
+def test_iam_permission_boundary_document_follows_inventory_rules():
+    boundary_doc = {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "*"}],
+    }
+    boundary_arn = "arn:aws:iam::123456789012:policy/BoundaryPolicy"
+    iam = FakeClient(
+        {
+            "get_account_authorization_details": {
+                "UserDetailList": [],
+                "RoleDetailList": [
+                    {
+                        "RoleName": "BoundedRole",
+                        "Arn": "arn:aws:iam::123456789012:role/BoundedRole",
+                        "Path": "/",
+                        "AssumeRolePolicyDocument": '{"Statement":[]}',
+                        "AttachedManagedPolicies": [],
+                        "RolePolicyList": [],
+                        "PermissionsBoundary": {"PermissionsBoundaryArn": boundary_arn},
+                        "RoleLastUsed": None,
+                    }
+                ],
+                "GroupDetailList": [],
+                "Policies": [
+                    {
+                        "PolicyName": "BoundaryPolicy",
+                        "Arn": boundary_arn,
+                        "DefaultVersionId": "v2",
+                    }
+                ],
+                "IsTruncated": False,
+            },
+            "get_policy_version": {"PolicyVersion": {"Document": boundary_doc}},
+            "generate_credential_report": {"State": "COMPLETE"},
+            "get_credential_report": {"Content": "user,mfa_active,password_last_used\n<root_account>,true,N/A"},
+            "list_open_id_connect_providers": {"OpenIDConnectProviderList": []},
+            "generate_service_last_accessed_details": {"JobId": "job-role-456"},
+            "get_service_last_accessed_details": {"JobStatus": "COMPLETED", "ServicesLastAccessed": []},
+        }
+    )
+
+    envelope = run(FakeFactory(iam=iam), "global")
+
+    role = envelope.resources[0]
+    assert role["has_boundary"] is True
+    assert role["permission_boundary_arn"] == boundary_arn
+    assert role["permission_boundary_document"] == boundary_doc
 
 
 def test_iam_fallback_aws_managed_attached_policy_skips_document_lookup():
@@ -618,6 +728,7 @@ def test_iam_cross_account_trust_preserves_factual_conditions():
             "is_wildcard": False,
             "has_external_id": False,
             "has_mfa_condition": False,
+            "actions": ["sts:AssumeRole"],
             "conditions": {},
         }
     ]

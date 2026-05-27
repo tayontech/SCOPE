@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["list_buckets"]
@@ -69,6 +70,11 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             response = _safe_get(lambda: s3.get_bucket_policy(Bucket=bucket_name), {"NoSuchBucketPolicy"})
             if response:
                 finding["policy"] = response.get("Policy")
+                normalized_policy = normalize_resource_policy(response.get("Policy"), account_id=factory.account_id)
+                if normalized_policy:
+                    finding["resource_policy"] = {"principals": normalized_policy["principals"]}
+                    finding["resource_policy_document"] = normalized_policy["document"]
+                    finding["resource_policy_statements"] = normalized_policy["statements"]
                 finding["policy_status"] = "present"
             else:
                 finding["policy_status"] = "absent"
@@ -137,6 +143,20 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             code = _error_code(err)
             finding["logging_status"] = _classify_status(code)
             tracker.record_skipped("bucket_logging", resource=bucket_arn, reason=_skip_reason(code))
+
+        try:
+            response = s3.get_bucket_notification_configuration(Bucket=bucket_name)
+            notification = _notification_configuration(response)
+            if notification:
+                finding["notification_configuration"] = notification
+                finding["notification_configuration_status"] = "present"
+            else:
+                finding["notification_configuration_status"] = "absent"
+            tracker.record_ok("bucket_notification_configuration", resource=bucket_arn)
+        except Exception as err:
+            code = _error_code(err)
+            finding["notification_configuration_status"] = _classify_status(code)
+            tracker.record_skipped("bucket_notification_configuration", resource=bucket_arn, reason=_skip_reason(code))
 
         try:
             response = s3.get_bucket_acl(Bucket=bucket_name)
@@ -266,6 +286,16 @@ def _has_public_policy(policy: str | None) -> bool:
         if isinstance(principal, dict) and principal.get("AWS") == "*":
             return True
     return False
+
+
+def _notification_configuration(response: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "LambdaFunctionConfigurations",
+        "TopicConfigurations",
+        "QueueConfigurations",
+        "EventBridgeConfiguration",
+    )
+    return {key: response[key] for key in keys if response.get(key)}
 
 
 def _classify_status(code: str) -> str:

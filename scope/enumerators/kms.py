@@ -5,6 +5,7 @@ from typing import Any
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["list_keys"]
@@ -70,7 +71,12 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
 
         try:
             response = kms.get_key_policy(KeyId=key_id, PolicyName="default")
-            finding["policy_principals"] = _extract_policy_principals(response.get("Policy"))
+            policy = response.get("Policy")
+            finding["policy_principals"] = _extract_policy_principals(policy)
+            normalized_policy = normalize_resource_policy(policy, account_id=factory.account_id)
+            if normalized_policy is not None:
+                finding["resource_policy_document"] = normalized_policy["document"]
+                finding["resource_policy_statements"] = normalized_policy["statements"]
             finding["policy_status"] = "present"
             tracker.record_ok("key_policy", resource=key_arn)
         except Exception as err:
@@ -86,6 +92,7 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
                     "grantee_principal": grant.get("GranteePrincipal"),
                     "operations": grant.get("Operations") or [],
                     "retiring_principal": grant.get("RetiringPrincipal"),
+                    "constraints": grant.get("Constraints") or {},
                 }
                 for grant in grants
             ]

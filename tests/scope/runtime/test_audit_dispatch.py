@@ -84,7 +84,11 @@ def test_audit_all_discovers_regions_and_dispatches_python_modules(monkeypatch, 
     assert (run_dir / "summary.json").exists()
     assert (run_dir / "resources.jsonl").exists()
     assert (run_dir / "modules" / "s3" / "global.json").exists()
+    assert (run_dir / "modules" / "cloudfront" / "global.json").exists()
+    assert (run_dir / "modules" / "route53" / "global.json").exists()
     assert not (run_dir / "modules" / "s3" / "us-east-1.json").exists()
+    assert not (run_dir / "modules" / "cloudfront" / "us-east-1.json").exists()
+    assert not (run_dir / "modules" / "route53" / "us-east-1.json").exists()
     assert not (run_dir / "sns.json").exists()
     modules = []
     for command in commands:
@@ -92,6 +96,7 @@ def test_audit_all_discovers_regions_and_dispatches_python_modules(monkeypatch, 
         if module not in modules:
             modules.append(module)
     assert set(modules) == set(audit.ALL_MODULES)
+    assert "ecs" in modules
     regions = {command[command.index("--region") + 1] for command in commands}
     assert {"global", "us-east-1", "us-west-2"} <= regions
     assert "lambda" in modules
@@ -132,6 +137,43 @@ def test_audit_single_region_writes_only_modules_and_aggregates(monkeypatch, tmp
     assert not (run_dir / "sns.json").exists()
     assert (run_dir / "resources.jsonl").exists()
     assert json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))["status"] == "complete"
+
+
+def test_audit_dispatches_ecs_as_regional_module(monkeypatch, tmp_path: Path):
+    commands = []
+
+    def fake_run_command(command, log_path: Path):
+        commands.append(command)
+        module = command[command.index("enum") + 1]
+        region = command[command.index("--logical-region") + 1]
+        run_dir = Path(command[command.index("--run-dir") + 1])
+        payload = {
+            "module": module,
+            "account_id": "123456789012",
+            "region": region,
+            "status": "complete",
+            "resources": [],
+            "coverage": [],
+            "errors": [],
+        }
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / f"{module}.json").write_text(json.dumps(payload), encoding="utf-8")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(audit, "ClientFactory", FakeClientFactory)
+    monkeypatch.setattr(audit, "_run_command", fake_run_command)
+
+    run_dir = tmp_path / "run"
+
+    result = audit.main(["--services", "ecs", "--regions", "us-east-1", "--run-dir", str(run_dir)])
+
+    assert result == 0
+    assert commands[0][commands[0].index("enum") + 1] == "ecs"
+    assert commands[0][commands[0].index("--region") + 1] == "us-east-1"
+    assert commands[0][commands[0].index("--logical-region") + 1] == "us-east-1"
+    assert (run_dir / "modules" / "ecs" / "us-east-1.json").exists()
 
 
 def test_audit_writes_graph_and_results_after_aggregation(monkeypatch, tmp_path: Path):
@@ -177,6 +219,9 @@ def test_audit_writes_graph_and_results_after_aggregation(monkeypatch, tmp_path:
     assert results["summary"]["total_resources"] == 1
     assert any(node["id"] == "role:LambdaExecRole" for node in results["graph"]["nodes"])
     assert results["attack_paths"] == []
+    assert results["candidate_attack_paths"] == []
+    assert results["attack_validation"] == []
+    assert results["security_observations"] == []
 
 
 def test_audit_returns_nonzero_when_envelope_missing(monkeypatch, tmp_path: Path):
@@ -922,9 +967,44 @@ def test_audit_mkdir_race_file_exists_becomes_system_exit(monkeypatch, tmp_path:
     assert "Run directory already exists" in str(exc.value)
 
 
-def test_audit_fails_when_run_dir_already_exists(monkeypatch, tmp_path: Path):
+def test_audit_allows_precreated_run_dir_with_gate_log(monkeypatch, tmp_path: Path):
+    def fake_run_command(command, log_path: Path):
+        module = command[command.index("enum") + 1]
+        region = command[command.index("--logical-region") + 1]
+        module_run_dir = Path(command[command.index("--run-dir") + 1])
+        payload = {
+            "module": module,
+            "account_id": "123456789012",
+            "region": region,
+            "status": "complete",
+            "resources": [],
+            "coverage": [],
+            "errors": [],
+        }
+        module_run_dir.mkdir(parents=True, exist_ok=True)
+        (module_run_dir / f"{module}.json").write_text(json.dumps(payload), encoding="utf-8")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
+        return 0
+
     existing = tmp_path / "existing"
     existing.mkdir()
+    (existing / "agent-log.jsonl").write_text('{"event":"gate_1"}\n', encoding="utf-8")
+    monkeypatch.setattr(audit, "ClientFactory", FakeClientFactory)
+    monkeypatch.setattr(audit, "_run_command", fake_run_command)
+
+    result = audit.main(["--services", "sts", "--run-dir", str(existing)])
+
+    assert result == 0
+    assert (existing / "agent-log.jsonl").read_text(encoding="utf-8") == '{"event":"gate_1"}\n'
+    assert (existing / "manifest.json").exists()
+    assert (existing / "modules" / "sts" / "global.json").exists()
+
+
+def test_audit_fails_when_run_dir_already_has_runtime_artifacts(monkeypatch, tmp_path: Path):
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    (existing / "manifest.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(audit, "ClientFactory", FakeClientFactory)
 
     with pytest.raises(SystemExit) as exc:
@@ -969,9 +1049,11 @@ def test_audit_dashboard_export_writes_public_results(monkeypatch, tmp_path: Pat
     result = audit.main(["--services", "sts", "--run-dir", str(run_dir), "--dashboard-export"])
 
     assert result == 0
-    public_result = tmp_path / "dashboard" / "public" / f"{EXTERNAL_RUN_ID}.json"
+    public_result = tmp_path / "dashboard" / "public" / "run.json"
     assert public_result.exists()
-    assert json.loads(public_result.read_text(encoding="utf-8"))["run_id"] == EXTERNAL_RUN_ID
+    assert json.loads(public_result.read_text(encoding="utf-8"))["run_id"] == "run"
     index = json.loads((tmp_path / "dashboard" / "public" / "index.json").read_text(encoding="utf-8"))
-    assert index["runs"][0]["run_id"] == EXTERNAL_RUN_ID
-    assert index["runs"][0]["source"] == "audit"
+    assert index["reports"][0]["report_id"] == "run"
+    assert index["reports"][0]["audit"]["run_id"] == "run"
+    assert index["reports"][0]["audit"]["file"] == "run.json"
+    assert "runs" not in index

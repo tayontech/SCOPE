@@ -12,19 +12,6 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
     errors: list[ErrorRecord] = []
     status = "complete"
 
-    try:
-        findings.extend(_foundation_models(bedrock, region))
-    except Exception as err:
-        if _is_region_not_available(err):
-            return _envelope(factory.account_id, region, [], "complete", [])
-        return _envelope(
-            factory.account_id,
-            region,
-            [],
-            "error",
-            [_error("bedrock.ListFoundationModels", "foundation_models", err)],
-        )
-
     for operation, resource, collector in (
         ("bedrock.ListCustomModels", "custom_models", lambda: _custom_models(factory, bedrock, region)),
         ("bedrock-agent.ListAgents", "agents", lambda: _agents(factory, agent, region)),
@@ -36,7 +23,7 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
         try:
             findings.extend(collector())
         except Exception as err:
-            if _is_operation_unsupported(err):
+            if _is_region_not_available(err) or _is_operation_unsupported(err):
                 continue
             status = "partial"
             errors.append(_error(operation, resource, err))
@@ -60,27 +47,6 @@ def _envelope(
         coverage=[],
         errors=errors,
     )
-
-
-def _foundation_models(client: Any, region: str) -> list[dict[str, Any]]:
-    response = client.list_foundation_models()
-    return [
-        {
-            "resource_type": "bedrock_model",
-            "resource_id": model.get("modelId"),
-            "arn": model.get("modelArn") or f"arn:aws:bedrock:{region}::foundation-model/{model.get('modelId')}",
-            "region": region,
-            "model_name": model.get("modelName"),
-            "provider": model.get("providerName"),
-            "model_arn": model.get("modelArn"),
-            "input_modalities": model.get("inputModalities") or [],
-            "output_modalities": model.get("outputModalities") or [],
-            "customizations_supported": model.get("customizationsSupported") or [],
-            "inference_types": model.get("inferenceTypesSupported") or [],
-            "findings": [],
-        }
-        for model in response.get("modelSummaries") or []
-    ]
 
 
 def _custom_models(factory: Any, client: Any, region: str) -> list[dict[str, Any]]:

@@ -95,3 +95,97 @@ def test_sns_topic_attributes_access_denied_marks_topic_partial():
     coverage = next(entry for entry in envelope.coverage if entry.check == "topic_attributes")
     assert coverage.status == "partial"
     assert coverage.failed == 1
+
+
+def test_sns_preserves_resource_policy_statements_and_conditions():
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "S3PublishOnly",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "sns:Publish",
+                "Resource": "arn:aws:sns:us-east-1:123456789012:vpc-flow-logs-sns",
+                "Condition": {
+                    "StringEquals": {
+                        "AWS:SourceArn": "arn:aws:s3:::tot-vpc-logs",
+                        "AWS:SourceOwner": "123456789012",
+                    }
+                },
+            }
+        ],
+    }
+    sns = FakeClient(
+        {
+            "list_topics": {
+                "Topics": [
+                    {"TopicArn": "arn:aws:sns:us-east-1:123456789012:vpc-flow-logs-sns"},
+                ],
+            },
+            "get_topic_attributes": {
+                "Attributes": {
+                    "TopicArn": "arn:aws:sns:us-east-1:123456789012:vpc-flow-logs-sns",
+                    "Policy": json.dumps(policy),
+                },
+            },
+        }
+    )
+
+    envelope = run(FakeFactory(sns=sns), "us-east-1")
+
+    topic = envelope.resources[0]
+    assert topic["resource_policy_document"] == policy
+    assert topic["resource_policy"] == {"principals": ["*"]}
+    assert topic["resource_policy_statements"][0]["sid"] == "S3PublishOnly"
+    assert topic["resource_policy_statements"][0]["normalized_actions"] == ["sns:Publish"]
+    assert topic["resource_policy_statements"][0]["condition"] == policy["Statement"][0]["Condition"]
+    assert topic["resource_policy_statements"][0]["source_arns"] == ["arn:aws:s3:::tot-vpc-logs"]
+
+
+def test_sns_collects_topic_subscriptions():
+    topic_arn = "arn:aws:sns:us-east-1:123456789012:uploads"
+    queue_arn = "arn:aws:sqs:us-east-1:123456789012:uploads-queue"
+    function_arn = "arn:aws:lambda:us-east-1:123456789012:function:processor"
+    sns = FakeClient(
+        {
+            "list_topics": {"Topics": [{"TopicArn": topic_arn}]},
+            "get_topic_attributes": {
+                "Attributes": {
+                    "TopicArn": topic_arn,
+                    "SubscriptionsConfirmed": "2",
+                }
+            },
+            "list_subscriptions_by_topic": {
+                "Subscriptions": [
+                    {
+                        "SubscriptionArn": "arn:aws:sns:us-east-1:123456789012:uploads:sub-1",
+                        "Protocol": "sqs",
+                        "Endpoint": queue_arn,
+                    },
+                    {
+                        "SubscriptionArn": "arn:aws:sns:us-east-1:123456789012:uploads:sub-2",
+                        "Protocol": "lambda",
+                        "Endpoint": function_arn,
+                    },
+                ]
+            },
+        }
+    )
+
+    envelope = run(FakeFactory(sns=sns), "us-east-1")
+
+    topic = envelope.resources[0]
+    assert topic["subscriptions_status"] == "present"
+    assert topic["subscriptions"] == [
+        {
+            "subscription_arn": "arn:aws:sns:us-east-1:123456789012:uploads:sub-1",
+            "protocol": "sqs",
+            "endpoint": queue_arn,
+        },
+        {
+            "subscription_arn": "arn:aws:sns:us-east-1:123456789012:uploads:sub-2",
+            "protocol": "lambda",
+            "endpoint": function_arn,
+        },
+    ]

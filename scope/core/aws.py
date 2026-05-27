@@ -36,7 +36,7 @@ class ClientFactory:
     def client(self, service: str) -> Any:
         if service not in self._clients:
             boto_service = SERVICE_ALIASES.get(service, service)
-            region_name = None if boto_service in {"iam", "sts", "organizations"} else self.region
+            region_name = None if boto_service in {"cloudfront", "iam", "route53", "sts", "organizations"} else self.region
             self._clients[service] = self.session.client(boto_service, region_name=region_name, config=DEFAULT_CONFIG)
         return self._clients[service]
 

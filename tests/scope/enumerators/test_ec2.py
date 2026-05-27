@@ -241,3 +241,77 @@ def test_ec2_elbv2_listener_failure_marks_load_balancer_partial():
     assert lb["findings"][0]["type"] == "internet_facing"
     assert envelope.errors[0].operation == "elbv2.DescribeListeners"
     assert envelope.errors[0].resource == lb_arn
+
+
+def test_ec2_elbv2_collects_listener_target_groups():
+    lb_arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/aws-goat-m2-alb/abc"
+    tg_arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/aws-goat-m2-tg/def"
+    factory = _empty_clients(
+        elbv2_ops={
+            "describe_load_balancers": {
+                "LoadBalancers": [
+                    {
+                        "LoadBalancerName": "aws-goat-m2-alb",
+                        "LoadBalancerArn": lb_arn,
+                        "Type": "application",
+                        "Scheme": "internet-facing",
+                        "DNSName": "aws-goat.example.com",
+                        "VpcId": "vpc-0abc123",
+                        "SecurityGroups": ["sg-lb"],
+                    }
+                ]
+            },
+            "describe_listeners": {
+                "Listeners": [
+                    {
+                        "ListenerArn": f"{lb_arn}/listener/app/123",
+                        "Port": 80,
+                        "Protocol": "HTTP",
+                        "DefaultActions": [
+                            {
+                                "Type": "forward",
+                                "TargetGroupArn": tg_arn,
+                            }
+                        ],
+                    }
+                ]
+            },
+            "describe_target_groups": {
+                "TargetGroups": [
+                    {
+                        "TargetGroupArn": tg_arn,
+                        "TargetGroupName": "aws-goat-m2-tg",
+                        "Protocol": "HTTP",
+                        "Port": 80,
+                        "TargetType": "ip",
+                        "VpcId": "vpc-0abc123",
+                        "LoadBalancerArns": [lb_arn],
+                    }
+                ]
+            },
+        }
+    )
+
+    envelope = run(factory, "us-east-1")
+
+    load_balancer = next(resource for resource in envelope.resources if resource["resource_type"] == "ec2_load_balancer")
+    target_group = next(resource for resource in envelope.resources if resource["resource_type"] == "ec2_target_group")
+    assert load_balancer["security_groups"] == ["sg-lb"]
+    assert load_balancer["listeners"] == [
+        {
+            "arn": f"{lb_arn}/listener/app/123",
+            "port": 80,
+            "protocol": "HTTP",
+            "ssl_policy": None,
+            "default_actions": [
+                {
+                    "type": "forward",
+                    "target_group_arn": tg_arn,
+                    "forward_target_groups": [],
+                }
+            ],
+            "target_group_arns": [tg_arn],
+        }
+    ]
+    assert target_group["arn"] == tg_arn
+    assert target_group["load_balancer_arns"] == [lb_arn]
