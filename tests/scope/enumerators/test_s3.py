@@ -212,3 +212,77 @@ def test_s3_public_policy_and_acl_generate_findings():
     finding_types = {finding["type"] for finding in envelope.resources[0]["findings"]}
     assert "public_policy" in finding_types
     assert "public_acl" in finding_types
+
+
+def test_s3_preserves_resource_policy_statements_and_conditions():
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "VpcEndpointRead",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": ["s3:GetObject"],
+                "Resource": "arn:aws:s3:::my-test-bucket/*",
+                "Condition": {
+                    "StringEquals": {
+                        "aws:SourceArn": "arn:aws:vpce:us-east-1:123456789012:vpce/vpce-abc123"
+                    }
+                },
+            }
+        ],
+    }
+    s3 = FakeClient(
+        _minimal_bucket_ops(
+            get_bucket_policy={"Policy": json.dumps(policy)},
+        )
+    )
+
+    envelope = run(FakeFactory(s3=s3), "us-east-1")
+
+    bucket = envelope.resources[0]
+    assert bucket["resource_policy_document"] == policy
+    assert bucket["resource_policy"] == {"principals": ["*"]}
+    assert bucket["resource_policy_statements"][0]["sid"] == "VpcEndpointRead"
+    assert bucket["resource_policy_statements"][0]["normalized_actions"] == ["s3:GetObject"]
+    assert bucket["resource_policy_statements"][0]["normalized_resources"] == ["arn:aws:s3:::my-test-bucket/*"]
+    assert bucket["resource_policy_statements"][0]["source_arns"] == [
+        "arn:aws:vpce:us-east-1:123456789012:vpce/vpce-abc123"
+    ]
+
+
+def test_s3_preserves_bucket_notification_configuration():
+    notification = {
+        "LambdaFunctionConfigurations": [
+            {
+                "Id": "ProcessUploads",
+                "LambdaFunctionArn": "arn:aws:lambda:us-east-1:123456789012:function:processor",
+                "Events": ["s3:ObjectCreated:*"],
+            }
+        ],
+        "TopicConfigurations": [
+            {
+                "Id": "PublishUploads",
+                "TopicArn": "arn:aws:sns:us-east-1:123456789012:uploads",
+                "Events": ["s3:ObjectCreated:Put"],
+            }
+        ],
+        "QueueConfigurations": [
+            {
+                "Id": "QueueUploads",
+                "QueueArn": "arn:aws:sqs:us-east-1:123456789012:uploads",
+                "Events": ["s3:ObjectCreated:Put"],
+            }
+        ],
+    }
+    s3 = FakeClient(
+        _minimal_bucket_ops(
+            get_bucket_notification_configuration=notification,
+        )
+    )
+
+    envelope = run(FakeFactory(s3=s3), "us-east-1")
+
+    bucket = envelope.resources[0]
+    assert bucket["notification_configuration"] == notification
+    assert bucket["notification_configuration_status"] == "present"

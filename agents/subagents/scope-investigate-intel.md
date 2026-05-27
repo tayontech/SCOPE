@@ -1,7 +1,7 @@
 ---
 name: scope-investigate-intel
 description: Threat intel mode intake for scope-investigate. Fetches URLs or parses natural language threat descriptions, extracts IOCs and TTPs, generates threat_intel and intel_reasoning hypotheses (INTEL-03), and builds investigation_context from parsed intel. Dispatched by scope-investigate parent when MODE=INTEL. Returns structured handoff to parent.
-model: claude-sonnet-4-6
+model: reasoning
 tools: Read, WebFetch, WebSearch
 ---
 
@@ -72,7 +72,7 @@ Apply the following extraction logic against the fetched page content:
 - AWS eventNames appearing in prose: scan for known high-value names (CreateAccessKey, AssumeRole, GetSecretValue, PutBucketPolicy, StopLogging, CreateRole, UpdateAssumeRolePolicy, GetObject, InvokeFunction, etc.)
 
 **Affected AWS services (keyword matching):**
-- Match against: IAM, STS, S3, EC2, Lambda, RDS, Secrets Manager, KMS, CloudTrail, Organizations, SSM, SNS, SQS, API Gateway, CodeBuild, ECS, EKS
+- Match against: IAM, STS, S3, EC2, Lambda, RDS, Secrets Manager, KMS, CloudTrail, Organizations, SSM, SNS, SQS, API Gateway, CodeBuild, ECS
 
 **Threat actor name:**
 - Look for known patterns: APT\d+, FIN\d+, UNC\d+, Lazarus Group, SCATTERED SPIDER, Midnight Blizzard, Cozy Bear, Fancy Bear, etc.
@@ -206,7 +206,7 @@ Use the MITRE T-ID → CloudTrail Event Family table to map each `mitre_id` to a
 | T1059 | Command and scripting interpreter | InvokeFunction, StartSession (SSM) | Code execution |
 | T1537 | Transfer data to cloud account | CopyObject, PutObject cross-account | Data exfiltration |
 | T1485 | Data destruction | DeleteObject, DeleteBucket, DeleteTable | Impact |
-| T1490 | Inhibit system recovery | DisableRule (EventBridge), DeleteBackup | Impact |
+| T1490 | Inhibit system recovery | DeleteBackup | Impact |
 | T1087 | Account discovery | ListUsers, ListRoles, ListGroups | Reconnaissance |
 | T1580 | Cloud infrastructure discovery | DescribeInstances, ListBuckets, DescribeFunctions | Reconnaissance |
 | T1567 | Exfiltration over web service | GetObject to public endpoint, PutBucketPolicy (public) | Data exfiltration |

@@ -5,169 +5,134 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/tayontech/SCOPE/blob/main/LICENSE)
 [![GitHub last commit](https://img.shields.io/github/last-commit/tayontech/SCOPE)](https://github.com/tayontech/SCOPE/commits/main)
 
-*One framework. Full purple team loop. From enumeration to defense.*
-
-Most AWS security assessments are manual, fragmented, and slow. Enumeration scripts dump raw output that someone has to stitch together. Findings live in spreadsheets. Attack paths exist only in the assessor's head. Defensive recommendations are generic and disconnected from what was actually found.
-
-**SCOPE changes that.** It's an agentic AI framework that runs the full purple team loop: enumerate AWS resources, reason about attack paths, generate exploit playbooks, produce targeted defensive controls, and investigate threats.
+SCOPE runs AWS purple-team workflows with deterministic Python inventory and bounded AI agents. It audits AWS resources, validates attack paths, generates review-only exploit playbooks, produces controls, and guides Splunk investigations.
 
 ## How It Works
 
-SCOPE runs as a set of AI agents inside [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [Codex CLI](https://github.com/openai/codex). One command kicks off the full pipeline:
+Run SCOPE from Claude Code, Antigravity CLI, Gemini CLI, or Codex CLI:
 
-```
+```text
 /scope:audit --all
 ```
 
-The orchestrator runs the Python AWS SDK runtime across 16 AWS services, feeds factual resource inventory into an attack path reasoning engine, auto-chains defensive control generation, and renders everything into an interactive dashboard. No manual handoffs.
-
-| Phase | What Happens |
-|-------|-------------|
-| **Audit** | Python enumerators inventory IAM, STS, S3, KMS, Secrets Manager, Lambda, EC2, RDS, API Gateway, SNS, SQS, CodeBuild, Bedrock, Cognito, DynamoDB, SSM |
-| **Attack Paths** | AI reasons over combined findings to identify privilege escalation chains, lateral movement, and trust abuse |
-| **Controls** | Generates SCPs, resource control policies, SPL detections (atomic + composite), and prioritized remediation |
-| **Exploit** | Produces narrative red team playbooks with creative reasoning for novel abuse paths beyond standard catalogues |
-| **Investigate** | SOC alert investigation, run-guided threat hunting, and threat intel parsing — three modes: investigation, run-guided, and intel |
+| Phase | Output |
+|-------|--------|
+| Audit | Python enumerators inventory IAM, STS, S3, KMS, Secrets Manager, Lambda, EC2, ECS, RDS, API Gateway, SNS, SQS, CodeBuild, Bedrock, CloudFront, Cognito, DynamoDB, Route 53, and SSM |
+| Attack paths | Candidate generation, validation, grouped reporting, and review-only AWS CLI replay artifacts |
+| Controls | Org-wide issues, SPL detections, monitoring dashboard ideas, policy replacements, remediation, and validation |
+| Exploit | Principal-scoped playbooks with approved replay command artifacts |
+| Investigate | Alert, run-guided, and intel-driven Splunk investigation workflows |
 
 ## Quick Start
 
 ```bash
-# Clone and install
 git clone https://github.com/tayontech/SCOPE.git
 cd SCOPE
-node bin/install.js
+uv run python -m scope.install
 
-# Configure AWS credentials (any standard method)
 export AWS_PROFILE=your-profile
 
-# Run a full audit
 /scope:audit --all
-
-# Or target specific services
 /scope:audit iam s3 lambda
-
-# Generate exploit playbooks for a principal
 /scope:exploit arn:aws:iam::123456789012:role/target-role
-
-# Self-target mode (discovers caller identity automatically)
 /scope:exploit
-
-# Investigate a SOC alert
 /scope:investigate
 ```
 
-The installer presents an interactive selector — pick your runtime (Claude Code, Gemini, Codex, or all) and install scope (local project or global).
+Requirements: Python 3.11+, `uv`, AWS CLI with read-only credentials, and one supported runtime. Node.js supports dashboard generation and Splunk MCP `mcp-remote` transport.
 
-> **Requirements:** AWS CLI configured with read-only credentials. Node.js for tooling. Claude Code, Gemini CLI, or Codex CLI as the runtime.
+Scripted installs:
 
-## Architecture
-
-```
-agents/               Core agents: audit orchestrator, controls, exploit, investigate
-agents/subagents/     Attack analysis, controls subagents, investigation intake, research, verification
-scope/enumerators/    Python boto3 resource inventory modules
-scope/core/           Shared Python runtime: AWS clients, envelope, coverage, retry, models
-scope/runtime/        Audit orchestration, target selection, aggregation, post-processing
-dashboard/            React + D3 interactive dashboard (self-contained HTML output)
-config/               Runtime reference data, lifecycle hooks, schemas, settings templates
-bin/                  Tooling: installer, report generator, graph extractor
+```bash
+uv run python -m scope.install --claude --local --no-splunk-mcp
+uv run python -m scope.install --antigravity --local --no-splunk-mcp
+uv run python -m scope.install --gemini --local --no-splunk-mcp
+uv run python -m scope.install --codex --local --no-splunk-mcp
+uv run python -m scope.install --all --local --with-splunk-mcp
 ```
 
-### Exploit Intelligence
+Interactive install asks whether to configure bundled Splunk MCP defaults. Scripted installs skip MCP server settings unless you pass `--with-splunk-mcp`. Use `--no-splunk-mcp` when automation should show the choice in logs. SCOPE remains SPL-first until the project adds query-language profiles. See `config/mcp-setup.md`.
 
-The exploit agent uses creative reasoning to discover abuse paths — not just a static checklist. It analyzes a principal's actual permissions and reasons about what attack chains are possible, using known escalation families as a floor, not a ceiling.
+## Safety
 
-- **Permission auto-discovery** — self-target mode discovers caller identity, reads own policies, falls back to targeted probes
-- **Focused exploit output** — exploit playbooks avoid detection and CloudTrail visibility guidance; controls and investigate own detection engineering, dashboards, and telemetry caveats
-- **Creative reasoning** — LLM reasons about unconventional service chain abuse beyond the standard catalogue
-- **PassRole attack surface** — maps composable role-passing chains across 10+ AWS services
-
-### Safety by Default
-
-SCOPE agents are **read-only**. A lifecycle hook blocks every destructive AWS API call before it executes. Exploit generates playbooks with write commands but never runs them. Execution requires explicit human approval per-step.
+SCOPE agents run read-only AWS activity by default. `config/hooks/scope-safety-guard.sh` blocks destructive AWS shell operations before execution. Audit and exploit may write AWS CLI replay command artifacts for human review; agents do not execute those write commands.
 
 | Hook | Purpose |
 |------|---------|
-| Safety Guard | Blocks destructive AWS operations at the shell level |
-| SPL Lint | Hard-fails on Splunk query anti-patterns |
-| Schema Validate | Enforces structured output on all results |
-| Artifact Check | Verifies mandatory outputs before agent completion |
-
-### SIEM Integration
-
-SCOPE connects to your SIEM via MCP for live query execution during investigations. The default configuration targets Splunk Cloud (Splunkbase app 7931), but you can use any SIEM that exposes an MCP server. Replace the `mcpServers` block in your platform's config with your SIEM's MCP server definition and credentials. The investigation agent probes for available search tools at startup and adapts accordingly. See `config/mcp-setup.md` for details.
+| Safety Guard | Blocks destructive AWS shell operations |
+| SPL Lint | Rejects SPL anti-patterns and side-effect commands |
+| Schema Validate | Validates results and module envelopes |
+| Artifact Check | Checks required run outputs before completion |
 
 ## Dashboard
 
-Agents produce structured JSON that feeds into an interactive React + D3 dashboard. One command generates a self-contained HTML file. No server required.
+Generate one self-contained report for a run:
 
 ```bash
 cd dashboard && npm run dashboard
-open dashboard/<run-id>-dashboard.html
+open dashboard/reports/<run-id>-dashboard.html
 ```
 
-The dashboard visualizes:
-- Trust relationships with internal/external classification based on owned account IDs
-- Attack paths with severity, MITRE ATT&CK mappings, and exploitability ratings
-- Privilege escalation chains and lateral movement graphs
-- Defensive controls: SCPs, RCPs, and SPL detections with atomic/composite badges
-- KPI cards: critical priv esc count, wildcard trusts, cross-account trusts
+An explicit audit run directory basename becomes the dashboard run ID. `dashboard/public/index.json` stores `reports[]`; each report points to one audit JSON export and optional controls JSON export. Controls attach to the audit report, so one audit workflow creates one selectable dashboard report.
 
-## Multi-Platform
+The dashboard shows attack graphs, path details, public exposure findings, controls, SPL detections, dashboard ideas, policy replacements, and remediation.
 
-SCOPE runs on three AI coding platforms with the same agent definitions:
+## Platforms
 
-| Platform | Status | Hooks Config | Notes |
-|----------|--------|-------------|-------|
-| **Claude Code** | Full support | `.claude/settings.json` | Lifecycle hooks, model routing, memory |
-| **Gemini CLI** | Full support | `.gemini/settings.json` | Lifecycle hooks, model routing |
-| **Codex CLI** | Full support | `.codex/hooks.json` | Lifecycle hooks, model routing |
+| Platform | Status | Hook Config | Install Surface |
+|----------|--------|-------------|-----------------|
+| Claude Code | Supported | `.claude/settings.json` | `.claude/skills/`, `.claude/agents/` |
+| Antigravity CLI | Preferred Google target | `.agents/hooks.json` | `.agents/skills/`, `.agents/mcp_config.json`, `.agents/plugins/scope/agents/` |
+| Gemini CLI | Legacy Google target | `.gemini/settings.json` | `.agents/skills/`, `.gemini/agents/` |
+| Codex CLI | Supported | `.codex/hooks.json` | `.agents/skills/`, `.codex/agents/` |
 
-### Agent Architecture
+Google announced on May 19, 2026 that Gemini CLI and Gemini Code Assist IDE extensions stop serving requests for Google AI Pro, Ultra, and free individual users on June 18, 2026. Use Antigravity CLI for new Google installs. SCOPE keeps `--gemini` for enterprise/API-key users and migration.
 
-SCOPE has two types of agents:
+## Agents And Models
 
-**Skills** — run in your session, inherit your model:
-- `scope-audit` — orchestrator, dispatches subagents
-- `scope-controls` — defensive controls orchestrator, dispatches 5 subagents
-- `scope-exploit` — standalone red team playbook generator
-- `scope-investigate` — standalone SOC investigation assistant
+Top-level agents inherit the runtime session model:
 
-**Subagents** — dispatched with their own pinned model:
-- `scope-attack-analyze` — attack path analysis over Python runtime inventory, graph, and IAM policy context
-- `scope-controls-guardrails`, `scope-controls-detections`, `scope-controls-policy`, `scope-controls-remediation`, `scope-controls-validate` — controls subagents
-- `scope-investigate-alert`, `scope-investigate-intel`, `scope-investigate-run` — investigation intake and hypothesis generation
-- `scope-research` - shared external technique research for attack analysis and exploit playbooks
+- `scope-audit` orchestrates audit gates, Python runtime execution, attack analysis, replay artifacts, and controls chaining.
+- `scope-controls` orchestrates org-wide issues, detections, dashboard ideas, policy replacements, remediation, and validation.
+- `scope-exploit` generates principal-scoped red-team playbooks.
+- `scope-investigate` runs alert, run-guided, and intel investigation modes.
 
-When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, dispatches `scope-attack-analyze`, optionally enriches candidates through `scope-research`, then chains controls on a reasoning model. Scope-investigate dispatches intake subagents on a reasoning model, then runs Splunk execution on your session model. Exploit always uses whatever model your session is running.
+Subagents run bounded reasoning tasks:
 
-### Model Routing
+- `scope-attack-analyze`, `scope-attack-validate`, `scope-public-exposure-analysis`, and `scope-awscli-replay` support attack-path analysis and replay artifacts.
+- `scope-controls-org-wide`, `scope-controls-detections`, `scope-controls-dashboards`, `scope-controls-policy`, `scope-controls-remediation`, and `scope-controls-validate` support controls.
+- `scope-investigate-alert`, `scope-investigate-intel`, and `scope-investigate-run` prepare investigation context.
+- `scope-research` - shared external technique research for attack analysis and exploit playbooks.
 
-`install.js` assigns platform-specific models to subagents during install:
+When you run `/scope:audit --all`, the orchestrator runs on your session model, calls `scope audit` for deterministic Python enumeration and post-processing, seeds IAM and public/service-connected candidates with `scope.attack.candidates`, dispatches `scope-attack-analyze`, optionally enriches candidates through `scope-research`, then can generate review-only AWS CLI replay artifacts for validated paths before chaining controls on a reasoning model.
 
-| Agent Type | Claude Code | Gemini CLI | Codex |
-|------------|-------------|------------|-------|
-| Reasoning (attack analysis, controls + subagents, investigation intake, research subagent) | claude-sonnet-4-6 | gemini-3.1-pro-preview | gpt-5.4 |
+| Runtime | Reasoning Subagent Tier |
+|---------|-------------------------|
+| Claude Code | `opus[1m]` alias |
+| Antigravity CLI | Model selected in Antigravity |
+| Gemini CLI | `pro` alias |
+| Codex CLI | `gpt-5.5` with high reasoning effort |
 
-Enumeration is deterministic Python via `python -m scope` and `scope/enumerators/` — no AI model. Skills (audit, exploit, investigate) inherit your session model.
+Claude subagents use the `opus[1m]` alias for larger context during artifact-heavy analysis and validation. Enumeration uses deterministic Python, not an AI model.
 
 ## Documentation
 
-| | |
-|---|---|
-| [PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/PROJECT.md) | Behavioral guidance: reasoning philosophy, operator pace, environmental learning |
-| [LLM-CONTEXT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/LLM-CONTEXT.md) | Reviewer and implementation-agent context for SCOPE contracts, boundaries, and verification |
-| [Dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | Visualization setup and customization |
-| [Hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hook reference |
-| [Schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema definitions for audit, controls, exploit output |
+| Document | Purpose |
+|----------|---------|
+| [ARCHITECTURE.md](https://github.com/tayontech/SCOPE/blob/main/ARCHITECTURE.md) | Component ownership, pipeline flow, runtime contracts, graphs, and hooks |
+| [RELEASE-NOTES.md](https://github.com/tayontech/SCOPE/blob/main/RELEASE-NOTES.md) | Current release changes |
+| [config/mcp-setup.md](https://github.com/tayontech/SCOPE/blob/main/config/mcp-setup.md) | Splunk MCP and manual SPL mode |
+| [config/README.md](https://github.com/tayontech/SCOPE/blob/main/config/README.md) | Config ownership |
+| [knowledge/README.md](https://github.com/tayontech/SCOPE/blob/main/knowledge/README.md) | Durable knowledge rules and redaction |
+| [config/project-docs/PROJECT.md](https://github.com/tayontech/SCOPE/blob/main/config/project-docs/PROJECT.md) | Source for generated runtime instruction files |
+| [docs/LLM-CONTEXT.md](https://github.com/tayontech/SCOPE/blob/main/docs/LLM-CONTEXT.md) | Reviewer and implementation-agent context |
+| [dashboard](https://github.com/tayontech/SCOPE/tree/main/dashboard) | React and D3 report generator |
+| [config/hooks](https://github.com/tayontech/SCOPE/tree/main/config/hooks) | Safety and validation hooks |
+| [config/schemas](https://github.com/tayontech/SCOPE/tree/main/config/schemas) | JSON Schema contracts |
 
 ## Community
 
-- [Issues](https://github.com/tayontech/SCOPE/issues) Bugs and feature requests
-- [Pull Requests](https://github.com/tayontech/SCOPE/pulls) Contributions welcome
-
----
+- [Issues](https://github.com/tayontech/SCOPE/issues)
+- [Pull Requests](https://github.com/tayontech/SCOPE/pulls)
 
 Created by **Tayvion Payton**
-
-*Enumerate. Reason. Controls. One command, full loop.*

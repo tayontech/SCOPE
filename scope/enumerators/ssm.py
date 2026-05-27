@@ -6,6 +6,7 @@ from typing import Any
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["describe_parameters"]
@@ -61,10 +62,16 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
 
         try:
             response = ssm.get_resource_policies(ResourceArn=parameter_arn)
-            entry = (response.get("Policies") or [None])[0]
-            policy = entry.get("Policy") if isinstance(entry, dict) else None
-            if policy:
-                finding["resource_policy"] = _parse_policy(policy)
+            policy_entries = _normalize_policy_entries(response.get("Policies") or [], account_id=factory.account_id)
+            if policy_entries:
+                finding["resource_policies"] = policy_entries
+                finding["resource_policy"] = policy_entries[0]["document"]
+                finding["resource_policy_document"] = policy_entries[0]["document"]
+                finding["resource_policy_statements"] = [
+                    statement
+                    for policy_entry in policy_entries
+                    for statement in policy_entry["statements"]
+                ]
                 finding["has_resource_policy"] = True
                 finding["resource_policy_status"] = "present"
             else:
@@ -112,6 +119,26 @@ def _format_timestamp(value: Any) -> str | None:
         normalized = value.astimezone(timezone.utc)
         return normalized.isoformat(timespec="milliseconds").replace("+00:00", "Z")
     return str(value)
+
+
+def _normalize_policy_entries(policies: list[Any], *, account_id: str) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for index, entry in enumerate(policies):
+        if not isinstance(entry, dict):
+            continue
+        normalized_policy = normalize_resource_policy(entry.get("Policy"), account_id=account_id)
+        if not normalized_policy:
+            continue
+        entries.append(
+            {
+                "policy_id": entry.get("PolicyId") or entry.get("PolicyHash") or f"policy-{index + 1}",
+                "policy_hash": entry.get("PolicyHash"),
+                "document": normalized_policy["document"],
+                "principals": normalized_policy["principals"],
+                "statements": normalized_policy["statements"],
+            }
+        )
+    return entries
 
 
 def _parse_policy(policy: str) -> Any:

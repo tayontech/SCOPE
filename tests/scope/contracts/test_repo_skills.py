@@ -37,6 +37,9 @@ def test_repo_attack_pipeline_skills_contract() -> None:
         "runtime_assumption",
         "coverage_caveat",
         "Do not call AWS APIs.",
+        "Existing CodeBuild project execution",
+        "Identity issuance",
+        "DynamoDB, or SSM",
     ]:
         assert text in attack
     assert "transition" in attack
@@ -51,7 +54,7 @@ def test_repo_attack_pipeline_skills_contract() -> None:
     )
 
     for pattern in [
-        r"public endpoint[\s\S]{0,120}compute role",
+        r"public endpoint[\s\S]{0,160}AWS-level proof",
         r"assume-role[\s\S]{0,120}stronger action",
         r"pass-role[\s\S]{0,120}compute",
         r"resource policy[\s\S]{0,120}external access[\s\S]{0,120}impact",
@@ -127,9 +130,11 @@ def test_repo_exploit_playbook_skill_contract() -> None:
         "`DISCOVERY_MODE`: `standalone` or `audit`",
         "operator-approved paths",
         "research results from `scope-research`",
+        "`AWS_CLI_REPLAY` from `scope-awscli-replay`",
         "The top-level agent owns permission discovery, path reasoning, research dispatch, gates, artifact writes, and `results.json`.",
         "Use actual ARNs, account IDs, resource names, and permissions from discovery.",
         "Order steps by technical dependency, not quietness or stealth.",
+        "Use command blocks from `AWS_CLI_REPLAY.paths[].commands[]`.",
         "Do not include CloudTrail event names, GuardDuty finding types, detection likelihood, OPSEC notes, SOC recommendations, numeric confidence scores, or stealth-ordering headers.",
         "Establish Persistence",
         "Post-Exploitation",
@@ -144,3 +149,43 @@ def test_repo_exploit_playbook_skill_contract() -> None:
         "Persistence and post-exploitation sections require explicit operator approval",
     ]:
         assert text in playbook
+
+
+def test_repo_detection_format_skill_contract() -> None:
+    detection_format = read("skills/scope-detection-format/SKILL.md")
+
+    assert_frontmatter(detection_format, "scope-detection-format")
+
+    for text in [
+        "format-only",
+        "FORMAT_BLOCKS",
+        "`detections.md`",
+        "`detections.json`",
+        "Do not decide alert vs hunt",
+        "Do not promote, reject, or downgrade detections",
+        "Do not change SPL logic",
+        "Do not invent required values",
+        "The caller owns detection quality",
+        "SPL in `detections.json` must be a single-line string",
+        "Markdown SPL blocks must use fenced `spl` code blocks",
+        "Dashboard-readable text must be concise",
+    ]:
+        assert text in detection_format
+
+    for field in [
+        "name",
+        "type",
+        "objective",
+        "spl",
+        "severity",
+        "category",
+        "mitre_technique",
+        "source_attack_paths",
+        "source_run_ids",
+        "promotion_decision",
+        "fidelity_rationale",
+        "noise_controls",
+        "expected_volume",
+        "validation_status",
+    ]:
+        assert f"`{field}`" in detection_format

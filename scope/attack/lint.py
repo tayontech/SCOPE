@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from scope.attack.schema import (
     AttackCandidate,
+    AttackPathGroup,
     AttackValidation,
     FinalAttackPath,
     SecurityObservation,
@@ -18,7 +19,7 @@ from scope.attack.schema import (
 
 Stage = Literal["auto", "candidates", "validation"]
 ModelT = TypeVar(
-    "ModelT", AttackCandidate, AttackValidation, FinalAttackPath, SecurityObservation
+    "ModelT", AttackCandidate, AttackPathGroup, AttackValidation, FinalAttackPath, SecurityObservation
 )
 REQUIRED_ARRAY_FIELDS = (
     "candidate_attack_paths",
@@ -38,6 +39,7 @@ def lint_results_file(path: Path, *, stage: Stage = "auto") -> list[str]:
     validation_payloads = _required_array(payload, "attack_validation", errors)
     final_path_payloads = _required_array(payload, "attack_paths", errors)
     observation_payloads = _required_array(payload, "security_observations", errors)
+    group_payloads = _optional_array(payload, "attack_path_groups", errors)
 
     graph_edge_ids = _graph_edge_ids(payload)
     candidates = _validate_items(
@@ -49,6 +51,7 @@ def lint_results_file(path: Path, *, stage: Stage = "auto") -> list[str]:
     final_paths = _validate_items(
         "attack_paths", final_path_payloads, FinalAttackPath, errors
     )
+    groups = _validate_items("attack_path_groups", group_payloads, AttackPathGroup, errors)
     observations = _validate_items(
         "security_observations", observation_payloads, SecurityObservation, errors
     )
@@ -73,6 +76,9 @@ def lint_results_file(path: Path, *, stage: Stage = "auto") -> list[str]:
         _check_candidates_stage(final_path_payloads, errors)
     if resolved_stage == "validation":
         _check_validation_stage(candidates, validations, final_paths, errors)
+        _check_attack_path_groups(groups, final_paths, errors)
+        _check_validation_summary(payload, validations, final_paths, groups, errors)
+        _check_public_exposure_promotion_links(payload, candidates, final_paths, errors)
 
     return errors
 
@@ -97,6 +103,16 @@ def _load_payload(path: Path, errors: list[str]) -> dict[str, Any] | None:
 def _required_array(payload: dict[str, Any], field: str, errors: list[str]) -> list[Any]:
     if field not in payload:
         errors.append(f"{field} is required")
+        return []
+    value = payload.get(field, [])
+    if isinstance(value, list):
+        return value
+    errors.append(f"{field} must be an array")
+    return []
+
+
+def _optional_array(payload: dict[str, Any], field: str, errors: list[str]) -> list[Any]:
+    if field not in payload:
         return []
     value = payload.get(field, [])
     if isinstance(value, list):
@@ -290,6 +306,115 @@ def _check_validation_stage(
                 "attack_paths: validation_status mismatch for "
                 f"{final_path.source_candidate_id}: final path is "
                 f"{final_path.validation_status}, validation is {validation.status}"
+            )
+
+
+def _check_attack_path_groups(
+    groups: list[AttackPathGroup],
+    final_paths: list[FinalAttackPath],
+    errors: list[str],
+) -> None:
+    if not groups:
+        return
+    path_ids = {path.id for path in final_paths}
+    grouped_path_ids: set[str] = set()
+    seen_group_ids: set[str] = set()
+    for group in groups:
+        if group.id in seen_group_ids:
+            errors.append(f"duplicate attack_path_groups id {group.id}")
+        seen_group_ids.add(group.id)
+        if group.representative_path_id not in path_ids:
+            errors.append(
+                "attack_path_groups: unknown representative_path_id "
+                f"{group.representative_path_id}"
+            )
+        unknown_members = [path_id for path_id in group.member_path_ids if path_id not in path_ids]
+        grouped_path_ids.update(group.member_path_ids)
+        for path_id in unknown_members:
+            errors.append(f"attack_path_groups: unknown member_path_id {path_id}")
+        for asset in group.leveraging_assets:
+            for path_id in asset.path_ids:
+                if path_id not in path_ids:
+                    errors.append(
+                        "attack_path_groups: leveraging asset "
+                        f"{asset.id} references unknown path_id {path_id}"
+                    )
+                elif path_id not in group.member_path_ids:
+                    errors.append(
+                        "attack_path_groups: leveraging asset "
+                        f"{asset.id} references path_id {path_id} outside group {group.id}"
+                    )
+        if group.member_count != len(group.member_path_ids):
+            errors.append(
+                "attack_path_groups: member_count does not match member_path_ids "
+                f"for {group.id}"
+            )
+    ungrouped_path_ids = sorted(path_ids - grouped_path_ids)
+    for path_id in ungrouped_path_ids:
+        errors.append(f"attack_path_groups: final path {path_id} is not grouped")
+
+
+def _check_validation_summary(
+    payload: dict[str, Any],
+    validations: list[AttackValidation],
+    final_paths: list[FinalAttackPath],
+    groups: list[AttackPathGroup],
+    errors: list[str],
+) -> None:
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return
+    if final_paths and summary.get("attack_analysis_stage") != "validation":
+        errors.append("summary.attack_analysis_stage must be validation when attack_paths exist")
+
+    expected = {
+        "validated_attack_paths_count": sum(1 for item in validations if item.status == "validated"),
+        "conditional_attack_paths_count": sum(1 for item in validations if item.status == "conditional"),
+        "rejected_attack_paths_count": sum(1 for item in validations if item.status == "rejected"),
+        "attack_paths_count": len(final_paths),
+        "attack_path_groups_count": len(groups),
+    }
+    for field, expected_value in expected.items():
+        if field in summary and summary.get(field) != expected_value:
+            errors.append(
+                f"summary.{field} is {summary.get(field)}, expected {expected_value}"
+            )
+
+
+def _check_public_exposure_promotion_links(
+    payload: dict[str, Any],
+    candidates: list[AttackCandidate],
+    final_paths: list[FinalAttackPath],
+    errors: list[str],
+) -> None:
+    findings = payload.get("public_exposure_findings", [])
+    if not isinstance(findings, list) or not findings:
+        return
+
+    candidates_by_id = {candidate.id: candidate for candidate in candidates}
+    promoted_by_entrypoint: dict[str, set[str]] = {}
+    for final_path in final_paths:
+        candidate = candidates_by_id.get(final_path.source_candidate_id)
+        if candidate is None or candidate.starting_position.type != "public_endpoint":
+            continue
+        promoted_by_entrypoint.setdefault(candidate.starting_position.id, set()).add(final_path.id)
+
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        entrypoint_id = finding.get("source_entrypoint_id")
+        if not isinstance(entrypoint_id, str):
+            continue
+        expected_ids = promoted_by_entrypoint.get(entrypoint_id)
+        if not expected_ids:
+            continue
+        actual_ids = set(finding.get("promoted_attack_path_ids") or [])
+        missing_ids = sorted(expected_ids - actual_ids)
+        if missing_ids:
+            errors.append(
+                "public_exposure_findings: "
+                f"{finding.get('id', entrypoint_id)} missing promoted_attack_path_ids "
+                f"{', '.join(missing_ids)}"
             )
 
 

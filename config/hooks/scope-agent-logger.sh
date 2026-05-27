@@ -12,19 +12,20 @@ INPUT=$(cat /dev/stdin)
 
 # Ultra-fast exit: check raw stdin for 'aws' before any jq parsing.
 # Skips 90%+ of hook invocations (mkdir, echo, cp, jq, etc.) with zero jq overhead.
-if ! echo "$INPUT" | grep -q '"aws '; then
+if ! grep -qi 'aws[[:space:]]' <<<"$INPUT"; then
   exit 0
 fi
 
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // .toolCall.args.CommandLine // empty')
 
-# Precise check on parsed command
-if ! echo "$COMMAND" | grep -qE '^\s*aws\s'; then
+# Precise check on parsed command. Allow leading env assignments and shell
+# operators before the first AWS CLI call.
+if ! grep -qE '(^|[[:space:];&|])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*aws[[:space:]]' <<<"$COMMAND"; then
   exit 0
 fi
 
-TOOL_RESPONSE=$(echo "$INPUT" | jq -r '.tool_response // empty')
-CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+TOOL_RESPONSE=$(echo "$INPUT" | jq -r '.tool_response // .error // empty')
+CWD=$(echo "$INPUT" | jq -r '.cwd // .toolCall.args.Cwd // .workspacePaths[0] // empty')
 
 if [ -z "$CWD" ]; then
   CWD="$(pwd)"
@@ -40,7 +41,7 @@ fi
     for d in $dir_pattern; do
       [ -d "$d" ] || continue
       # Check modified within last 30 min
-      if find "$d" -maxdepth 0 -mmin -30 -print -quit 2>/dev/null | grep -q .; then
+      if [ -n "$(find "$d" -maxdepth 0 -mmin -30 -print -quit 2>/dev/null)" ]; then
         mod_time=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo 0)
         if [ "$mod_time" -gt "$LATEST_TIME" ]; then
           LATEST_TIME=$mod_time
@@ -60,8 +61,12 @@ fi
   # Parse the AWS command into service and action, skipping --flag value pairs
   parse_aws_args() {
     local skip_next=false
+    local seen_aws=false
     for word in $1; do
-      [ "$word" = "aws" ] && continue
+      if [ "$seen_aws" = false ]; then
+        [ "$word" = "aws" ] && seen_aws=true
+        continue
+      fi
       if [ "$skip_next" = true ]; then skip_next=false; continue; fi
       case "$word" in
         --*=*) continue ;;
@@ -71,15 +76,15 @@ fi
     done
   }
   AWS_ARGS=$(parse_aws_args "$COMMAND")
-  AWS_SERVICE=$(echo "$AWS_ARGS" | head -1)
-  AWS_ACTION=$(echo "$AWS_ARGS" | sed -n '2p')
+  AWS_SERVICE=$(sed -n '1p' <<<"$AWS_ARGS")
+  AWS_ACTION=$(sed -n '2p' <<<"$AWS_ARGS")
 
   # Determine response status from tool_response
   RESPONSE_STATUS="unknown"
-  if echo "$TOOL_RESPONSE" | grep -qi 'error\|denied\|failed\|exception'; then
-    RESPONSE_STATUS="error"
-  elif echo "$TOOL_RESPONSE" | grep -qi 'AccessDenied\|UnauthorizedAccess'; then
+  if grep -qi 'AccessDenied\|UnauthorizedAccess' <<<"$TOOL_RESPONSE"; then
     RESPONSE_STATUS="access_denied"
+  elif grep -qi 'error\|denied\|failed\|exception' <<<"$TOOL_RESPONSE"; then
+    RESPONSE_STATUS="error"
   else
     RESPONSE_STATUS="success"
   fi

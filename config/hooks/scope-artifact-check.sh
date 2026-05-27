@@ -19,18 +19,27 @@ ERRORS=()
 
 # --- Check for recent audit runs ---
 # Current Python runtime writes audit runs to ./runs/ by default.
-LATEST_AUDIT=$((
+LATEST_AUDIT=$(
+  {
   find "$CWD/runs" -maxdepth 1 -type d -name "audit-*" -mmin -60 2>/dev/null
-) | sort -r | head -1 || true)
+  } | sort -r | awk 'NR == 1 { print }' || true
+)
 
 PARTIAL_MODULES=""
+AUDIT_FINAL_PHASE=false
 if [ -n "$LATEST_AUDIT" ]; then
   if [ -f "$LATEST_AUDIT/results.json" ]; then
+    if [ -f "$LATEST_AUDIT/findings.md" ]; then
+      AUDIT_FINAL_PHASE=true
+    fi
+
     # results.json exists — check if any module reported partial/error (indicates interrupted run)
-    PARTIAL_MODULES=$((
+    PARTIAL_MODULES=$(
+      {
       find "$LATEST_AUDIT/modules" -mindepth 2 -maxdepth 2 -name "*.json" -type f 2>/dev/null
       find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "summary.json" ! -name "manifest.json" ! -name "enumeration.json" -type f 2>/dev/null
-    ) | xargs -r jq -r 'select(.status == "partial" or .status == "error") | .module' 2>/dev/null | tr '\n' ', ' | sed 's/,$//' || true)
+      } | xargs -r jq -r 'select(.status == "partial" or .status == "error") | .module' 2>/dev/null | tr '\n' ', ' | sed 's/,$//' || true
+    )
     if [ -n "$PARTIAL_MODULES" ]; then
       # Interrupted run — downgrade findings.md and dashboard export to warnings
       if [ ! -f "$LATEST_AUDIT/agent-log.jsonl" ]; then
@@ -63,16 +72,20 @@ if [ -n "$LATEST_AUDIT" ]; then
   if [ -f "$LATEST_AUDIT/results.json" ] && [ ! -f "$CWD/dashboard/public/$RUN_ID.json" ]; then
     if [ -n "$PARTIAL_MODULES" ]; then
       ERRORS+=("WARNING: dashboard/public/$RUN_ID.json missing (run had partial modules: $PARTIAL_MODULES)")
+    elif [ "$AUDIT_FINAL_PHASE" != "true" ]; then
+      ERRORS+=("WARNING: dashboard/public/$RUN_ID.json missing (audit has not written findings.md yet; final dashboard export check deferred)")
     else
       ERRORS+=("MISSING: dashboard/public/$RUN_ID.json — results.json exists but dashboard export was not written.")
     fi
   fi
 
   # Check for per-module JSON output (at least one module file expected in orchestrated runs)
-  MODULE_FILES=$((
+  MODULE_FILES=$(
+    {
     find "$LATEST_AUDIT/modules" -mindepth 2 -maxdepth 2 -name "*.json" -type f 2>/dev/null
     find "$LATEST_AUDIT" -maxdepth 1 -name "*.json" ! -name "results.json" ! -name "summary.json" ! -name "manifest.json" ! -name "enumeration.json" -type f 2>/dev/null
-  ) | head -1)
+    } | awk 'NR == 1 { print }'
+  )
   # Note: module JSON files are only present in orchestrated runs.
   # Do not block on this — just warn if results.json exists but no module files.
   if [ -f "$LATEST_AUDIT/results.json" ] && [ -z "$MODULE_FILES" ]; then
@@ -81,23 +94,22 @@ if [ -n "$LATEST_AUDIT" ]; then
 fi
 
 # --- Check for recent controls runs ---
-LATEST_CONTROLS=$((
+LATEST_CONTROLS=$(
+  {
   find "$CWD/runs" -maxdepth 4 -type d -name "controls-*" -mmin -60 2>/dev/null
-) | sort -r | head -1 || true)
+  } | sort -r | awk 'NR == 1 { print }' || true
+)
 
 if [ -n "$LATEST_CONTROLS" ]; then
-  for REQUIRED_FILE in results.json guardrails.json detections.json policy-replacements.json remediation-plan.md validation-report.md; do
+  for REQUIRED_FILE in results.json org-wide-issues.md org-wide-issues.json detections.md detections.json dashboards.md dashboards.json policy-replacements.md policy-replacements.json remediation-plan.md validation-report.md agent-log.jsonl; do
     if [ ! -f "$LATEST_CONTROLS/$REQUIRED_FILE" ]; then
       ERRORS+=("MISSING: $LATEST_CONTROLS/$REQUIRED_FILE (mandatory controls artifact)")
     fi
   done
-  if [ ! -d "$LATEST_CONTROLS/policies" ]; then
-    ERRORS+=("MISSING: $LATEST_CONTROLS/policies/ directory (mandatory controls artifact — SCP/RCP JSON files)")
-  fi
 fi
 
 # --- Check for recent exploit runs ---
-LATEST_EXPLOIT=$(find "$CWD/exploit" -maxdepth 1 -type d -name "exploit-*" -mmin -60 2>/dev/null | sort -r | head -1 || true)
+LATEST_EXPLOIT=$(find "$CWD/exploit" -maxdepth 1 -type d -name "exploit-*" -mmin -60 2>/dev/null | sort -r | awk 'NR == 1 { print }' || true)
 
 if [ -n "$LATEST_EXPLOIT" ]; then
   # agent-log.jsonl is always required (even for zero-path and Gate 4 skip runs)
@@ -148,7 +160,7 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
     REASON=$(printf '%s\n' "${HARD_ERRORS[@]}")
     if [ ${#WARNINGS[@]} -gt 0 ]; then
       WARN_TEXT=$(printf '%s\n' "${WARNINGS[@]}")
-      REASON="$REASON"$'\n\n'"Warnings:\n$WARN_TEXT"
+      REASON="$REASON"$'\n\n'"Warnings:"$'\n'"$WARN_TEXT"
     fi
     echo "SCOPE Artifact Check: Mandatory files missing. Go back and create them before completing." >&2
     echo "$REASON" >&2

@@ -15,6 +15,7 @@ REQUIRED_CHECKS = [
     "snapshot_attributes",
     "describe_load_balancers_v2",
     "describe_listeners",
+    "describe_target_groups",
     "describe_load_balancers_classic",
 ]
 
@@ -266,25 +267,35 @@ def _enumerate_elbv2(factory: Any, elbv2: Any, region: str, tracker: CoverageTra
         return []
 
     findings: list[dict[str, Any]] = []
+    seen_target_groups: set[str] = set()
     for load_balancer in load_balancers:
         lb_arn = load_balancer.get("LoadBalancerArn")
         listeners: list[dict[str, Any]] = []
         listeners_status = None
+        target_groups: list[dict[str, Any]] = []
+        target_groups_status = None
         try:
             raw_listeners = factory.paginate(elbv2, "describe_listeners", "Listeners", LoadBalancerArn=lb_arn)
-            listeners = [
-                {
-                    "port": listener.get("Port"),
-                    "protocol": listener.get("Protocol"),
-                    "ssl_policy": listener.get("SslPolicy"),
-                }
-                for listener in raw_listeners
-            ]
+            listeners = [_listener(listener) for listener in raw_listeners]
             listeners_status = "present"
             tracker.record_ok("describe_listeners", resource=lb_arn)
         except Exception as err:
             listeners_status = _classify_status(_error_code(err))
             tracker.record_resource_failure("describe_listeners", lb_arn, "elbv2.DescribeListeners", err)
+
+        try:
+            raw_target_groups = factory.paginate(
+                elbv2,
+                "describe_target_groups",
+                "TargetGroups",
+                LoadBalancerArn=lb_arn,
+            )
+            target_groups = [_target_group(target_group, region) for target_group in raw_target_groups]
+            target_groups_status = "present"
+            tracker.record_ok("describe_target_groups", resource=lb_arn)
+        except Exception as err:
+            target_groups_status = _classify_status(_error_code(err))
+            tracker.record_resource_failure("describe_target_groups", lb_arn, "elbv2.DescribeTargetGroups", err)
 
         finding = {
             "resource_type": "ec2_load_balancer",
@@ -297,8 +308,10 @@ def _enumerate_elbv2(factory: Any, elbv2: Any, region: str, tracker: CoverageTra
             "dns_name": load_balancer.get("DNSName"),
             "vpc_id": load_balancer.get("VpcId"),
             "availability_zones": [az.get("ZoneName") for az in load_balancer.get("AvailabilityZones") or []],
+            "security_groups": load_balancer.get("SecurityGroups") or [],
             "listeners": listeners,
             "listeners_status": listeners_status,
+            "target_groups_status": target_groups_status,
             "findings": [],
         }
         if load_balancer.get("Scheme") == "internet-facing":
@@ -310,7 +323,79 @@ def _enumerate_elbv2(factory: Any, elbv2: Any, region: str, tracker: CoverageTra
                 }
             )
         findings.append(finding)
+        for target_group in target_groups:
+            target_group_arn = target_group.get("arn")
+            if not isinstance(target_group_arn, str) or target_group_arn in seen_target_groups:
+                continue
+            seen_target_groups.add(target_group_arn)
+            findings.append(target_group)
     return findings
+
+
+def _listener(listener: dict[str, Any]) -> dict[str, Any]:
+    default_actions = [_listener_action(action) for action in listener.get("DefaultActions") or []]
+    target_group_arns = sorted(
+        {
+            target_group_arn
+            for action in default_actions
+            for target_group_arn in _action_target_group_arns(action)
+        }
+    )
+    return {
+        "arn": listener.get("ListenerArn"),
+        "port": listener.get("Port"),
+        "protocol": listener.get("Protocol"),
+        "ssl_policy": listener.get("SslPolicy"),
+        "default_actions": default_actions,
+        "target_group_arns": target_group_arns,
+    }
+
+
+def _listener_action(action: dict[str, Any]) -> dict[str, Any]:
+    forward_config = action.get("ForwardConfig") or {}
+    return {
+        "type": action.get("Type"),
+        "target_group_arn": action.get("TargetGroupArn"),
+        "forward_target_groups": [
+            {
+                "target_group_arn": target_group.get("TargetGroupArn"),
+                "weight": target_group.get("Weight"),
+            }
+            for target_group in forward_config.get("TargetGroups") or []
+        ],
+    }
+
+
+def _action_target_group_arns(action: dict[str, Any]) -> list[str]:
+    arns: list[str] = []
+    target_group_arn = action.get("target_group_arn")
+    if isinstance(target_group_arn, str):
+        arns.append(target_group_arn)
+    for target_group in action.get("forward_target_groups") or []:
+        if isinstance(target_group, dict) and isinstance(target_group.get("target_group_arn"), str):
+            arns.append(target_group["target_group_arn"])
+    return arns
+
+
+def _target_group(target_group: dict[str, Any], region: str) -> dict[str, Any]:
+    return {
+        "resource_type": "ec2_target_group",
+        "resource_id": target_group.get("TargetGroupName"),
+        "arn": target_group.get("TargetGroupArn"),
+        "region": region,
+        "protocol": target_group.get("Protocol"),
+        "port": target_group.get("Port"),
+        "target_type": target_group.get("TargetType"),
+        "vpc_id": target_group.get("VpcId"),
+        "load_balancer_arns": target_group.get("LoadBalancerArns") or [],
+        "health_check": {
+            "protocol": target_group.get("HealthCheckProtocol"),
+            "path": target_group.get("HealthCheckPath"),
+            "port": target_group.get("HealthCheckPort"),
+            "enabled": target_group.get("HealthCheckEnabled"),
+        },
+        "findings": [],
+    }
 
 
 def _enumerate_classic_elb(factory: Any, elb: Any, region: str, tracker: CoverageTracker) -> list[dict[str, Any]]:

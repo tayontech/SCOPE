@@ -14,6 +14,53 @@
       "policy_principals": [
         "arn:aws:iam::123456789012:root"
       ],
+      "resource_policy_document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::123456789012:root"
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+          }
+        ]
+      },
+      "resource_policy_statements": [
+        {
+          "sid": null,
+          "effect": "Allow",
+          "principal": {
+            "AWS": "arn:aws:iam::123456789012:root"
+          },
+          "not_principal": null,
+          "action": [
+            "kms:*"
+          ],
+          "not_action": [],
+          "resource": [
+            "*"
+          ],
+          "not_resource": [],
+          "condition": null,
+          "normalized_principals": [
+            "arn:aws:iam::123456789012:root"
+          ],
+          "normalized_actions": [
+            "kms:*"
+          ],
+          "normalized_resources": [
+            "*"
+          ],
+          "source_arns": [],
+          "source_accounts": [],
+          "source_org_ids": [],
+          "service_principals": [],
+          "is_public": false,
+          "is_cross_account": false
+        }
+      ],
       "policy_status": "present",
       "grants": [],
       "grants_status": "present",

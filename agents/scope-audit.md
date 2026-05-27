@@ -18,10 +18,10 @@ Given a target (ARN, service name, `--all`, or `@targets.txt`), you:
 2. Show all modules that will run and get batch approval from the operator (Gate 2 — single prompt)
 3. Run `uv run python -m scope audit` for deterministic Python AWS SDK enumeration and post-processing
 4. Present enumeration summary and pause for operator confirmation before attack-paths (Gate 3)
-5. Dispatch public exposure analysis — identify externally reachable entrypoints and attack-path starting positions
+5. Dispatch public exposure analysis — identify externally reachable entrypoints, public exposure findings, and attack-path starting positions
 6. Dispatch the attack analysis pipeline — candidate generation, candidate lint, validation, validation lint
 7. Run verification inline from agents/subagents/scope-verify.md (domain-core + domain-aws)
-8. Present validated attack path findings, await operator approval before controls (Gate 4)
+8. Present validated attack path findings, await operator approval before generating review-only AWS CLI replay commands and controls (Gate 4)
 9. Write the three-layer findings.md report to $RUN_DIR/
 10. Auto-chain controls as a subagent — it reads results.json and per-module JSONs from $RUN_DIR/
 11. Use the runtime post-processing artifacts produced by `python -m scope`
@@ -48,7 +48,7 @@ Parse the operator's input (`/scope:audit <target>`) to determine the service li
 
 ### Target Types and Service Resolution
 
-**`--all`** → All 16 services: iam, sts, s3, kms, secrets, lambda, ec2, rds, sns, sqs, apigateway, codebuild, bedrock, cognito, dynamodb, ssm
+**`--all`** → All 19 services: iam, sts, s3, kms, secrets, lambda, ec2, ecs, rds, sns, sqs, apigateway, codebuild, bedrock, cloudfront, cognito, dynamodb, route53, ssm
 
 **Single service name** (e.g., `iam`) → Single-service list: [iam]
 
@@ -62,14 +62,17 @@ Parse the operator's input (`/scope:audit <target>`) to determine the service li
 - `lambda` → [lambda]
 - `sts` → [sts]
 - `ec2`, `elasticloadbalancing` → [ec2]
+- `ecs` → [ecs]
 - `rds` → [rds]
 - `sns` → [sns]
 - `sqs` → [sqs]
 - `apigateway`, `execute-api` → [apigateway]
 - `codebuild` → [codebuild]
 - `bedrock` → [bedrock]
+- `cloudfront` → [cloudfront]
 - `cognito-identity`, `cognito-idp` → [cognito]
 - `dynamodb` → [dynamodb]
+- `route53` → [route53]
 - `ssm` → [ssm]
 
 Store the specific ARN as the TARGET for the dispatched module (enables targeted API calls rather than full enumeration).
@@ -83,10 +86,13 @@ Store the specific ARN as the TARGET for the dispatched module (enables targeted
 | `secrets` | secrets |
 | `secretsmanager` | secrets |
 | `vpc`, `ebs`, `elb`, `elbv2` | ec2 |
+| `ecs` | ecs |
 | `dynamo`, `dynamodb` | dynamodb |
 | `params`, `parameters`, `ssm` | ssm |
 | `cognito` | cognito |
 | `bedrock` | bedrock |
+| `cdn`, `cloudfront` | cloudfront |
+| `dns`, `route53` | route53 |
 
 ### No Argument
 
@@ -142,11 +148,9 @@ Stop. Do not continue.
 
 **Load account context:** Read `config/accounts.json` if it exists. Build owned-accounts set (add caller account). If missing, set contains only caller account.
 
-**Load SCP config:** Glob `config/scps/*.json`. Skip `_`-prefixed files. Load PolicyId → SCP object map. Tag each as `_source: "config"`.
-
 **Region handling:** `scope audit` discovers enabled regions through `scope.core.regions.discover_regions()` during runtime dispatch when regional services are requested. If explicit regions were supplied, display those requested regions. Pass them with `--regions us-east-1,us-west-2`. If no explicit regions were supplied, display: `Region discovery will run during runtime dispatch.` If runtime region discovery fails, stop and show the runtime error rather than guessing region coverage.
 
-**Display Gate 1:** Identity confirmed - show caller ARN, account ID, principal type, owned-accounts count, SCPs loaded count, requested regions when supplied, or the runtime-discovery message above. Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
+**Display Gate 1:** Identity confirmed - show caller ARN, account ID, principal type, owned-accounts count, requested regions when supplied, or the runtime-discovery message above. Auto-continue to module approval. Do NOT pause for operator input at Gate 1.
 
 **Knowledge preflight:** Use `skills/scope-knowledge-load/SKILL.md` with `AGENT=scope-audit`, `ACCOUNT_ID`, target, services, and requested regions when supplied. If regions were not supplied, set the knowledge request region context to `runtime_discovery_pending`. Use the returned `KNOWLEDGE_CONTEXT` to contextualize findings, public exposure, attack paths, and coverage gaps. Do not treat knowledge as ground truth; current audit evidence wins when it conflicts with stored knowledge. Cite knowledge entries that influence decisions.
 </gate_1_credentials>
@@ -236,30 +240,40 @@ After enumeration completes and before Gate 3, spot-check module JSON under `$RU
 
 Before attack-path candidate generation, dispatch `scope-public-exposure-analysis`.
 
-The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, module envelopes, and base `results.json`. Public exposure analysis turns externally reachable AWS surfaces into structured `public_entrypoints[]` that attack analysis can use as realistic starting positions.
+The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, module envelopes, and base `results.json`. Public exposure analysis turns externally reachable AWS surfaces into structured `public_entrypoints[]` that attack analysis can use as realistic starting positions and `public_exposure_findings[]` that reporting and controls can use as security observations.
 
 Dispatch `scope-public-exposure-analysis` with:
 - `RUN_DIR`
 - `ACCOUNT_ID`
 - `OWNED_ACCOUNTS`
 
-The subagent reads runtime artifacts from `$RUN_DIR/`, identifies public entrypoints and exposure observations, and writes `public_entrypoints[]` to `$RUN_DIR/results.json`.
+The subagent reads runtime artifacts from `$RUN_DIR/`, identifies public entrypoints and exposure observations, and writes `public_entrypoints[]` plus `public_exposure_findings[]` to `$RUN_DIR/results.json`.
 
-**Expected output:** `public_entrypoints[]` in `$RUN_DIR/results.json`.
+**Expected output:** `public_entrypoints[]` and `public_exposure_findings[]` in `$RUN_DIR/results.json`.
 
 Rules:
 - Public exposure alone is not an attack path.
 - `attack_path_seed: true` requires a transition from public access into execution context, identity/resource-policy context, or sensitive resource reachability.
 - If exposure is public but does not create a meaningful chain seed, preserve it with `attack_path_seed: false` and a concrete `seed_reason`.
+- Public exposure findings are not attack paths. They may describe internet-facing ALBs, public management ports, anonymous SNS/SQS policies, public bucket/API/Lambda surfaces, or unknown public surfaces with coverage gaps.
 - If public exposure analysis fails, stop before attack analysis and surface the error. Do not ask attack analysis to infer public entrypoints from generic public flags.
 </public_exposure_analysis>
 
 <attack_paths_dispatch>
 ## Attack Path Analysis — Candidate and Validation Pipeline
 
-Attack path analysis uses a candidate generation subagent followed by a validation subagent. The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, and base `results.json`.
+Attack path analysis uses deterministic candidate seeding, a candidate generation subagent, and a validation subagent. The Python runtime already generated `graph.json`, `resources.jsonl`, `summary.json`, and base `results.json`.
 
-Public exposure analysis must run first. `scope-attack-analyze` consumes `public_entrypoints[]` from `$RUN_DIR/results.json` as preferred external starting positions.
+Public exposure analysis must run first. The attack analyzer consumes `public_entrypoints[]` from `$RUN_DIR/results.json` as preferred external starting positions.
+
+### Deterministic candidate seeding
+
+After public exposure analysis and before dispatching `scope-attack-analyze`, run exactly:
+```bash
+uv run python -m scope.attack.candidates --run-dir "$RUN_DIR" --write
+```
+
+This seeds deterministic candidates for collected `sts:AssumeRole`, `iam:PassRole`, CodeBuild `StartBuild`, identity issuance, public/service-connected paths, and concrete DynamoDB or SSM data-impact paths. It does not promote public endpoint reachability to backend role permissions unless collected AWS-level evidence proves the data flow, event source, resource-policy grant, identity issuance path, or service transition. AWS-managed policy names are known permission profiles; do not require fetching or parsing AWS-managed policy documents. Customer-managed and inline policies remain document-evaluated evidence. Preserve these candidates. The analyzer may append additional candidates or add observations, but it must not remove deterministic candidates already present in `candidate_attack_paths[]`.
 
 ### Candidate Dispatch
 
@@ -302,7 +316,7 @@ Read `agents/subagents/scope-verify.md` and apply domain-core and domain-aws sec
 
 Verify claims in `$RUN_DIR/results.json` before presenting Gate 4 results:
 - Keep final attack path status grounded in `validation_status`, `runtime_assumptions[]`, and `coverage_caveats[]`.
-- Strip or rewrite unsupported AWS API names, IAM policy syntax, SCP/RCP structures, remediation claims, and attack path logic.
+- Strip or rewrite unsupported AWS API names, IAM policy syntax, organization policy structures, remediation claims, and attack path logic.
 - Do not introduce numeric confidence scores, ranking tiers, or speculative claim labels.
 - Do not block the audit run for narrative issues. Strip unsupported claims and continue with reproducible output.
 </verification>
@@ -310,29 +324,59 @@ Verify claims in `$RUN_DIR/results.json` before presenting Gate 4 results:
 <gate_4_results_approval>
 ## Gate 4: Attack Path Results Approval
 
-After attack validation, validation lint, and verification complete, display: candidates generated, validated paths, conditional paths, rejected paths, final attack path count by severity (critical/high/medium/low), and top 3 validated/conditional paths (one sentence each).
+After attack validation, validation lint, and verification complete, display: candidates generated, public exposure findings count from `public_exposure_findings[]`, validated paths, conditional paths, rejected paths, final attack path count by severity (critical/high/medium/low), attack path group count from `attack_path_groups[]`, and top 3 grouped attack paths (one sentence each).
 
-Options: `continue` (full output), `skip` (sets GATE4_SKIP=true, writes findings.md, skips scope-controls and dashboard HTML generation), `stop` (end session).
+Options: `continue` (full output, including review-only AWS CLI replay command artifacts when attack paths exist), `skip` (sets GATE4_SKIP=true, writes findings.md, skips AWS CLI replay generation, scope-controls, and dashboard HTML generation), `stop` (end session).
 
 On skip, still write `$RUN_DIR/findings.md` and keep `$RUN_DIR/results.json` intact. Do not dispatch scope-controls. Do not delete or roll back dashboard export files already written by the Python runtime.
 
 Wait for operator approval before proceeding.
 </gate_4_results_approval>
 
+<aws_cli_replay_generation>
+## AWS CLI Replay Generation
+
+After Gate 4 approval, if final `attack_paths[]` contains validated or conditional paths, dispatch `scope-awscli-replay` once with the approved final path set:
+
+```
+Dispatch `scope-awscli-replay` as a subagent with:
+
+  CALLER=audit
+  RUN_ID=[RUN_ID]
+  ACCOUNT_ID=[ACCOUNT_ID]
+  APPROVED_PATHS=[final attack_paths[] entries with validation_status validated or conditional]
+  DISCOVERY_SUMMARY=[runtime summary, coverage gaps, validation status counts]
+  RESOURCE_CONTEXT=[real ARNs, account IDs, regions, and resource names from results.json, graph.json, resources.jsonl, and module envelopes]
+
+Expected return: AWS_CLI_REPLAY
+```
+
+Rules:
+
+- Generate only. Do not execute AWS CLI commands.
+- Treat commands as user validation material, not agent execution steps.
+- Do not infer commands inside the dashboard. The dashboard may render only `attack_paths[].aws_cli_commands[]`.
+- Write `$RUN_DIR/aws-cli-replay.json` after Gate 4 approval.
+- Map `AWS_CLI_REPLAY.paths[].commands[]` into matching `$RUN_DIR/results.json` `attack_paths[].aws_cli_commands[]`.
+- Refresh `dashboard/public/$RUN_ID.json` from the updated `$RUN_DIR/results.json` so regenerated dashboard HTML can display the commands.
+- If command generation returns `partial`, keep the audit run write-ready, preserve warnings in `aws-cli-replay.json`, and add `attack_paths[].aws_cli_command_warnings[]` when warnings map to a path.
+- If `attack_paths[]` is empty, skip replay generation and note "No attack paths, no replay commands generated" in findings.
+</aws_cli_replay_generation>
+
 <findings_md>
 ## Findings Report
 
-After Gate 4 approval, write `$RUN_DIR/findings.md` - always generated, even with 0 findings. If Gate 3 `skip` was selected, write the raw-inventory report described in `<gate_3_enumeration_summary>` instead and do not continue to Gate 4.
+After Gate 4 approval and AWS CLI replay generation, write `$RUN_DIR/findings.md` - always generated, even with 0 findings. If Gate 3 `skip` was selected, write the raw-inventory report described in `<gate_3_enumeration_summary>` instead and do not continue to Gate 4.
 
-**0-finding handling:** If attack_paths is empty and no findings across modules, generate a clean-run report: RISK SUMMARY with "low", services analyzed, modules with partial data, and recommended next action to review coverage gaps.
+**0-finding handling:** If attack_paths is empty, public_exposure_findings is empty, and no findings exist across modules, generate a clean-run report: RISK SUMMARY with "low", services analyzed, modules with partial data, and recommended next action to review coverage gaps.
 
 **Three-layer structure (when findings exist):**
 
-1. **Layer 1 — Risk Summary:** Caller ARN, account ID, overall risk rating (highest severity), up to 5 bullet findings (one sentence each with real ARN/name), biggest concern, services analyzed, **Coverage Gaps subsection** (see below).
+1. **Layer 1 — Risk Summary:** Caller ARN, account ID, overall risk rating (highest severity across attack_paths, public_exposure_findings, and module findings), up to 5 bullet findings (one sentence each with real ARN/name), biggest concern, services analyzed, **Public Exposure subsection**, **Coverage Gaps subsection** (see below). The Public Exposure subsection lists `public_exposure_findings[]` count, highest exposure severity, top public resources, and whether each item became an attack-path seed or final path through `promoted_attack_path_ids[]`.
 
-2. **Layer 2 — Findings by Severity** (`--all`/multi-service: grouped by critical/high/medium/low) **or Effective Permissions** (single ARN: Action | Resource | Effect | Source Policy table).
+2. **Layer 2 — Findings by Severity** (`--all`/multi-service: grouped by critical/high/medium/low) **or Effective Permissions** (single ARN: Action | Resource | Effect | Source Policy table). Include public exposure findings by severity with title, resource, assessment, security_relevance, promoted_attack_path_ids when present, reason_not_attack_path only when not promoted, and coverage_needed.
 
-3. **Layer 3 — Attack Path Narratives:** Ordered by exploitability DESC. Each path includes: name, severity, exploitability, validation status (validated or conditional with caveats), MITRE TTPs, narrative paragraph with real policy details, concrete exploit CLI steps (reference only), Splunk detection sketch, remediation actions.
+3. **Layer 3 — Attack Path Narratives:** Prefer `attack_path_groups[]` for human-readable reporting, ordered by severity and grouped member count. Each group includes: group name, severity, primitive, representative path ID, member count, `leveraging_assets[]` with asset type, context ID, ARN when available, and member path IDs, source principals summary, validation statuses, grouped impact, narrative paragraph with real policy details, review-only AWS CLI replay command references from representative/member `attack_paths[]` when generated, Splunk detection sketch, remediation actions. If `attack_path_groups[]` is absent, fall back to final `attack_paths[]`. Do not omit raw `attack_paths[]` from `results.json`.
 
 ### Coverage Gaps subsection
 
@@ -361,8 +405,9 @@ The Python runtime performs dashboard public JSON export automatically when invo
 After findings.md is written (and neither Gate 3 nor Gate 4 was skipped), verify:
 1. `dashboard/public/$RUN_ID.json` exists or a runtime warning explains why export failed.
 2. `dashboard/public/index.json` contains this run or a runtime warning explains why index update failed.
+3. If `aws-cli-replay.json` was written, `dashboard/public/$RUN_ID.json` includes matching `attack_paths[].aws_cli_commands[]`.
 
-Do not hand-build dashboard public JSON unless recovering from a runtime export failure and using the same index shape documented by `scope.runtime.post_processing.export_dashboard_results`.
+Do not hand-build dashboard public JSON unless recovering from a runtime export failure, or refreshing `dashboard/public/$RUN_ID.json` from updated `$RUN_DIR/results.json` after AWS CLI replay mapping. Preserve the same index shape documented by `scope.runtime.post_processing.export_dashboard_results`.
 
 **Gate 3 skip exception:** If Gate 3 `skip` was selected, do not create or update dashboard export files after Gate 3. Keep any dashboard export files the Python runtime already wrote. `$RUN_DIR/results.json`, `$RUN_DIR/findings.md`, and `$RUN_DIR/agent-log.jsonl` remain required.
 
@@ -378,9 +423,9 @@ After findings.md and results.json are written, automatically dispatch scope-con
 
 **Gate 4 skip exception:** If GATE4_SKIP=true, do not dispatch. Log skip and advise `/scope:controls` for later use.
 
-**Dispatch:** scope-controls subagent with `AUDIT_RUN_DIR` and `ACCOUNT_ID`. Note: controls dispatches 5 subagents internally, so it must run as a subagent (not inline) to allow nesting.
+**Dispatch:** scope-controls subagent with `AUDIT_RUN_DIR` and `ACCOUNT_ID`. Note: controls dispatches six subagents internally (five producers plus validator), so it must run as a subagent (not inline) to allow nesting.
 
-**Expected return:** STATUS, CONTROLS_RUN_DIR (`{audit_run_dir}/controls/controls-{timestamp}/`), METRICS (scps, rcps, detections). Capture CONTROLS_RUN_DIR — needed for pipeline Run 2.
+**Expected return:** STATUS, CONTROLS_RUN_DIR (`{audit_run_dir}/controls/controls-{timestamp}/`), METRICS (org_wide_issues, detections, dashboards). Capture CONTROLS_RUN_DIR — needed for pipeline Run 2.
 
 Controls failure is non-blocking — log warning and continue to post-processing/dashboard.
 
@@ -403,7 +448,7 @@ Do not run the deprecated agent pipeline. If runtime post-processing failed, the
 <dashboard_generation>
 ## Dashboard Generation (Inline)
 
-Run: `cd dashboard && npm run dashboard 2>&1` — produces `dashboard/<run-id>-dashboard.html`, a self-contained portable file. Dependencies auto-install if needed.
+Run: `cd dashboard && npm run dashboard 2>&1` — produces `dashboard/reports/<run-id>-dashboard.html`, a self-contained portable file. Dependencies auto-install if needed.
 
 **Do NOT generate dashboard HTML yourself.** Always use `npm run dashboard` — it's a React + D3 app that inlines data from `dashboard/public/`.
 
@@ -419,14 +464,17 @@ Every audit run MUST produce ALL of the following files. Check this list before 
 
 **Gate 4 skip exception:** If the operator said "skip" at Gate 4, `$RUN_DIR/results.json`, `findings.md`, and `agent-log.jsonl` remain required. Controls output and dashboard HTML generation are skipped. Runtime dashboard export files remain acceptable when the Python runtime already created them before Gate 4.
 
+**Zero attack path replay exception:** If final `attack_paths[]` is empty, `aws-cli-replay.json` is skipped. Record the skip in `findings.md`.
+
 | # | File | Location | Purpose |
 |---|------|----------|---------|
 | 1 | Per-module JSONs | `$RUN_DIR/modules/<service>/<region>.json` | Structured resource inventory per service module |
 | 2 | `results.json` | `$RUN_DIR/results.json` | Attack path analysis — structured graph data for dashboard |
-| 3 | `findings.md` | `$RUN_DIR/findings.md` | Three-layer human-readable report |
-| 4 | `agent-log.jsonl` | `$RUN_DIR/agent-log.jsonl` | Agent activity log — one JSON line per event |
-| 5 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
-| 6 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array |
+| 3 | `aws-cli-replay.json` | `$RUN_DIR/aws-cli-replay.json` | Review-only AWS CLI replay command artifact when attack paths exist |
+| 4 | `findings.md` | `$RUN_DIR/findings.md` | Three-layer human-readable report |
+| 5 | `agent-log.jsonl` | `$RUN_DIR/agent-log.jsonl` | Agent activity log — one JSON line per event |
+| 6 | Dashboard export | `dashboard/public/$RUN_ID.json` | Copy of results.json for the SCOPE dashboard |
+| 7 | Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `reports[]` manifest |
 
 Dashboard export files are expected when runtime export succeeds. If a dashboard export or index file is missing and no runtime warning exists, recover it using `scope.runtime.post_processing.export_dashboard_results`; if a runtime warning explains the export failure, report the warning and continue with the run artifacts intact.
 
@@ -464,6 +512,7 @@ Log every subagent dispatch/return and every gate transition. Seed the log after
 | Candidate lint failure | Stop before validation and surface linter errors. |
 | Attack validation failure | Log, stop before validation lint and surface the error. |
 | Validation lint failure | Stop before Gate 4 and surface linter errors. |
+| AWS CLI replay generation failure | Non-blocking. Log warning, continue with findings, controls, and dashboard without commands. |
 | Dashboard HTML generation failure | Non-blocking. Log warning, continue. Raw artifacts already written. |
 
 Never swallow errors silently — operator must see every non-AccessDenied error. Aggregate error count at Gate 3 summary.
@@ -486,8 +535,9 @@ The `/scope:audit` orchestrator succeeds (full run) when ALL of the following ar
 6. **Verification ran inline after attack validation** — domain-core and domain-aws sections of scope-verify.md applied. Final `attack_paths[]` entries use `validation_status` values `validated` or `conditional`; rejected candidates stay out of final `attack_paths[]`.
 7. **Three-layer findings report produced** — Layer 1 (risk summary), Layer 2 (severity findings or effective permissions), Layer 3 (attack path narratives with MITRE, Splunk sketches, remediation). Written to $RUN_DIR/findings.md.
 8. **Session isolated** — Run directory under `./runs/` or explicit `--run-dir` created, all artifacts written there, run metadata recorded in `manifest.json` and `summary.json`.
-9. **Controls handled** — scope-controls dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When controls succeeds, it creates `$RUN_DIR/controls/controls-{timestamp}/` and returns CONTROLS_RUN_DIR in its summary. Controls failure is logged and remains non-blocking.
+9. **AWS CLI replay handled** — scope-awscli-replay dispatched after Gate 4 approval when attack paths exist. Commands are written for user validation only and are never executed by SCOPE.
+10. **Controls handled** — scope-controls dispatched as subagent after Gate 4 with AUDIT_RUN_DIR. When controls succeeds, it creates `$RUN_DIR/controls/controls-{timestamp}/` and returns CONTROLS_RUN_DIR in its summary. Controls failure is logged and remains non-blocking.
 10. **Runtime post-processing completed** — `summary.json`, `resources.jsonl`, `graph.json`, and base `results.json` exist before attack analysis.
-11. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
-12. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception).
+12. **Dashboard generated** — `cd dashboard && npm run dashboard` executed. dashboard.html produced or failure logged.
+13. **Mandatory outputs present** — All files in `<mandatory_outputs>` checklist exist (subject to Gate 4 skip exception and zero attack path replay exception).
 </success_criteria>

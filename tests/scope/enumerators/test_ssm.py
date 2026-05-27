@@ -110,3 +110,66 @@ def test_ssm_resource_policy_access_denied_is_optional_skip():
     assert coverage.status == "skipped"
     assert coverage.skipped == 1
     assert coverage.reasons[0].code == "access_denied"
+
+
+def test_ssm_preserves_multiple_resource_policy_statements():
+    parameter_arn = "arn:aws:ssm:us-east-1:123456789012:parameter/app/secret-key"
+    read_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "CrossAccountRead",
+                "Effect": "Allow",
+                "Principal": {"AWS": "arn:aws:iam::999999999999:role/Reader"},
+                "Action": "ssm:GetParameter",
+                "Resource": parameter_arn,
+            }
+        ],
+    }
+    write_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "OrgWrite",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "ssm:PutParameter",
+                "Resource": parameter_arn,
+                "Condition": {"StringEquals": {"aws:PrincipalOrgID": "o-example"}},
+            }
+        ],
+    }
+    ssm = FakeClient(
+        {
+            "describe_parameters": {
+                "Parameters": [
+                    {
+                        "Name": "/app/secret-key",
+                        "Type": "SecureString",
+                        "LastModifiedDate": "2024-03-15T00:00:00.000Z",
+                        "Version": 3,
+                    },
+                ],
+            },
+            "get_resource_policies": {
+                "Policies": [
+                    {"PolicyId": "read", "Policy": json.dumps(read_policy)},
+                    {"PolicyId": "write", "Policy": json.dumps(write_policy)},
+                ]
+            },
+        }
+    )
+
+    envelope = run(FakeFactory(ssm=ssm), "us-east-1")
+
+    parameter = envelope.resources[0]
+    assert parameter["resource_policy"] == read_policy
+    assert len(parameter["resource_policies"]) == 2
+    assert [entry["policy_id"] for entry in parameter["resource_policies"]] == ["read", "write"]
+    assert [statement["sid"] for statement in parameter["resource_policy_statements"]] == [
+        "CrossAccountRead",
+        "OrgWrite",
+    ]
+    assert parameter["resource_policy_statements"][0]["normalized_actions"] == ["ssm:GetParameter"]
+    assert parameter["resource_policy_statements"][0]["is_cross_account"] is True
+    assert parameter["resource_policy_statements"][1]["source_org_ids"] == ["o-example"]

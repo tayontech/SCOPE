@@ -48,6 +48,7 @@ const SEVERITY_CONFIG = {
 };
 
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+const VALID_PHASES = ["audit", "exploit", "controls"];
 
 const CATEGORY_CONFIG = {
   privilege_escalation: { label: "Priv Esc", color: "#ef4444" },
@@ -68,15 +69,251 @@ const PHASE_CONFIG = {
   controls:      { label: "Controls",      color: "#22c55e" },
 };
 
+function reportDateValue(report) {
+  const parsed = Date.parse(report?.created_at || report?.date || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function migrateRunsToReports(runs) {
+  const byId = new Map();
+  for (const run of Array.isArray(runs) ? runs : []) {
+    if (!run || typeof run !== "object") continue;
+    if (run.source !== "audit") continue;
+    if (!run.run_id) continue;
+    if (byId.has(run.run_id)) continue;
+    byId.set(run.run_id, {
+      report_id: run.run_id,
+      created_at: run.date || "",
+      account_id: run.account_id,
+      target: run.target || "",
+      risk: run.risk || "low",
+      status: run.status || "complete",
+      audit: {
+        run_id: run.run_id,
+        file: run.file || `${run.run_id}.json`,
+      },
+    });
+  }
+  return [...byId.values()];
+}
+
+function normalizeReports(reports) {
+  const clean = [];
+  for (const report of Array.isArray(reports) ? reports : []) {
+    if (!report || typeof report !== "object") continue;
+    if (!report.report_id || (!report.audit?.file && !report.exploit?.file)) continue;
+    clean.push(report);
+  }
+  return clean.sort((a, b) => reportDateValue(b) - reportDateValue(a));
+}
+
+function reportsFromIndex(index) {
+  const reports = normalizeReports(index?.reports);
+  if (reports.length > 0) return reports;
+  return normalizeReports(migrateRunsToReports(index?.runs || []));
+}
+
+function reportStatusLabel(status) {
+  if (status === "partial") return " \u26A0 partial";
+  if (status === "failed") return " \u26A0 failed";
+  return " \u2714";
+}
+
+function reportDisplayLabel(report) {
+  const reportId = report?.report_id || "report";
+  const target = report?.target ? ` ${report.target}` : "";
+  return `${reportId}${target}${reportStatusLabel(report?.status)}`;
+}
+
+function displayNameFromNodeId(id = "") {
+  return id.includes(":") ? id.split(":").pop() : id;
+}
+
+function derivePrincipalsFromGraph(graph) {
+  if (!Array.isArray(graph?.nodes)) return [];
+  return graph.nodes
+    .filter((node) => node.type === "user" || node.type === "role")
+    .map((node) => ({
+      ...node,
+      type: node.type,
+      id: node.label || displayNameFromNodeId(node.id),
+      node_id: node.id,
+      arn: node.arn || "",
+      mfa_enabled: node.mfa_enabled ?? node.mfa ?? false,
+      console_access: node.console_access ?? false,
+      access_keys: node.access_keys ?? 0,
+    }));
+}
+
+function deriveTrustsFromGraph(graph) {
+  if (!Array.isArray(graph?.edges)) return [];
+  const nodeById = new Map((graph?.nodes || []).map((node) => [node.id, node]));
+  return graph.edges
+    .filter((edge) => edge.edge_type === "trust")
+    .map((edge) => {
+      const roleNode = nodeById.get(edge.target) || {};
+      const principalNode = nodeById.get(edge.source) || {};
+      const principal = principalNode.arn || principalNode.label || edge.source;
+      const roleName = roleNode.label || displayNameFromNodeId(edge.target);
+      const trustType = edge.trust_type || "same-account";
+      const isWildcard = trustType === "wildcard" || principal === "*" || principal === "anonymous" || String(principal).includes(":anonymous");
+      return {
+        role_id: edge.target,
+        role_name: roleName,
+        role_arn: roleNode.arn || "",
+        principal,
+        trust_principal: principal,
+        trust_type: trustType,
+        is_wildcard: isWildcard,
+        risk: isWildcard ? "critical" : (trustType === "cross-account" ? "high" : "low"),
+      };
+    });
+}
+
+function detectionMatchesPath(detection, path) {
+  const pathRefs = new Set([
+    path?.name,
+    path?.id,
+    path?.source_candidate_id,
+    path?.group_id,
+    path?.representative_path_id,
+    path?.representative_path_name,
+    ...(path?.member_path_ids || []),
+    ...(path?.member_path_names || []),
+  ].filter(Boolean));
+  return (detection?.source_attack_paths || []).some((source) => pathRefs.has(source));
+}
+
+function commandsFromPath(path) {
+  const values = [];
+  const collect = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+    } else if (typeof value === "string") {
+      values.push(value);
+    } else if (typeof value === "object") {
+      collect(value.command || value.aws_cli || value.awscli || value.cli || value.shell);
+    }
+  };
+  collect(path?.commands);
+  collect(path?.aws_cli_commands);
+  collect(path?.exploit_commands);
+  collect(path?.steps?.map((step) => (typeof step === "object" ? step.command : null)));
+  return values.filter(Boolean);
+}
+
+function displayAttackPathItems(data) {
+  const rawPaths = Array.isArray(data?.attack_paths) ? data.attack_paths : [];
+  const groups = Array.isArray(data?.attack_path_groups) ? data.attack_path_groups : [];
+  if (groups.length === 0) return rawPaths;
+  const byId = new Map(rawPaths.map((path) => [path.id, path]));
+  return groups.map((group) => {
+    const representative = byId.get(group.representative_path_id) || byId.get(group.member_path_ids?.[0]) || {};
+    const memberPathIds = group.member_path_ids || [];
+    const memberPaths = memberPathIds.map((id) => byId.get(id)).filter(Boolean);
+    return {
+      ...representative,
+      id: group.representative_path_id || representative.id || group.id,
+      group_id: group.id,
+      group_name: group.name,
+      group_description: group.description,
+      member_path_ids: memberPathIds,
+      member_path_names: memberPaths.map((path) => path.name).filter(Boolean),
+      member_count: group.member_count || memberPathIds.length || 1,
+      source_principals: group.source_principals || [],
+      leveraging_assets: group.leveraging_assets || [],
+      primitive: group.primitive,
+      validation_statuses: group.validation_statuses || [],
+      name: group.name || representative.name,
+      description: group.description || representative.description || "Grouped attack paths with a shared primitive and impact.",
+      severity: group.severity || representative.severity,
+      category: group.category || representative.category,
+      affected_resources: group.affected_resources || representative.affected_resources || [],
+      representative_path_id: group.representative_path_id,
+      representative_path_name: representative.name,
+    };
+  });
+}
+
+function formatSplForDisplay(spl = "") {
+  const stages = spl.split(/\s+\|\s+/).map((stage) => stage.trim()).filter(Boolean);
+  if (stages.length <= 1) return [spl.trim()].filter(Boolean);
+  return stages.map((stage, index) => (index === 0 ? stage : `| ${stage}`));
+}
+
+function hopPartsFromStep(step) {
+  if (step && typeof step === "object") {
+    return {
+      action: step.action || step.permission || step.event_name || "",
+      target: step.target || step.resource || step.to || "",
+      capability: step.capability_gained || step.result || step.description || "",
+      source: step.source || step.from || "",
+    };
+  }
+  const text = String(step || "");
+  const parts = text.split(/\s*(?:→|->)\s*/).filter(Boolean);
+  return {
+    action: parts[0] || text,
+    target: parts[1] || "",
+    capability: parts.slice(2).join(" → "),
+    source: "",
+  };
+}
+
+function fitTransformForNodes(nodes, width, height, padding = 120) {
+  const usableHeight = Math.max(height - 90, 200);
+  const positioned = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+  if (positioned.length === 0 || width <= 0 || height <= 0) {
+    return d3.zoomIdentity.translate(0, 0).scale(0.85);
+  }
+  const xs = positioned.map((node) => node.x);
+  const ys = positioned.map((node) => node.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(maxX - minX, 240);
+  const spanY = Math.max(maxY - minY, 240);
+  const scale = Math.min(
+    Math.max((width - padding * 2) / spanX, 0.2),
+    Math.max((usableHeight - padding * 2) / spanY, 0.2),
+    1.1
+  );
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  return d3.zoomIdentity.translate(width / 2 - centerX * scale, usableHeight / 2 - centerY * scale).scale(scale);
+}
+
+function useIsNarrowViewport(breakpoint = 900) {
+  const [isNarrow, setIsNarrow] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth < breakpoint : false
+  ));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mediaQuery = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const sync = () => setIsNarrow(mediaQuery.matches);
+    sync();
+    mediaQuery.addEventListener("change", sync);
+    return () => mediaQuery.removeEventListener("change", sync);
+  }, [breakpoint]);
+
+  return isNarrow;
+}
+
 // ─── Data Normalization ───
 // Handles multiple controls data formats produced by different agents:
-//   1. Rich results.json (per spec: has scps[], rcps[], detections[] with severity/spl, etc.)
-//   2. Thin results.json (summary counts + policies.scp_files + basic detections without spl)
+//   1. Rich results.json (per spec: has org_wide_issues[], detections[] with severity/spl, etc.)
+//   2. Thin results.json (summary counts + basic detections without spl)
 //   3. Data layer format (fields nested under payload, from data/controls/*.json)
-//   4. Flat policies[] format (policies as single array with type: "SCP"/"RCP", no scps[]/rcps[])
+//   4. Controls org_wide_issues[] advisory format
 // Also fixes audit source field: json.source may be service-specific (e.g., "svc:ec2.amazonaws.com")
 function normalizeForDashboard(json, indexSource) {
   let data = { ...json };
+  if (data._dashboard_run_id && !data.dashboard_run_id) {
+    data.dashboard_run_id = data._dashboard_run_id;
+  }
 
   // Unwrap data layer payload format (data/<phase>/*.json nests fields under payload)
   if (data.payload && typeof data.payload === "object") {
@@ -86,10 +323,9 @@ function normalizeForDashboard(json, indexSource) {
 
   // Resolve canonical phase key: prefer index.json source over json.source when
   // json.source is not a recognized phase (e.g., "svc:ec2.amazonaws.com" for audit)
-  const VALID_PHASES = ["audit", "exploit", "controls"];
   const source = (indexSource && VALID_PHASES.includes(indexSource))
     ? indexSource
-    : (VALID_PHASES.includes(data.source) ? data.source : (indexSource || "audit"));
+    : (VALID_PHASES.includes(data.source) ? data.source : "audit");
   data.source = source;
 
   // Audit-specific normalization
@@ -98,6 +334,13 @@ function normalizeForDashboard(json, indexSource) {
     const s = data.summary;
     if (s.total_attack_paths == null && s.attack_paths != null) s.total_attack_paths = s.attack_paths;
     if (s.total_attack_paths == null) s.total_attack_paths = data.attack_paths?.length ?? 0;
+
+    if ((!Array.isArray(data.principals) || data.principals.length === 0) && data.graph?.nodes?.length > 0) {
+      data.principals = derivePrincipalsFromGraph(data.graph);
+    }
+    if ((!Array.isArray(data.trust_relationships) || data.trust_relationships.length === 0) && data.graph?.edges?.length > 0) {
+      data.trust_relationships = deriveTrustsFromGraph(data.graph);
+    }
 
     // Array-first KPI derivation: principals[] wins over summary when present and non-empty
     if (data.principals?.length > 0) {
@@ -145,14 +388,10 @@ function normalizeForDashboard(json, indexSource) {
       ).length;
     }
 
-    // Fallback: if trust_relationships reports 0 wildcards, count attack paths about wildcard trusts
-    if ((s.wildcard_trust_policies ?? 0) === 0 && Array.isArray(data.attack_paths)) {
-      const wildcardPaths = data.attack_paths.filter((p) =>
-        (p.name || "").toLowerCase().includes("wildcard") ||
-        (p.description || "").toLowerCase().includes("wildcard") ||
-        (p.category || "") === "trust_misconfiguration"
-      );
-      if (wildcardPaths.length > 0) s.wildcard_trust_policies = wildcardPaths.length;
+    if (Array.isArray(data.attack_paths)) {
+      s.critical_priv_esc_risks = data.attack_paths.filter((p) =>
+        p.severity === "critical" && (p.category === "privilege_escalation" || !p.category)
+      ).length;
     }
   }
 
@@ -176,57 +415,19 @@ function normalizeForDashboard(json, indexSource) {
       data.audit_runs_analyzed = [data.audit_run];
     }
 
-    // New schema (78-controls-rework): guardrails[] array with type: "scp"|"rcp"
-    // Derive scps[]/rcps[] from guardrails[] for PolicyViewer compatibility
-    if (Array.isArray(data.guardrails) && !data.scps && !data.rcps) {
-      const mapGuardrail = (g) => ({
-        name: g.name || g.file?.replace(/^policies\//, "").replace(/\.json$/, "") || "Unnamed",
-        policy_json: g.policy_json || null,
-        source_attack_paths: g.source_attack_paths || [],
-        impact_analysis: g.impact_analysis || {
-          prevents: [],
-          blast_radius: "unknown",
-          break_glass: "none",
-        },
-      });
-      data.scps = data.guardrails.filter((g) => g.type === "scp").map(mapGuardrail);
-      data.rcps = data.guardrails.filter((g) => g.type === "rcp").map(mapGuardrail);
-    }
-
-    // Legacy flat policies[] array by type into separate scps[]/rcps[] arrays
-    // Some agents produce policies: [{ file, type: "SCP", ... }] instead of scps[]/rcps[]
-    if (!data.scps && !data.rcps && Array.isArray(data.policies)) {
-      const mapPolicy = (p) => ({
-        name: p.name || p.file?.replace(/^policies\//, "").replace(/\.json$/, "") || "Unnamed",
-        policy_json: p.policy_json || null,
-        source_attack_paths: p.source_attack_paths || [],
-        impact_analysis: p.impact_analysis || {
-          prevents: [],
-          blast_radius: (p.blast_radius || "unknown").toLowerCase(),
-          break_glass: "none",
-        },
-      });
-      data.scps = data.policies
-        .filter((p) => (p.type || "").toUpperCase() === "SCP")
-        .map(mapPolicy);
-      data.rcps = data.policies
-        .filter((p) => (p.type || "").toUpperCase() === "RCP")
-        .map(mapPolicy);
-    }
-
     // Normalize remediation: new schema uses remediation.items count; legacy used prioritization[]
     if (!data.prioritization && data.remediation?.file) {
       // New schema: expose file path and item count for the Remediation tab
       data.remediationPlanFile = data.remediation.file;
       data.remediationItemCount = data.remediation.items ?? 0;
+      data.remediationPlanMarkdown = data.remediation.markdown || data.remediation.content || "";
     }
 
-    // KPI derivation — array lengths ALWAYS win for controls KPIs
-    // New field names: summary.guardrails, summary.detections, summary.remediation_items
-    // Legacy field names preserved as fallbacks for backward compatibility
-    s.scps_generated = data.scps?.length ?? 0;
-    s.rcps_generated = data.rcps?.length ?? 0;
+    if (!Array.isArray(data.org_wide_issues)) data.org_wide_issues = [];
+    if (!Array.isArray(data.dashboards)) data.dashboards = [];
+    s.org_wide_issues = data.org_wide_issues.length ?? s.org_wide_issues ?? 0;
     s.detections_generated = data.detections?.length ?? s.detections ?? 0;
+    s.dashboards = s.dashboards ?? data.dashboards.length ?? 0;
     s.remediation_items = s.remediation_items ?? data.remediation?.items ?? 0;
     // controls_recommended: new schema has no security_controls[] — map to remediation_items
     s.controls_recommended = s.remediation_items;
@@ -239,21 +440,73 @@ function normalizeForDashboard(json, indexSource) {
     const lower = s?.toLowerCase() ?? fallback;
     return SEVERITY_ALIASES[lower] ?? lower;
   };
+  const highestSeverity = (values, fallback = "low") => {
+    const order = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+    return values
+      .map((value) => canonicalizeSeverity(value, fallback))
+      .filter((value) => order[value] != null)
+      .sort((a, b) => order[a] - order[b])[0] || fallback;
+  };
 
   // Normalize severity fields to lowercase across all phases
   // Guarantees SEVERITY_CONFIG lowercase keys always match regardless of agent casing
   // Coerce attack_path array fields that agents may emit as strings (e.g. Gemini remediation)
   const ensureArray = (v) => Array.isArray(v) ? v : (typeof v === "string" && v ? [v] : []);
+  const stepText = (step) => {
+    if (typeof step === "string") return step;
+    if (step && typeof step === "object") {
+      return [step.description, step.action].filter(Boolean).join(" — ");
+    }
+    return "";
+  };
+  const pathSteps = (p) => {
+    const directSteps = ensureArray(p.steps || p.exploit_steps).map(stepText).filter(Boolean);
+    if (directSteps.length > 0) return directSteps;
+    return ensureArray(p.hops).map((hop) => {
+      if (!hop || typeof hop !== "object") return stepText(hop);
+      return [hop.action, hop.target, hop.capability_gained].filter(Boolean).join(" → ");
+    }).filter(Boolean);
+  };
   if (Array.isArray(data.attack_paths)) {
     data.attack_paths = data.attack_paths.map((p) => ({
       ...p,
       severity: canonicalizeSeverity(p.severity),
-      steps: ensureArray(p.steps || p.exploit_steps),
+      steps: pathSteps(p),
       remediation: ensureArray(p.remediation),
       detection_opportunities: ensureArray(p.detection_opportunities),
       mitre_techniques: ensureArray(p.mitre_techniques),
       affected_resources: ensureArray(p.affected_resources),
     }));
+  }
+  const candidateById = new Map(
+    (data.candidate_attack_paths || [])
+      .filter((candidate) => candidate?.id)
+      .map((candidate) => [candidate.id, candidate])
+  );
+  const promotedPathIdsByEntrypoint = new Map();
+  (data.attack_paths || []).forEach((path) => {
+    const candidate = candidateById.get(path.source_candidate_id);
+    const startingPosition = candidate?.starting_position;
+    if (startingPosition?.type !== "public_endpoint" || !startingPosition.id) return;
+    const current = promotedPathIdsByEntrypoint.get(startingPosition.id) || [];
+    current.push(path.id);
+    promotedPathIdsByEntrypoint.set(startingPosition.id, current);
+  });
+  if (Array.isArray(data.public_exposure_findings)) {
+    data.public_exposure_findings = data.public_exposure_findings.map((finding) => {
+      const inferredPromotedIds = promotedPathIdsByEntrypoint.get(finding.source_entrypoint_id) || [];
+      return {
+        ...finding,
+        severity: canonicalizeSeverity(finding.severity, "low"),
+        coverage_needed: ensureArray(finding.coverage_needed),
+        promoted_attack_path_ids: [
+          ...new Set([
+            ...ensureArray(finding.promoted_attack_path_ids),
+            ...inferredPromotedIds,
+          ]),
+        ],
+      };
+    });
   }
   if (Array.isArray(data.detections)) {
     data.detections = data.detections.map((d) => ({
@@ -271,10 +524,14 @@ function normalizeForDashboard(json, indexSource) {
   if (data.summary?.risk_score && typeof data.summary.risk_score === "string") {
     data.summary.risk_score = data.summary.risk_score.toLowerCase();
   }
-
-  // Map technical_remediation → technical_recommendations (data layer uses former)
-  if (data.technical_remediation && !data.technical_recommendations) {
-    data.technical_recommendations = data.technical_remediation;
+  if (data.summary && (source === "audit" || source === "exploit")) {
+    data.summary.risk_score = highestSeverity([
+      data.summary.risk_score,
+      data.summary.severity,
+      ...(data.attack_paths || []).map((path) => path.severity),
+      ...(data.public_exposure_findings || []).map((finding) => finding.severity),
+    ]);
+    data.summary.severity = data.summary.risk_score;
   }
 
   // DASH-06: Deduplicate graph nodes and edges.
@@ -358,6 +615,7 @@ function CopyButton({ text }) {
     <button
       onClick={handleCopy}
       title="Copy to clipboard"
+      aria-label="Copy to clipboard"
       style={{
         background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 4,
         color: copied ? COLORS.low : COLORS.textDim, cursor: "pointer",
@@ -407,12 +665,104 @@ function getEdgeStyle(edge_type, trust_type) {
     case "public_access":return { color: COLORS.edgePublicAccess,  strokeWidth: 3,   dashArray: "none" };
     case "service":      return { color: COLORS.edgeService,       strokeWidth: 1.5, dashArray: "4,2" };
     case "membership":   return { color: COLORS.nodeGroup,         strokeWidth: 1.2, dashArray: "3,2" };
+    case "resource_policy_allows": return { color: COLORS.edgePublicAccess, strokeWidth: 2.5, dashArray: "5,2" };
+    case "resource_policy_statement": return { color: COLORS.edgePublicAccess, strokeWidth: 1.5, dashArray: "2,4" };
+    case "event_source": return { color: COLORS.edgeService,       strokeWidth: 1.5, dashArray: "2,3" };
+    case "encrypted_by": return { color: COLORS.edgeDataAccess,    strokeWidth: 1.5, dashArray: "2,2" };
     default:             return { color: COLORS.edgeNormal,        strokeWidth: 1.5, dashArray: "none" };
   }
 }
 
+function pathValueCandidates(value) {
+  const raw = String(value || "");
+  if (!raw) return [];
+  const values = new Set([raw]);
+  const normalized = raw.replace(/^principal:/, "");
+  values.add(normalized);
+
+  const iamMatch = normalized.match(/^arn:aws:iam::\d+:(role|user)\/(.+)$/);
+  if (iamMatch) {
+    values.add(`${iamMatch[1]}:${iamMatch[2]}`);
+    values.add(iamMatch[2]);
+  }
+
+  if (normalized.includes("/")) {
+    const parts = normalized.split("/").filter(Boolean);
+    values.add(parts[parts.length - 1]);
+    if (parts[0]?.endsWith(":loadbalancer") && parts.length >= 3) values.add(parts[2]);
+    if (parts[0]?.endsWith(":targetgroup") && parts.length >= 2) values.add(parts[1]);
+  }
+
+  const colonTail = normalized.split(":").filter(Boolean).pop();
+  if (colonTail) values.add(colonTail);
+
+  return [...values].filter(Boolean);
+}
+
+function resolvePathNodeIds(value, nodes) {
+  const candidates = pathValueCandidates(value);
+  if (candidates.length === 0) return [];
+  return nodes
+    .filter((node) => candidates.some((candidate) =>
+      node.id === candidate ||
+      node.label === candidate ||
+      node.id?.endsWith(`:${candidate}`)
+    ))
+    .map((node) => node.id);
+}
+
+function evidenceEdgeIdsFromPath(path) {
+  const ids = new Set();
+  const collect = (items) => {
+    if (!Array.isArray(items)) return;
+    items.forEach((item) => {
+      if (item?.id && String(item.id).startsWith("edge:")) ids.add(item.id);
+    });
+  };
+  collect(path.evidence);
+  (path.hops || []).forEach((hop) => collect(hop.evidence));
+  return ids;
+}
+
+function graphForAttackPaths(data, paths) {
+  const graph = data?.graph || {};
+  const allNodes = graph.nodes || [];
+  const allEdges = graph.edges || [];
+  if (!Array.isArray(paths) || paths.length === 0) return { nodes: [], edges: [] };
+
+  const evidenceEdgeIds = new Set();
+  const nodeIds = new Set();
+  const addNodeValue = (value) => resolvePathNodeIds(value, allNodes).forEach((id) => nodeIds.add(id));
+
+  paths.forEach((path) => {
+    evidenceEdgeIdsFromPath(path).forEach((id) => evidenceEdgeIds.add(id));
+    (path.affected_resources || []).forEach(addNodeValue);
+    (path.hops || []).forEach((hop) => {
+      addNodeValue(hop.from_context);
+      addNodeValue(hop.resulting_context);
+      addNodeValue(hop.target);
+      (hop.evidence || []).forEach((item) => addNodeValue(item?.id));
+    });
+  });
+
+  const evidenceEdges = allEdges.filter((edge) => evidenceEdgeIds.has(edge.id));
+  evidenceEdges.forEach((edge) => {
+    nodeIds.add(edge.source);
+    nodeIds.add(edge.target);
+  });
+
+  const nodes = allNodes.filter((node) => nodeIds.has(node.id));
+  const scopedNodeIds = new Set(nodes.map((node) => node.id));
+  const edges = allEdges.filter((edge) =>
+    evidenceEdgeIds.has(edge.id) ||
+    (scopedNodeIds.has(edge.source) && scopedNodeIds.has(edge.target))
+  );
+
+  return { ...graph, nodes, edges };
+}
+
 // ─── Attack Graph Visualization (D3) ───
-const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNodeClick, onDeselect }, ref) {
+const AttackGraph = forwardRef(function AttackGraph({ data, paths, selectedPath, onNodeClick, onDeselect }, ref) {
   const svgRef = useRef(null);
   const simRef = useRef(null);
   const zoomRef = useRef(null);
@@ -420,6 +770,7 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
   const [disconnectedNodes, setDisconnectedNodes] = useState([]);
   const [showDisconnectedSidebar, setShowDisconnectedSidebar] = useState(false);
   const [edgeTooltip, setEdgeTooltip] = useState(null); // { x, y, edge_type, source, target }
+  const graphData = useMemo(() => graphForAttackPaths(data, paths), [data, paths]);
 
   useImperativeHandle(ref, () => ({
     panToNode(nodeId) {
@@ -461,18 +812,19 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
     },
     resetView() {
       if (!svgRef.current || !zoomRef.current) return;
+      const transform = fitTransformForNodes(nodesRef.current, svgRef.current.clientWidth, svgRef.current.clientHeight);
       d3.select(svgRef.current)
         .transition().duration(300)
-        .call(zoomRef.current.transform, d3.zoomIdentity.translate(0, 0).scale(0.85));
+        .call(zoomRef.current.transform, transform);
     },
   }), []);
 
   // Resolve affected_resources (ARNs) to graph node IDs for highlighting
   const highlightedNodes = useMemo(() => {
-    if (!selectedPath || !data?.graph?.nodes) return new Set();
+    if (!selectedPath || !graphData?.nodes) return new Set();
     const resources = selectedPath.affected_resources || [];
     const matched = new Set();
-    const nodes = data.graph.nodes;
+    const nodes = graphData.nodes;
     for (const r of resources) {
       // Direct match
       if (nodes.some((n) => n.id === r)) { matched.add(r); continue; }
@@ -482,7 +834,7 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
       if (node) matched.add(node.id);
     }
     return matched;
-  }, [selectedPath, data]);
+  }, [selectedPath, graphData]);
 
   const highlightedEdges = useMemo(() => {
     if (!selectedPath || highlightedNodes.size === 0) return new Set();
@@ -498,7 +850,7 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
   }, [selectedPath, highlightedNodes]);
 
   useEffect(() => {
-    if (!svgRef.current || !data?.graph) return;
+    if (!svgRef.current || !graphData) return;
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
@@ -520,7 +872,7 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
 
     const defs = svg.append("defs");
 
-    ["normal", "trust", "priv_esc", "cross_account", "data_access", "service", "network", "public_access"].forEach((type) => {
+    ["normal", "trust", "priv_esc", "cross_account", "data_access", "service", "network", "public_access", "resource_policy_allows", "resource_policy_statement", "event_source", "encrypted_by"].forEach((type) => {
       const { color } = getEdgeStyle(type === "public_access" ? "public_access" : type, undefined);
       defs.append("marker")
         .attr("id", `arrow-${type}`)
@@ -538,12 +890,24 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
     feMerge.append("feMergeNode").attr("in", "blur");
     feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
-    const nodes = (data.graph.nodes || []).map((d) => ({ ...d }));
+    const nodes = (graphData.nodes || []).map((d) => ({ ...d }));
     nodesRef.current = nodes;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-    const links = (data.graph.edges || [])
+    const links = (graphData.edges || [])
       .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
       .map((d) => ({ ...d }));
+
+    if (nodes.length === 0) {
+      setDisconnectedNodes([]);
+      g.append("text")
+        .attr("x", width / 2)
+        .attr("y", height / 2)
+        .attr("text-anchor", "middle")
+        .attr("fill", COLORS.textDim)
+        .attr("font-size", 13)
+        .text("No final attack path graph nodes available");
+      return undefined;
+    }
 
     // Disconnected node detection — compute BEFORE simulation starts
     const connectedNodeIds = new Set();
@@ -639,16 +1003,20 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
       .attr("opacity", (d) => !hasHighlight || highlightedNodes.has(d.id) ? 1 : 0.08)
       .text((d) => d.label.length > 24 ? d.label.slice(0, 22) + "\u2026" : d.label);
 
-    sim.on("tick", () => {
+    const syncPositions = () => {
       link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y)
         .attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
       node.attr("transform", (d) => `translate(${d.x},${d.y})`);
-    });
+    };
 
-    svg.call(zoom.transform, d3.zoomIdentity.translate(0, 0).scale(0.85));
+    sim.on("tick", syncPositions);
+    sim.tick(80);
+    syncPositions();
+
+    svg.call(zoom.transform, fitTransformForNodes(nodes, width, height));
 
     return () => sim.stop();
-  }, [data, highlightedNodes, highlightedEdges, onNodeClick]);
+  }, [graphData, highlightedNodes, highlightedEdges, onNodeClick]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -689,7 +1057,7 @@ const AttackGraph = forwardRef(function AttackGraph({ data, selectedPath, onNode
             >&#215;</button>
           </div>
           <div style={{ fontSize: 11, color: COLORS.textDim, marginBottom: 10, lineHeight: 1.5 }}>
-            These nodes have no edges in the graph — they may be incomplete attack path data or isolated resources requiring investigation.
+            These nodes have no edges in the graph. They may be incomplete attack path data or isolated resources requiring investigation.
           </div>
           {disconnectedNodes.map((n, i) => (
             <div key={i} style={{
@@ -751,15 +1119,19 @@ function StatCard({ label, value, color, subtext, active, onClick }) {
 // ─── Attack Path Card ───
 function AttackPathCard({ path, isSelected, onClick }) {
   const sev = SEVERITY_CONFIG[path.severity] || SEVERITY_CONFIG.medium;
+  const isGrouped = Boolean(path.group_id);
   return (
     <div
       onClick={onClick}
       style={{
         background: isSelected ? COLORS.bgCardHover : COLORS.bgCard,
-        border: `1px solid ${isSelected ? sev.color : COLORS.border}`,
+        borderStyle: "solid",
+        borderWidth: 1,
+        borderColor: isSelected ? sev.color : COLORS.border,
         borderRadius: 8, padding: 16, cursor: "pointer",
         transition: "all 0.2s", marginBottom: 10,
-        borderLeft: `3px solid ${sev.color}`,
+        borderLeftWidth: 3,
+        borderLeftColor: sev.color,
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -773,6 +1145,13 @@ function AttackPathCard({ path, isSelected, onClick }) {
       </div>
       <p style={{ color: COLORS.textDim, fontSize: 12, margin: 0, lineHeight: 1.5 }}>{path.description}</p>
       <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {isGrouped && (
+          <span style={{
+            background: COLORS.accent + "1f",
+            color: COLORS.accent,
+            padding: "1px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700,
+          }}>{path.member_count} paths</span>
+        )}
         {path.category && CATEGORY_CONFIG[path.category] && (
           <span style={{
             background: CATEGORY_CONFIG[path.category].color + "1f",
@@ -792,7 +1171,74 @@ function AttackPathCard({ path, isSelected, onClick }) {
 }
 
 // ─── Attack Path Detail Panel ───
-function PathDetail({ path }) {
+function StructuredHop({ step, index, isLast, severity }) {
+  const parts = hopPartsFromStep(step);
+  const fields = [
+    ["Action", parts.action],
+    ["Target", parts.target],
+    ["Capability", parts.capability],
+    ["Source", parts.source],
+  ].filter(([, value]) => value);
+
+  return (
+    <div style={{ display: "flex", gap: 0, marginBottom: 0, alignItems: "stretch" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 32 }}>
+        <div style={{
+          minWidth: 26, height: 26, borderRadius: "50%",
+          background: index === 0 ? severity.color : severity.bg,
+          color: index === 0 ? "#fff" : severity.color,
+          border: `2px solid ${severity.color}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, fontWeight: 700, flexShrink: 0, zIndex: 1,
+        }}>{index + 1}</div>
+        {!isLast && (
+          <div style={{
+            width: 2, flex: 1, minHeight: 12,
+            background: `linear-gradient(to bottom, ${severity.color}66, ${severity.color}22)`,
+          }} />
+        )}
+      </div>
+      <div style={{
+        flex: 1,
+        marginLeft: 12,
+        marginBottom: isLast ? 0 : 8,
+        padding: "10px 14px",
+        background: COLORS.bgCard,
+        border: `1px solid ${COLORS.border}`,
+        borderLeft: `3px solid ${index === 0 ? severity.color : severity.color + "66"}`,
+        borderRadius: 6,
+      }}>
+        {fields.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(72px, 110px) 1fr", gap: "6px 10px" }}>
+            {fields.map(([label, value]) => (
+              <div key={label} style={{ display: "contents" }}>
+                <div style={{ color: COLORS.textDim, fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>{label}</div>
+                <div style={{
+                  color: label === "Capability" ? COLORS.text : "#cbd5e1",
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  fontFamily: label === "Action" || label === "Target" || label === "Source" ? "'JetBrains Mono', monospace" : "inherit",
+                  wordBreak: "break-word",
+                }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.6, wordBreak: "break-word" }}>{String(step || "")}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PathDetail({ path, controlsData }) {
+  const detailRef = useRef(null);
+  const detailKey = `${path?.group_id || ""}:${path?.id || ""}:${path?.representative_path_id || ""}:${path?.name || ""}`;
+
+  useEffect(() => {
+    detailRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [detailKey]);
+
   if (!path) return (
     <div style={{ color: COLORS.textDim, textAlign: "center", padding: 40, fontSize: 13 }}>
       Select an attack path to see details
@@ -800,9 +1246,13 @@ function PathDetail({ path }) {
   );
 
   const sev = SEVERITY_CONFIG[path.severity] || SEVERITY_CONFIG.medium;
+  const matchingDetections = (controlsData?.detections || []).filter((d) => detectionMatchesPath(d, path));
+  const commandLines = commandsFromPath(path);
+  const visibleSteps = commandLines.length > 0 ? commandLines : (path.hops?.length > 0 ? path.hops : path.steps);
+  const isGrouped = Boolean(path.group_id);
 
   return (
-    <div style={{ padding: 20, overflowY: "auto", height: "100%" }}>
+    <div ref={detailRef} style={{ padding: 20, overflowY: "auto", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <span style={{
           background: sev.bg, color: sev.color, padding: "3px 12px", borderRadius: 12,
@@ -811,12 +1261,73 @@ function PathDetail({ path }) {
         <h2 style={{ margin: 0, color: COLORS.text, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={path.name}>{path.name}</h2>
       </div>
       <p style={{ color: COLORS.textDim, lineHeight: 1.6, fontSize: 13 }}>{path.description}</p>
+      {isGrouped && (
+        <div style={{
+          background: COLORS.bgCard,
+          border: `1px solid ${COLORS.border}`,
+          borderLeft: `3px solid ${COLORS.accent}`,
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+        }}>
+          <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
+            Grouped Paths
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 170px) 1fr", gap: "6px 10px", fontSize: 12 }}>
+            <div style={{ color: COLORS.textDim, textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>Members</div>
+            <div style={{ color: COLORS.text }}>{path.member_count} final attack paths</div>
+            <div style={{ color: COLORS.textDim, textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>Primitive</div>
+            <div style={{ color: COLORS.text, fontFamily: "'JetBrains Mono', monospace" }}>{path.primitive}</div>
+            <div style={{ color: COLORS.textDim, textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>Representative</div>
+            <div style={{ color: COLORS.text, fontFamily: "'JetBrains Mono', monospace" }}>{path.representative_path_id} representative raw path</div>
+            {path.source_principals?.length > 0 && (
+              <>
+                <div style={{ color: COLORS.textDim, textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>Starting Principals</div>
+                <div style={{ color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-word" }}>
+                  {path.source_principals.slice(0, 8).join(", ")}
+                  {path.source_principals.length > 8 ? `, +${path.source_principals.length - 8} more` : ""}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {isGrouped && path.leveraging_assets?.length > 0 && (
+        <>
+          <SectionHeader title="Assets That Can Leverage This" icon={"\u25C9"} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, marginBottom: 14 }}>
+            {path.leveraging_assets.map((asset) => (
+              <div key={asset.id} style={{
+                background: COLORS.bgCard,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 8,
+                padding: 10,
+                borderLeft: `3px solid ${COLORS.accent}`,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                  <span style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, wordBreak: "break-word" }}>{asset.id}</span>
+                  <span style={{ color: COLORS.accent, background: COLORS.accent + "18", borderRadius: 6, padding: "1px 6px", fontSize: 10, textTransform: "uppercase", height: 18 }}>{asset.type}</span>
+                </div>
+                {asset.arn && (
+                  <div style={{ color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, wordBreak: "break-word", marginBottom: 6 }}>{asset.arn}</div>
+                )}
+                <div style={{ color: COLORS.textDim, fontSize: 10 }}>
+                  Paths: {(asset.path_ids || []).join(", ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Steps */}
-      <SectionHeader title="Attack Steps" icon={"\u2694"} />
+      <SectionHeader title={commandLines.length > 0 ? "AWS CLI Replay Commands" : "Validated Attack Hops"} icon={"\u2694"} />
       <div style={{ marginLeft: 4, position: "relative" }}>
-        {path.steps?.map((step, i) => {
-          const isLast = i === path.steps.length - 1;
+        {visibleSteps?.map((step, i) => {
+          const isLast = i === visibleSteps.length - 1;
+          if (commandLines.length === 0) {
+            return <StructuredHop key={i} step={step} index={i} isLast={isLast} severity={sev} />;
+          }
           return (
             <div key={i} style={{ display: "flex", gap: 0, marginBottom: 0, alignItems: "stretch" }}>
               {/* Timeline column */}
@@ -843,12 +1354,34 @@ function PathDetail({ path }) {
                 borderLeft: `3px solid ${i === 0 ? sev.color : sev.color + "66"}`,
                 borderRadius: 6, transition: "border-color 0.2s",
               }}>
-                <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.6, wordBreak: "break-all" }}>{step}</span>
+                <span style={{
+                  color: COLORS.text,
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  wordBreak: "break-word",
+                  fontFamily: commandLines.length > 0 ? "'JetBrains Mono', monospace" : "inherit",
+                  flex: 1,
+                }}>{step}</span>
+                {commandLines.length > 0 && <CopyButton text={step} />}
               </div>
             </div>
           );
         })}
       </div>
+      {commandLines.length === 0 && (
+        <div style={{
+          marginTop: 10,
+          padding: "10px 12px",
+          borderRadius: 6,
+          border: `1px solid ${COLORS.border}`,
+          background: "#0d1117",
+          color: COLORS.textDim,
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}>
+          AWS CLI replay commands are not embedded in this audit result. Generate an exploit playbook to display executable reproduction commands.
+        </div>
+      )}
 
       {/* MITRE */}
       {path.mitre_techniques?.length > 0 && (
@@ -868,9 +1401,41 @@ function PathDetail({ path }) {
       )}
 
       {/* Detection */}
-      {path.detection_opportunities?.length > 0 && (
+      {matchingDetections.length > 0 ? (
         <>
-          <SectionHeader title="Splunk Detections (CloudTrail)" icon={"\uD83D\uDD0D"} />
+          <SectionHeader title="Generated SPL Detections" icon={"\uD83D\uDD0D"} />
+          {matchingDetections.map((d, i) => (
+            <div key={i} style={{
+              background: COLORS.bgCard,
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 10,
+            }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <span style={{ color: COLORS.text, fontWeight: 600, fontSize: 13 }}>{d.name}</span>
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: severityColorFor(d.severity),
+                  background: severityColorFor(d.severity) + "18",
+                  borderRadius: 6,
+                  padding: "2px 8px",
+                  textTransform: "uppercase",
+                }}>{d.severity}</span>
+              </div>
+              {d.spl ? (
+                <SplBlock spl={d.spl} />
+              ) : (
+                <div style={{ color: COLORS.textDim, fontSize: 12 }}>SPL query not embedded.</div>
+              )}
+              <DetectionMetadata rule={d} />
+            </div>
+          ))}
+        </>
+      ) : path.detection_opportunities?.length > 0 && (
+        <>
+          <SectionHeader title="Detection Opportunities" icon={"\uD83D\uDD0D"} />
           {path.detection_opportunities.map((d, i) => (
             <div key={i} style={{
               display: "flex", alignItems: "flex-start", gap: 4, marginBottom: 6,
@@ -878,9 +1443,8 @@ function PathDetail({ path }) {
               <div style={{
                 flex: 1, background: "rgba(6,182,212,0.08)", border: `1px solid rgba(6,182,212,0.2)`,
                 borderRadius: 6, padding: "8px 12px", fontSize: 12,
-                color: "#67e8f9", fontFamily: "monospace", wordBreak: "break-all",
+                color: "#67e8f9", wordBreak: "break-word",
               }}>{d}</div>
-              <CopyButton text={d} />
             </div>
           ))}
         </>
@@ -889,7 +1453,7 @@ function PathDetail({ path }) {
       {/* Remediation */}
       {path.remediation?.length > 0 && (
         <>
-          <SectionHeader title="Remediation (SCP/RCP + IAM)" icon={"\uD83D\uDEE1"} />
+          <SectionHeader title="Remediation" icon={"\uD83D\uDEE1"} />
           {path.remediation.map((r, i) => (
             <div key={i} style={{
               display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8,
@@ -912,9 +1476,9 @@ function PathDetail({ path }) {
               background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
               borderRadius: 6, padding: "8px 12px",
             }}>
-              <span style={{ color: COLORS.nodeUser, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>{hop.from}</span>
+              <span style={{ color: COLORS.nodeUser, fontFamily: "monospace", fontSize: 11, wordBreak: "break-word" }}>{hop.from}</span>
               <span style={{ color: COLORS.edgeCrossAccount }}>{"\u2192"}</span>
-              <span style={{ color: COLORS.nodeRole, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>{hop.to}</span>
+              <span style={{ color: COLORS.nodeRole, fontFamily: "monospace", fontSize: 11, wordBreak: "break-word" }}>{hop.to}</span>
               <span style={{ color: COLORS.textDim, fontSize: 10, marginLeft: "auto" }}>{hop.mechanism}</span>
             </div>
           ))}
@@ -999,6 +1563,8 @@ function GraphLegend() {
     { color: COLORS.edgeService, label: "Service", shape: "line-dashed" },
     { color: COLORS.edgeNetwork, label: "Network", shape: "line" },
     { color: COLORS.edgePublicAccess, label: "Public Access", shape: "line" },
+    { color: COLORS.edgePublicAccess, label: "Resource Policy", shape: "line-dashed" },
+    { color: COLORS.edgeDataAccess, label: "Encrypted By", shape: "line-dashed" },
   ];
   return (
     <div style={{
@@ -1050,16 +1616,34 @@ function FileUpload({ onDataLoad }) {
   );
 }
 
+function LoadedPhaseSummary({ allData }) {
+  const phases = Object.keys(allData).filter((src) => PHASE_CONFIG[src]);
+  if (phases.length === 0) return null;
+
+  return (
+    <>
+      {" \u2022 "}
+      {phases.map((src, index) => (
+        <span key={src}>
+          {index > 0 && <span style={{ color: COLORS.textDim }}>{" / "}</span>}
+          <span style={{ color: PHASE_CONFIG[src]?.color || COLORS.accent }}>{PHASE_CONFIG[src]?.label || src}</span>
+        </span>
+      ))}
+    </>
+  );
+}
+
 // ─── Node Detail Panel (slide-out) ───
-function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
+function NodeDetailPanel({ node, data, graphPaths, selectedPath, onSelectPath, onClose }) {
   if (!node) return null;
+  const scopedGraph = useMemo(() => graphForAttackPaths(data, graphPaths), [data, graphPaths]);
 
   const connectedEdges = useMemo(() => {
-    if (!data?.graph?.edges) return [];
-    return data.graph.edges.filter(
+    if (!scopedGraph?.edges) return [];
+    return scopedGraph.edges.filter(
       (e) => e.source === node.id || e.target === node.id
     );
-  }, [data, node]);
+  }, [scopedGraph, node]);
 
   const associatedPaths = useMemo(() => {
     if (!data?.attack_paths) return [];
@@ -1099,7 +1683,7 @@ function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 4 }}>Node ID</div>
           <div style={{
-            fontSize: 11, color: COLORS.text, fontFamily: "monospace", wordBreak: "break-all",
+            fontSize: 11, color: COLORS.text, fontFamily: "monospace", wordBreak: "break-word",
             background: COLORS.bgCard, padding: "6px 8px", borderRadius: 4,
           }}>{node.id}</div>
         </div>
@@ -1175,62 +1759,6 @@ function NodeDetailPanel({ node, data, selectedPath, onSelectPath, onClose }) {
   );
 }
 
-// ─── Run History Panel (phase-aware) ───
-// ─── Severity Filter Buttons ───
-function SeverityFilter({ activeSeverities, onToggle }) {
-  return (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-      {["critical", "high", "medium", "low"].map((sev) => {
-        const config = SEVERITY_CONFIG[sev];
-        const active = activeSeverities.has(sev);
-        return (
-          <button
-            key={sev}
-            onClick={() => onToggle(sev)}
-            style={{
-              padding: "3px 10px", borderRadius: 12, cursor: "pointer",
-              fontSize: 11, fontWeight: 600, textTransform: "uppercase",
-              border: `1px solid ${active ? config.color : COLORS.border}`,
-              background: active ? config.bg : "transparent",
-              color: active ? config.color : COLORS.textMuted,
-              transition: "all 0.15s",
-            }}
-          >
-            {config.icon} {sev}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Category Filter Buttons ───
-function CategoryFilter({ activeCategories, onToggle }) {
-  return (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-      {Object.entries(CATEGORY_CONFIG).map(([key, cfg]) => {
-        const active = activeCategories.has(key);
-        return (
-          <button
-            key={key}
-            onClick={() => onToggle(key)}
-            style={{
-              padding: "3px 10px", borderRadius: 12, cursor: "pointer",
-              fontSize: 10, fontWeight: 600,
-              border: `1px solid ${active ? cfg.color : COLORS.border}`,
-              background: active ? cfg.color + "1f" : "transparent",
-              color: active ? cfg.color : COLORS.textMuted,
-              transition: "all 0.15s",
-            }}
-          >
-            {cfg.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── Stat Detail Panel (slide-out) ───
 function StatDetailPanel({ statKey, data, onClose, onSelectPath, onHighlightNode }) {
   const principals = data?.principals || [];
@@ -1273,14 +1801,7 @@ function StatDetailPanel({ statKey, data, onClose, onSelectPath, onHighlightNode
       }
       case "wildcards": {
         const wildcardTrusts = trusts.filter((t) => t.is_wildcard);
-        if (wildcardTrusts.length > 0) return { title: "Wildcard Trusts", items: wildcardTrusts };
-        // Fallback: find wildcard-related attack paths or trust paths mentioning wildcard
-        const wildcardPaths = paths.filter((p) =>
-          (p.name || "").toLowerCase().includes("wildcard") ||
-          (p.description || "").toLowerCase().includes("wildcard") ||
-          p.category === "trust_misconfiguration"
-        );
-        return { title: "Wildcard Trusts", items: wildcardPaths };
+        return { title: "Wildcard Trusts", items: wildcardTrusts };
       }
       case "privesc": {
         // Include all critical paths that are privilege escalation or have no category
@@ -1337,7 +1858,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
   if (statKey === "users") {
     return (
       <div
-        onClick={() => onHighlightNode?.(item.id)}
+        onClick={() => onHighlightNode?.(item.node_id || item.id)}
         style={{
           background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
           borderRadius: 8, padding: 14, marginBottom: 10, cursor: "pointer",
@@ -1345,7 +1866,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
         }}
       >
         <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 6 }}>{item.id}</div>
-        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 8 }}>{item.arn}</div>
+        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-word", marginBottom: 8 }}>{item.arn}</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11 }}>
           <span style={{ color: item.mfa_enabled ? COLORS.low : COLORS.critical }}>
             MFA: {item.mfa_enabled ? "Yes" : "No"}
@@ -1373,7 +1894,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
   if (statKey === "roles") {
     return (
       <div
-        onClick={() => onHighlightNode?.(item.id)}
+        onClick={() => onHighlightNode?.(item.node_id || item.id)}
         style={{
           background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
           borderRadius: 8, padding: 14, marginBottom: 10, cursor: "pointer",
@@ -1381,7 +1902,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
         }}
       >
         <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 6 }}>{item.id}</div>
-        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 8 }}>{item.arn}</div>
+        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-word", marginBottom: 8 }}>{item.arn}</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11 }}>
           {item.is_wildcard_trust && <span style={{ color: COLORS.critical }}>Wildcard Trust</span>}
           <span style={{ color: item.has_boundary ? COLORS.low : COLORS.textDim }}>
@@ -1459,7 +1980,7 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
               Trusted by: <span style={{ color: COLORS.text, fontWeight: 500 }}>{trustedByName}</span>
             </div>
             {principal && (
-              <div style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 6 }}>{principal}</div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: "monospace", wordBreak: "break-word", marginBottom: 6 }}>{principal}</div>
             )}
           </>
         )}
@@ -1521,14 +2042,192 @@ function StatDetailItem({ item, statKey, onSelectPath, onHighlightNode }) {
   );
 }
 
+function publicExposureDisplayValue(value, fallback = "Unknown") {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const values = value.map((item) => publicExposureDisplayValue(item, "")).filter(Boolean);
+    return values.length ? values.join(", ") : fallback;
+  }
+  if (typeof value === "object") {
+    return value.name || value.id || value.resource || value.arn || value.type || fallback;
+  }
+  return fallback;
+}
+
+function PublicExposureFindingsSection({ findings = [], isNarrow, embedded = false }) {
+  if (!findings.length) return null;
+
+  const sortedFindings = [...findings].sort((a, b) => (
+    (SEVERITY_ORDER[a.severity] ?? 4) - (SEVERITY_ORDER[b.severity] ?? 4)
+  ));
+
+  return (
+    <section style={{
+      padding: embedded ? 16 : (isNarrow ? "0 12px 12px" : "0 24px 16px"),
+      height: embedded ? "100%" : "auto",
+      overflowY: embedded ? "auto" : "visible",
+      boxSizing: "border-box",
+    }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
+        <h2 style={{
+          margin: 0,
+          fontSize: 13,
+          fontWeight: 700,
+          color: COLORS.text,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        }}>
+          Public Exposure Findings
+        </h2>
+        <span style={{ fontSize: 11, color: COLORS.textDim }}>
+          Public reachability assessment, separate from validated attack paths
+        </span>
+      </div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isNarrow ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: 12,
+      }}>
+        {sortedFindings.map((finding, index) => {
+          const severityKey = finding.severity || "low";
+          const sev = SEVERITY_CONFIG[severityKey] || SEVERITY_CONFIG.low;
+          const coverageNeeded = Array.isArray(finding.coverage_needed) ? finding.coverage_needed : [];
+          const promotedPathIds = Array.isArray(finding.promoted_attack_path_ids) ? finding.promoted_attack_path_ids : [];
+          const resource = publicExposureDisplayValue(finding.resource);
+
+          return (
+            <article
+              key={finding.id || finding.source_entrypoint_id || index}
+              style={{
+                background: COLORS.bgCard,
+                border: `1px solid ${COLORS.border}`,
+                borderLeft: `3px solid ${sev.color}`,
+                borderRadius: 8,
+                padding: 14,
+                minWidth: 0,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.text, lineHeight: 1.35 }}>
+                    {finding.title || finding.category || "Public exposure"}
+                  </div>
+                  <div style={{
+                    marginTop: 4,
+                    fontSize: 11,
+                    color: COLORS.textDim,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    wordBreak: "break-word",
+                    lineHeight: 1.35,
+                  }}>
+                    {resource}
+                  </div>
+                </div>
+                <span style={{
+                  background: sev.bg,
+                  color: sev.color,
+                  padding: "2px 8px",
+                  borderRadius: 12,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  flexShrink: 0,
+                }}>
+                  {sev.icon} {severityKey}
+                </span>
+              </div>
+
+              {finding.assessment && (
+                <p style={{ color: COLORS.text, fontSize: 12, lineHeight: 1.5, margin: "0 0 8px" }}>
+                  {finding.assessment}
+                </p>
+              )}
+              {finding.security_relevance && (
+                <p style={{ color: COLORS.textDim, fontSize: 12, lineHeight: 1.5, margin: "0 0 10px" }}>
+                  {finding.security_relevance}
+                </p>
+              )}
+
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: COLORS.textMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>
+                  {promotedPathIds.length > 0 ? "Promoted attack path" : "Not promoted to attack path"}
+                </div>
+                {promotedPathIds.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {promotedPathIds.map((pathId) => (
+                      <span
+                        key={`${finding.id || index}-promoted-${pathId}`}
+                        style={{
+                          color: COLORS.high,
+                          background: COLORS.highBg,
+                          border: `1px solid ${COLORS.high}33`,
+                          borderRadius: 4,
+                          padding: "2px 6px",
+                          fontSize: 11,
+                          lineHeight: 1.35,
+                          wordBreak: "break-word",
+                          fontFamily: "'JetBrains Mono', monospace",
+                        }}
+                      >
+                        {pathId}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: COLORS.textDim, fontSize: 12, lineHeight: 1.45 }}>
+                    {finding.reason_not_attack_path || "No internal transition was validated from this public entrypoint."}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontSize: 10, color: COLORS.textMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 6 }}>
+                  Coverage needed
+                </div>
+                {coverageNeeded.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {coverageNeeded.map((item, itemIndex) => (
+                      <span
+                        key={`${finding.id || index}-coverage-${itemIndex}`}
+                        style={{
+                          color: COLORS.medium,
+                          background: COLORS.mediumBg,
+                          border: `1px solid ${COLORS.medium}33`,
+                          borderRadius: 4,
+                          padding: "2px 6px",
+                          fontSize: 11,
+                          lineHeight: 1.35,
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {publicExposureDisplayValue(item, "coverage item")}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: COLORS.textMuted, fontSize: 12 }}>No additional coverage listed.</div>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // ─── Phase Views ───
 // ═══════════════════════════════════════════════════════════════════
 
 // ─── Audit/Exploit View (extracted from original App) ───
-function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, tab, setTab, selectedNode, setSelectedNode, searchQuery, setSearchQuery, activeSeverities, handleToggleSeverity, activeCategories, handleToggleCategory, sortMode, setSortMode, activeStatPanel, handleStatClick }) {
+function AuditExploitView({ data, controlsData, filteredPaths, selectedPath, setSelectedPath, tab, setTab, selectedNode, setSelectedNode, searchQuery, setSearchQuery, sortMode, setSortMode, activeStatPanel, handleStatClick, isNarrow }) {
   const summary = data?.summary || {};
   const isExploit = data?.source === "exploit";
+  const rawAttackPathCount = data.attack_paths?.length || 0;
+  const attackPathGroupCount = data.attack_path_groups?.length || rawAttackPathCount;
   // Run status: absent/undefined treated as "complete" — backward compat with pre-status runs
   const runStatus = data?.runStatus || "complete";
   const isIncomplete = runStatus === "partial" || runStatus === "failed";
@@ -1563,10 +2262,10 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
   return (
     <>
       {/* Stats Row */}
-      <div style={{ display: "flex", gap: 12, padding: "16px 24px", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 12, padding: isNarrow ? "12px" : "16px 24px", flexWrap: "wrap" }}>
         {isExploit ? (
           <>
-            <StatCard label="Attack Paths" value={data.attack_paths?.length || 0} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
+            <StatCard label="Attack Paths" value={rawAttackPathCount} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
             <StatCard label="Persistence" value={summary.persistence_techniques ?? 0} color={COLORS.critical} />
             <StatCard label="Exfiltration" value={summary.exfiltration_vectors ?? 0} color={COLORS.high} />
             <StatCard label="Highest Priv" value={summary.highest_priv || "N/A"} color={COLORS.text} />
@@ -1579,25 +2278,34 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
             <StatCard label="Trust Relationships" value={summary.total_trust_relationships ?? 0} subtext={`${summary.cross_account_trusts || 0} cross-account / ${summary.service_trusts || 0} service / ${summary.same_account_trusts || 0} same-account`} active={activeStatPanel === "trusts"} onClick={() => handleStatClick("trusts")} />
             <StatCard label="Wildcard Trusts" value={summary.wildcard_trust_policies ?? 0} color={(summary.wildcard_trust_policies ?? 0) > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "wildcards"} onClick={() => handleStatClick("wildcards")} />
             <StatCard label="Critical PrivEsc" value={summary.critical_priv_esc_risks ?? 0} color={(summary.critical_priv_esc_risks ?? 0) > 0 ? COLORS.critical : COLORS.low} active={activeStatPanel === "privesc"} onClick={() => handleStatClick("privesc")} />
-            <StatCard label="Attack Paths" value={data.attack_paths?.length || 0} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
+            <StatCard label="Attack Groups" value={attackPathGroupCount} subtext={`${rawAttackPathCount} raw paths`} color={COLORS.accent} active={activeStatPanel === "paths"} onClick={() => handleStatClick("paths")} />
           </>
         )}
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0, overflow: "hidden" }}>
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: isNarrow ? "column" : "row",
+        padding: isNarrow ? "0 12px 12px" : "0 24px 24px",
+        gap: isNarrow ? 12 : 16,
+        minHeight: 0,
+        overflow: isNarrow ? "auto" : "hidden",
+      }}>
         {/* Left: Attack Paths List */}
-        <div style={{ width: 320, minWidth: 280, display: "flex", flexDirection: "column", opacity: (isIncomplete && !data?.attack_paths?.length) ? 0.6 : 1 }}>
+        <div style={{
+          width: isNarrow ? "100%" : 320,
+          minWidth: 0,
+          maxHeight: isNarrow ? 360 : "none",
+          display: "flex",
+          flexDirection: "column",
+          opacity: (isIncomplete && !data?.attack_paths?.length) ? 0.6 : 1,
+        }}>
           <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 600, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Attack Paths
+            {data.attack_path_groups?.length ? "Attack Path Groups" : "Attack Paths"}
           </div>
 
-          <div style={{ marginBottom: 8 }}>
-            <SeverityFilter activeSeverities={activeSeverities} onToggle={handleToggleSeverity} />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <CategoryFilter activeCategories={activeCategories} onToggle={handleToggleCategory} />
-          </div>
           <div style={{ marginBottom: 8 }}>
             <input
               type="text"
@@ -1679,9 +2387,9 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
         </div>
 
         {/* Center: Graph / Detail toggle */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: isNarrow ? 520 : 0 }}>
           <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
-            {["graph", "detail"].map((t) => (
+            {["graph", "detail", ...(isExploit ? [] : ["public"])].map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -1692,7 +2400,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
                   cursor: "pointer", fontSize: 12, fontWeight: 600, textTransform: "uppercase",
                 }}
               >
-                {t === "graph" ? "Attack Graph" : "Path Detail"}
+                {t === "graph" ? "Attack Graph" : t === "detail" ? "Path Detail" : "Public Exposure"}
               </button>
             ))}
             {/* Amber warning badge — only shown for partial or failed runs */}
@@ -1724,6 +2432,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
                     <AttackGraph
                       ref={graphRef}
                       data={data}
+                      paths={displayedPaths}
                       selectedPath={selectedPath}
                       onNodeClick={setSelectedNode}
                       onDeselect={handleDeselect}
@@ -1745,6 +2454,7 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
                       <NodeDetailPanel
                         node={selectedNode}
                         data={data}
+                        graphPaths={displayedPaths}
                         selectedPath={selectedPath}
                         onSelectPath={(p) => { setSelectedPath(p); setTab("detail"); }}
                         onClose={() => setSelectedNode(null)}
@@ -1753,11 +2463,17 @@ function AuditExploitView({ data, filteredPaths, selectedPath, setSelectedPath, 
                   </>
                 )}
               </>
-            ) : (
-              selectedPath ? <PathDetail path={selectedPath} /> : <div style={{
+            ) : tab === "detail" ? (
+              selectedPath ? <PathDetail path={selectedPath} controlsData={controlsData} /> : <div style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 height: "100%", color: COLORS.textDim, fontSize: 13, opacity: 0.6,
               }}>Select an attack path to view details</div>
+            ) : (
+              <PublicExposureFindingsSection
+                findings={data.public_exposure_findings || []}
+                isNarrow={isNarrow}
+                embedded
+              />
             )}
           </div>
         </div>
@@ -1791,23 +2507,250 @@ function formatJSON(obj) {
   }
 }
 
-function PolicyViewer({ scps, rcps }) {
-  const [expandedIdx, setExpandedIdx] = useState(null);
-  const allPolicies = [
-    ...(scps || []).map((p) => ({ ...p, policyType: "SCP" })),
-    ...(rcps || []).map((p) => ({ ...p, policyType: "RCP" })),
-  ];
+function severityColorFor(severity = "medium") {
+  const key = String(severity).toLowerCase();
+  return {
+    critical: COLORS.critical,
+    high: COLORS.high,
+    medium: COLORS.medium,
+    low: COLORS.low,
+    info: COLORS.textDim,
+  }[key] || COLORS.medium;
+}
 
-  if (allPolicies.length === 0) {
-    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No policies generated.</div>;
+function renderInlineMarkdown(text = "") {
+  const parts = String(text).split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter((part) => part !== "");
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code key={index} style={{
+          color: "#bfdbfe",
+          background: "#0d1117",
+          border: `1px solid ${COLORS.border}`,
+          borderRadius: 4,
+          padding: "1px 4px",
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: "0.92em",
+        }}>{part.slice(1, -1)}</code>
+      );
+    }
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index} style={{ color: COLORS.text, fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
+function splitMarkdownTableLine(line) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function parseMarkdownRows(markdown) {
+  const lines = String(markdown || "").split("\n");
+  const rows = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (line.includes("|") && lines[index + 1] && isMarkdownTableSeparator(lines[index + 1])) {
+      const headers = splitMarkdownTableLine(line);
+      const body = [];
+      index += 2;
+      while (index < lines.length && lines[index].includes("|")) {
+        body.push(splitMarkdownTableLine(lines[index]));
+        index += 1;
+      }
+      rows.push({ type: "table", headers, body });
+      continue;
+    }
+
+    if (trimmed.startsWith("- ")) {
+      const items = [];
+      while (index < lines.length && lines[index].trim().startsWith("- ")) {
+        items.push(lines[index].trim().slice(2));
+        index += 1;
+      }
+      rows.push({ type: "list", items });
+      continue;
+    }
+
+    if (!trimmed) rows.push({ type: "space" });
+    else if (trimmed === "---") rows.push({ type: "hr" });
+    else if (line.startsWith("# ")) rows.push({ type: "h2", text: line.slice(2) });
+    else if (line.startsWith("## ")) rows.push({ type: "h3", text: line.slice(3) });
+    else if (line.startsWith("### ")) rows.push({ type: "h4", text: line.slice(4) });
+    else rows.push({ type: "p", text: line });
+    index += 1;
+  }
+  return rows;
+}
+
+function MarkdownTable({ row }) {
+  return (
+    <div style={{ overflowX: "auto", margin: "10px 0 14px" }}>
+      <table style={{
+        width: "100%",
+        borderCollapse: "collapse",
+        fontSize: 12,
+        color: COLORS.textDim,
+      }}>
+        <thead>
+          <tr>
+            {row.headers.map((header, index) => (
+              <th key={index} style={{
+                textAlign: "left",
+                color: COLORS.text,
+                borderBottom: `1px solid ${COLORS.border}`,
+                padding: "7px 8px",
+                background: "#0d1117",
+              }}>{renderInlineMarkdown(header)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {row.body.map((cells, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.headers.map((_, cellIndex) => (
+                <td key={cellIndex} style={{
+                  borderBottom: `1px solid ${COLORS.border}`,
+                  padding: "7px 8px",
+                  verticalAlign: "top",
+                  lineHeight: 1.45,
+                  wordBreak: "break-word",
+                }}>{renderInlineMarkdown(cells[cellIndex] || "")}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MarkdownBlock({ markdown }) {
+  if (!markdown) return null;
+  const rows = parseMarkdownRows(markdown);
+  return (
+    <div style={{
+      background: COLORS.bgCard,
+      border: `1px solid ${COLORS.border}`,
+      borderRadius: 8,
+      padding: 16,
+      maxHeight: 520,
+      overflow: "auto",
+    }}>
+      {rows.map((row, index) => {
+        if (row.type === "h2") return <h2 key={index} style={{ color: COLORS.text, fontSize: 18, margin: "18px 0 10px" }}>{renderInlineMarkdown(row.text)}</h2>;
+        if (row.type === "h3") return <h3 key={index} style={{ color: COLORS.text, fontSize: 15, margin: "16px 0 8px" }}>{renderInlineMarkdown(row.text)}</h3>;
+        if (row.type === "h4") return <h4 key={index} style={{ color: COLORS.text, fontSize: 13, margin: "14px 0 6px" }}>{renderInlineMarkdown(row.text)}</h4>;
+        if (row.type === "list") {
+          return (
+            <ul key={index} style={{ margin: "6px 0 10px 18px", padding: 0 }}>
+              {row.items.map((item, itemIndex) => (
+                <li key={itemIndex} style={{ color: COLORS.textDim, fontSize: 12, lineHeight: 1.55, marginBottom: 4, wordBreak: "break-word" }}>
+                  {renderInlineMarkdown(item)}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        if (row.type === "table") return <MarkdownTable key={index} row={row} />;
+        if (row.type === "hr") return <hr key={index} style={{ border: "none", borderTop: `1px solid ${COLORS.border}`, margin: "14px 0" }} />;
+        if (row.type === "space") return <div key={index} style={{ height: 8 }} />;
+        return <p key={index} style={{ color: COLORS.textDim, fontSize: 12, lineHeight: 1.55, margin: "4px 0", wordBreak: "break-word" }}>{renderInlineMarkdown(row.text)}</p>;
+      })}
+    </div>
+  );
+}
+
+function SplBlock({ spl }) {
+  const lines = formatSplForDisplay(spl);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
+      <pre style={{
+        flex: 1,
+        background: "rgba(6,182,212,0.08)",
+        border: `1px solid rgba(6,182,212,0.2)`,
+        borderRadius: 6,
+        padding: "10px 12px",
+        fontSize: 11,
+        color: "#67e8f9",
+        fontFamily: "'JetBrains Mono', monospace",
+        margin: 0,
+        whiteSpace: "pre-wrap",
+        overflow: "auto",
+        maxHeight: 240,
+        lineHeight: 1.55,
+        wordBreak: "break-word",
+      }}>{lines.join("\n")}</pre>
+      <CopyButton text={spl} />
+    </div>
+  );
+}
+
+function DetectionMetadata({ rule }) {
+  const blocks = [
+    ["Objective", rule.objective],
+    ["Fidelity", rule.fidelity_rationale],
+    ["Tuning", rule.tuning_guidance],
+    ["Expected Volume", rule.expected_volume],
+    ["Validation", rule.validation_status],
+  ].filter(([, value]) => value);
+  const listBlocks = [
+    ["Noise Controls", rule.noise_controls],
+    ["Coverage Caveats", rule.coverage_caveats],
+    ["Covered Hops", rule.covered_hops],
+    ["Source Attack Paths", rule.source_attack_paths],
+    ["Source Public Exposure Findings", rule.source_public_exposure_findings],
+  ].filter(([, value]) => Array.isArray(value) && value.length > 0);
+
+  if (blocks.length === 0 && listBlocks.length === 0) return null;
+
+  return (
+    <div style={{
+      marginTop: 10,
+      display: "grid",
+      gap: 8,
+      fontSize: 12,
+      lineHeight: 1.5,
+    }}>
+      {blocks.map(([label, value]) => (
+        <div key={label} style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>{label}</div>
+          <div style={{ color: COLORS.text, wordBreak: "break-word" }}>{value}</div>
+        </div>
+      ))}
+      {listBlocks.map(([label, values]) => (
+        <div key={label} style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 5 }}>{label}</div>
+          <ul style={{ margin: "0 0 0 16px", padding: 0 }}>
+            {values.map((value, index) => (
+              <li key={index} style={{ color: COLORS.text, marginBottom: 3, wordBreak: "break-word" }}>{value}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrgWideIssuesList({ issues }) {
+  const [expandedIdx, setExpandedIdx] = useState(null);
+
+  if (!issues?.length) {
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No org-wide issues identified.</div>;
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {allPolicies.map((policy, i) => {
+      {issues.map((issue, i) => {
         const isExpanded = expandedIdx === i;
-        const blastColor = policy.impact_analysis?.blast_radius === "high" ? COLORS.critical
-          : policy.impact_analysis?.blast_radius === "medium" ? COLORS.high : COLORS.low;
+        const severityColor = severityColorFor(issue.severity || "medium");
 
         return (
           <div key={i} style={{
@@ -1819,23 +2762,24 @@ function PolicyViewer({ scps, rcps }) {
               style={{
                 padding: "12px 16px", cursor: "pointer", display: "flex",
                 justifyContent: "space-between", alignItems: "center",
+                gap: 12, minWidth: 0,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
                 <span style={{
                   fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4,
-                  background: policy.policyType === "SCP" ? COLORS.highBg : COLORS.mediumBg,
-                  color: policy.policyType === "SCP" ? COLORS.high : COLORS.medium,
-                }}>{policy.policyType}</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} title={policy.name}>{policy.name}</span>
+                  background: severityColor + "18",
+                  color: severityColor,
+                }}>{issue.severity || "medium"}</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} title={issue.name}>{issue.name}</span>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <span style={{
                   fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                  color: blastColor, background: blastColor + "18",
+                  color: COLORS.accent, background: COLORS.accent + "18",
                   textTransform: "uppercase",
                 }}>
-                  {policy.impact_analysis?.blast_radius || "unknown"} blast
+                  {issue.scope || "unknown"}
                 </span>
                 <span style={{ color: COLORS.textDim, fontSize: 12 }}>{isExpanded ? "\u25B2" : "\u25BC"}</span>
               </div>
@@ -1843,29 +2787,20 @@ function PolicyViewer({ scps, rcps }) {
 
             {isExpanded && (
               <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${COLORS.border}` }}>
-                {/* Impact Analysis — only show when it has real data */}
-                {policy.impact_analysis && (policy.impact_analysis.prevents?.length > 0 || (policy.impact_analysis.break_glass && policy.impact_analysis.break_glass !== "none")) && (
+                {issue.evidence?.length > 0 && (
                   <div style={{ marginTop: 12, marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 6 }}>Impact Analysis</div>
-                    {policy.impact_analysis.prevents?.length > 0 && (
-                      <div style={{ fontSize: 12, color: COLORS.text, marginBottom: 4 }}>
-                        <span style={{ color: COLORS.textDim }}>Prevents: </span>{policy.impact_analysis.prevents.join(", ")}
-                      </div>
-                    )}
-                    {policy.impact_analysis.break_glass && policy.impact_analysis.break_glass !== "none" && (
-                      <div style={{ fontSize: 12, color: COLORS.textDim }}>
-                        Break-glass: {policy.impact_analysis.break_glass}
-                      </div>
-                    )}
+                    <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 6 }}>Evidence</div>
+                    {issue.evidence.map((item, j) => (
+                      <div key={j} style={{ fontSize: 12, color: COLORS.text, marginBottom: 4 }}>{item}</div>
+                    ))}
                   </div>
                 )}
 
-                {/* Source attack paths */}
-                {policy.source_attack_paths?.length > 0 && (
+                {issue.source_attack_paths?.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 4 }}>Source Attack Paths</div>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {policy.source_attack_paths.map((p, j) => (
+                      {issue.source_attack_paths.map((p, j) => (
                         <span key={j} style={{
                           fontSize: 10, color: COLORS.critical, background: COLORS.criticalBg,
                           padding: "2px 8px", borderRadius: 4,
@@ -1875,26 +2810,24 @@ function PolicyViewer({ scps, rcps }) {
                   </div>
                 )}
 
-                {/* Policy JSON */}
-                {policy.policy_json ? (
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
-                      <span style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase" }}>Policy JSON</span>
-                      <CopyButton text={formatJSON(policy.policy_json)} />
+                {issue.source_public_exposure_findings?.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 4 }}>Source Public Exposure Findings</div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {issue.source_public_exposure_findings.map((findingId, j) => (
+                        <span key={j} style={{
+                          fontSize: 10, color: COLORS.high, background: COLORS.highBg,
+                          padding: "2px 8px", borderRadius: 4,
+                        }}>{findingId}</span>
+                      ))}
                     </div>
-                    <pre style={{
-                      background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6,
-                      padding: 12, fontSize: 11, color: "#7ee787", fontFamily: "monospace",
-                      overflow: "auto", maxHeight: 300, margin: 0, whiteSpace: "pre-wrap",
-                    }}>{formatJSON(policy.policy_json)}</pre>
                   </div>
-                ) : (
-                  <div style={{
-                    marginTop: 8, padding: 12, background: "#0d1117",
-                    border: `1px solid ${COLORS.border}`, borderRadius: 6,
-                    fontSize: 12, color: COLORS.textDim,
-                  }}>
-                    Policy JSON not embedded in results. See <span style={{ color: COLORS.accent, fontFamily: "monospace" }}>{policy.name}.json</span> in the run directory's <span style={{ fontFamily: "monospace" }}>policies/</span> folder.
+                )}
+
+                {(issue.widespread_rationale || issue.recommended_next_step) && (
+                  <div style={{ marginTop: 8, padding: 12, background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12, color: COLORS.textDim }}>
+                    {issue.widespread_rationale && <div style={{ marginBottom: 8 }}><span style={{ color: COLORS.text }}>Rationale: </span>{issue.widespread_rationale}</div>}
+                    {issue.recommended_next_step && <div><span style={{ color: COLORS.text }}>Next step: </span>{issue.recommended_next_step}</div>}
                   </div>
                 )}
               </div>
@@ -1943,9 +2876,9 @@ function DetectionRulesList({ detections }) {
                   background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
                   borderRadius: 8, padding: 14, marginBottom: 8,
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={rule.name}>{displayName}</span>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", flexShrink: 0, maxWidth: "45%" }}>
                       {detType && <span style={{
                         fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8,
                         color: detType === "composite" ? "#c084fc" : "#67e8f9",
@@ -1968,15 +2901,7 @@ function DetectionRulesList({ detections }) {
                     </div>
                   </div>
                   {rule.spl ? (
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
-                      <pre style={{
-                        flex: 1, background: "rgba(6,182,212,0.08)", border: `1px solid rgba(6,182,212,0.2)`,
-                        borderRadius: 6, padding: "8px 12px", fontSize: 11,
-                        color: "#67e8f9", fontFamily: "monospace", margin: 0,
-                        whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 200,
-                      }}>{rule.spl}</pre>
-                      <CopyButton text={rule.spl} />
-                    </div>
+                    <SplBlock spl={rule.spl} />
                   ) : (
                     <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                       {rule.paths_covered != null && (
@@ -1985,16 +2910,220 @@ function DetectionRulesList({ detections }) {
                         </span>
                       )}
                       <span style={{ fontSize: 11, color: COLORS.textMuted, fontStyle: "italic" }}>
-                        SPL query in technical-remediation.md
+                        SPL query not embedded.
                       </span>
                     </div>
                   )}
+                  <DetectionMetadata rule={rule} />
                 </div>
               );
             })}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function MonitoringIdeasList({ ideas }) {
+  if (!ideas?.length) {
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No monitoring dashboard ideas generated.</div>;
+  }
+
+  const asList = (value) => Array.isArray(value) ? value : [];
+  const ideaTypeLabel = (type = "monitoring_dashboard") => String(type).replace(/_/g, " ");
+
+  const renderChips = (values, color = COLORS.textDim) => (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", minWidth: 0 }}>
+      {values.map((value, index) => (
+        <span key={index} style={{
+          fontSize: 10,
+          color,
+          background: color + "18",
+          borderRadius: 4,
+          padding: "2px 8px",
+          wordBreak: "break-word",
+        }}>{value}</span>
+      ))}
+    </div>
+  );
+
+  const renderTextBlock = (label, value) => value ? (
+    <div style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+      <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>{label}</div>
+      <div style={{ color: COLORS.text, fontSize: 12, lineHeight: 1.5, wordBreak: "break-word" }}>{value}</div>
+    </div>
+  ) : null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {ideas.map((idea, i) => {
+        const sevCfg = SEVERITY_CONFIG[idea.severity] || SEVERITY_CONFIG.medium;
+        const requiredSources = asList(idea.required_data_sources);
+        const promotionTriggers = asList(idea.promotion_triggers);
+        const sourceExposureFindings = asList(idea.source_public_exposure_findings);
+        const panels = asList(idea.suggested_panels);
+
+        return (
+          <div key={i} style={{
+            background: COLORS.bgCard,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 8,
+            padding: 14,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={idea.name}>
+                  {idea.name || "Unnamed monitoring idea"}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 8,
+                    color: COLORS.accent,
+                    background: COLORS.accent + "18",
+                    textTransform: "uppercase",
+                  }}>{ideaTypeLabel(idea.type)}</span>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 8,
+                    color: sevCfg.color,
+                    background: sevCfg.bg,
+                    textTransform: "uppercase",
+                  }}>{idea.severity || "medium"}</span>
+                </div>
+              </div>
+              {(idea.refresh_cadence || idea.owner) && (
+                <div style={{ display: "grid", gap: 4, justifyItems: "end", flexShrink: 0 }}>
+                  {idea.refresh_cadence && <span style={{ fontSize: 10, color: COLORS.medium, background: COLORS.mediumBg, borderRadius: 4, padding: "2px 8px", textTransform: "uppercase" }}>{idea.refresh_cadence}</span>}
+                  {idea.owner && <span style={{ fontSize: 10, color: COLORS.textDim, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={idea.owner}>{idea.owner}</span>}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gap: 8 }}>
+              {renderTextBlock("Objective", idea.objective)}
+              {renderTextBlock("Why Dashboard Not Detection", idea.why_dashboard_not_detection)}
+
+              {requiredSources.length > 0 && (
+                <div style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+                  <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 5 }}>Required Data Sources</div>
+                  {renderChips(requiredSources, COLORS.detection)}
+                </div>
+              )}
+
+              {sourceExposureFindings.length > 0 && (
+                <div style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+                  <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 5 }}>Source Public Exposure Findings</div>
+                  {renderChips(sourceExposureFindings, COLORS.high)}
+                </div>
+              )}
+
+              {panels.length > 0 && (
+                <div style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+                  <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 8 }}>Suggested Panels</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {panels.map((panel, panelIndex) => (
+                      <div key={panelIndex} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px", minWidth: 0 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+                          <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 600, wordBreak: "break-word", minWidth: 0 }}>{panel.title || "Untitled panel"}</div>
+                          {panel.visualization && <span style={{ color: COLORS.textDim, fontSize: 10, textTransform: "uppercase", flexShrink: 0 }}>{panel.visualization}</span>}
+                        </div>
+                        {panel.question && <div style={{ color: COLORS.textDim, fontSize: 12, lineHeight: 1.45, marginBottom: 6, wordBreak: "break-word" }}>{panel.question}</div>}
+                        {asList(panel.fields).length > 0 && renderChips(asList(panel.fields), COLORS.low)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {promotionTriggers.length > 0 && (
+                <div style={{ background: "#0d1117", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px" }}>
+                  <div style={{ color: COLORS.textDim, fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 5 }}>Promotion Triggers</div>
+                  <ul style={{ margin: "0 0 0 16px", padding: 0 }}>
+                    {promotionTriggers.map((trigger, index) => (
+                      <li key={index} style={{ color: COLORS.text, fontSize: 12, lineHeight: 1.5, marginBottom: 3, wordBreak: "break-word" }}>{trigger}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PolicyReplacementsList({ replacements }) {
+  if (!replacements?.length) {
+    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No policy replacements generated.</div>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {replacements.map((policy, i) => (
+        <div key={i} style={{
+          background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
+          borderRadius: 8, padding: 14,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={policy.role_name}>
+                {policy.role_name || "Unknown role"}
+              </div>
+              {policy.original_policy_arn && (
+                <div style={{ fontSize: 10, color: COLORS.textDim, fontFamily: "monospace", wordBreak: "break-word", marginTop: 4 }}>
+                  {policy.original_policy_arn}
+                </div>
+              )}
+            </div>
+            {policy.file && (
+              <span style={{
+                fontSize: 10, color: COLORS.accent, background: COLORS.accent + "18",
+                borderRadius: 4, padding: "2px 8px", fontFamily: "monospace",
+                maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0,
+              }} title={policy.file}>{policy.file}</span>
+            )}
+          </div>
+
+          {policy.staleness_reasoning && (
+            <div style={{ fontSize: 12, color: COLORS.textDim, lineHeight: 1.5, marginBottom: 8 }}>
+              <span style={{ color: COLORS.text }}>Reasoning: </span>{policy.staleness_reasoning}
+            </div>
+          )}
+          {policy.boundary_considerations && (
+            <div style={{ fontSize: 12, color: COLORS.textDim, lineHeight: 1.5, marginBottom: 8 }}>
+              <span style={{ color: COLORS.text }}>Boundary considerations: </span>{policy.boundary_considerations}
+            </div>
+          )}
+          {policy.source_attack_paths?.length > 0 && (
+            <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
+              {policy.source_attack_paths.map((p, j) => (
+                <span key={j} style={{
+                  fontSize: 9, color: COLORS.critical, background: COLORS.criticalBg,
+                  padding: "1px 6px", borderRadius: 4,
+                }}>{p}</span>
+              ))}
+            </div>
+          )}
+          {policy.replacement_policy_json && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 4, marginTop: 10 }}>
+              <pre style={{
+                flex: 1, background: "#0d1117", border: `1px solid ${COLORS.border}`,
+                borderRadius: 6, padding: "8px 12px", fontSize: 11,
+                color: COLORS.text, fontFamily: "monospace", margin: 0,
+                whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 220,
+              }}>{formatJSON(policy.replacement_policy_json)}</pre>
+              <CopyButton text={formatJSON(policy.replacement_policy_json)} />
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -2058,9 +3187,17 @@ function ControlsMatrix({ controls }) {
 function PrioritizationSidebar({ items, onScrollTo }) {
   if (!items?.length) return null;
 
-  const catColors = { scp: COLORS.high, rcp: COLORS.medium, detection: COLORS.detection, control: COLORS.low };
+  const catColors = {
+    policy: COLORS.high,
+    policy_replacement: COLORS.high,
+    detection: COLORS.detection,
+    remediation: COLORS.low,
+    control: COLORS.low,
+    org_wide: COLORS.accent,
+  };
   const riskColors = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low };
   const effortColors = { low: COLORS.low, medium: COLORS.high, high: COLORS.critical };
+  const displayCategory = (category) => catColors[category] ? category : "remediation";
 
   return (
     <div style={{ width: 320, minWidth: 280, overflowY: "auto" }}>
@@ -2098,10 +3235,10 @@ function PrioritizationSidebar({ items, onScrollTo }) {
             }}>{item.effort} effort</span>
             <span style={{
               fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
-              color: catColors[item.category] || COLORS.textDim,
-              background: (catColors[item.category] || COLORS.textDim) + "18",
+              color: catColors[displayCategory(item.category)] || COLORS.textDim,
+              background: (catColors[displayCategory(item.category)] || COLORS.textDim) + "18",
               textTransform: "uppercase",
-            }}>{item.category}</span>
+            }}>{displayCategory(item.category)}</span>
           </div>
         </div>
       ))}
@@ -2109,203 +3246,31 @@ function PrioritizationSidebar({ items, onScrollTo }) {
   );
 }
 
-// ─── Executive Summary View ───
-function ExecutiveSummaryView({ data }) {
-  const exec = data?.executive_summary;
-  const summary = data?.summary || {};
-  const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[summary.risk_score] || COLORS.text;
-
-  if (!exec) {
-    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No executive summary data available. Re-run controls to generate.</div>;
-  }
-
-  return (
-    <div style={{ padding: 20, maxWidth: 900 }}>
-      {/* Risk Posture */}
-      <div style={{
-        background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-        padding: 20, marginBottom: 16,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-          <span style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>Risk Posture</span>
-          {summary.risk_score && (
-            <span style={{
-              fontSize: 12, fontWeight: 700, padding: "3px 12px", borderRadius: 6,
-              color: riskColor, background: riskColor + "18",
-            }}>{summary.risk_score}</span>
-          )}
-        </div>
-        <p style={{ color: COLORS.text, fontSize: 14, lineHeight: 1.6, margin: 0 }}>{exec.risk_posture}</p>
-      </div>
-
-      {/* Category Breakdown */}
-      {exec.category_breakdown?.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Category Breakdown</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-            {exec.category_breakdown.map((cat, i) => {
-              const sevCfg = SEVERITY_CONFIG[cat.severity] || SEVERITY_CONFIG.medium;
-              return (
-                <div key={i} style={{
-                  background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-                  padding: 12, borderLeft: `3px solid ${sevCfg.color}`,
-                }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={cat.category}>{cat.category}</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 22, fontWeight: 700, color: sevCfg.color, fontFamily: "monospace" }}>{cat.count}</span>
-                    <span style={{ fontSize: 10, color: sevCfg.color, textTransform: "uppercase", fontWeight: 600 }}>{cat.severity}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Quick Wins */}
-      {exec.quick_wins?.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Top Quick Wins</div>
-          {exec.quick_wins.map((qw, i) => (
-            <div key={i} style={{
-              background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-              padding: 14, marginBottom: 8, display: "flex", gap: 12, alignItems: "flex-start",
-            }}>
-              <span style={{
-                minWidth: 28, height: 28, borderRadius: "50%", background: COLORS.accent + "18",
-                color: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 13, fontWeight: 700,
-              }}>{qw.rank}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 4 }}>{qw.action}</div>
-                <div style={{ fontSize: 12, color: COLORS.textDim, lineHeight: 1.4 }}>{qw.impact}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Remediation Timeline */}
-      {exec.remediation_timeline && (
-        <div>
-          <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Remediation Timeline</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-            {[
-              { key: "this_week", label: "This Week", color: COLORS.critical },
-              { key: "this_month", label: "This Month", color: COLORS.high },
-              { key: "this_quarter", label: "This Quarter", color: COLORS.medium },
-            ].map(({ key, label, color }) => (
-              <div key={key} style={{
-                background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-                padding: 14, borderTop: `3px solid ${color}`,
-              }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color, marginBottom: 8, textTransform: "uppercase" }}>{label}</div>
-                {(exec.remediation_timeline[key] || []).map((item, i) => (
-                  <div key={i} style={{ fontSize: 12, color: COLORS.text, marginBottom: 6, lineHeight: 1.4, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <span style={{ color: COLORS.textDim, flexShrink: 0 }}>{"\u2022"}</span>
-                    <span>{item}</span>
-                  </div>
-                ))}
-                {(!exec.remediation_timeline[key] || exec.remediation_timeline[key].length === 0) && (
-                  <div style={{ fontSize: 11, color: COLORS.textMuted }}>None</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Technical Recommendations View ───
-function TechnicalRecommendationsView({ data }) {
-  const tech = data?.technical_recommendations;
-  if (!tech?.attack_path_bundles?.length) {
-    return <div style={{ color: COLORS.textDim, fontSize: 13, padding: 20 }}>No technical recommendations data available. Re-run controls to generate.</div>;
-  }
-
-  return (
-    <div style={{ padding: 20, maxWidth: 900 }}>
-      <div style={{ fontSize: 11, color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
-        Attack Path Remediation Bundles
-      </div>
-      {tech.attack_path_bundles.map((bundle, i) => {
-        const sevCfg = SEVERITY_CONFIG[bundle.severity] || SEVERITY_CONFIG.medium;
-        return (
-          <div key={i} style={{
-            background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-            padding: 16, marginBottom: 12, borderLeft: `3px solid ${sevCfg.color}`,
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }} title={bundle.attack_path}>{bundle.attack_path}</span>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8,
-                  color: sevCfg.color, background: sevCfg.bg, textTransform: "uppercase",
-                }}>{bundle.severity}</span>
-                {bundle.classification && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
-                    color: bundle.classification === "systemic" ? COLORS.critical : COLORS.textDim,
-                    background: bundle.classification === "systemic" ? COLORS.criticalBg : COLORS.bgCardHover,
-                    textTransform: "uppercase",
-                  }}>{bundle.classification}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Source runs */}
-            {bundle.source_run_ids?.length > 0 && (
-              <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 10, fontFamily: "monospace" }}>
-                Source: {bundle.source_run_ids.join(", ")}
-              </div>
-            )}
-
-            {/* Remediation links */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-              {[
-                { items: bundle.scp_names, label: "SCPs", color: COLORS.high },
-                { items: bundle.rcp_names, label: "RCPs", color: COLORS.medium },
-                { items: bundle.detection_names, label: "Detections", color: COLORS.detection },
-                { items: bundle.control_names, label: "Controls", color: COLORS.low },
-              ].filter(({ items }) => items?.length > 0).map(({ items, label, color }) => (
-                <div key={label}>
-                  <div style={{ fontSize: 10, color, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>{label}</div>
-                  {items.map((name, j) => (
-                    <div key={j} style={{
-                      fontSize: 11, color: COLORS.text, background: color + "0d", border: `1px solid ${color}22`,
-                      borderRadius: 4, padding: "4px 8px", marginBottom: 4,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }} title={name}>{name}</div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ControlsView({ data }) {
-  const [controlsTab, setControlsTab] = useState(data?.executive_summary ? "executive" : "policies");
+function ControlsView({ data, isNarrow }) {
+  const [controlsTab, setControlsTab] = useState("org-wide");
   const summary = data?.summary || {};
 
   return (
     <>
       {/* Stats Row — cards switch to the corresponding tab */}
-      <div style={{ display: "flex", gap: 12, padding: "16px 24px", flexWrap: "wrap" }}>
-        <StatCard label="SCPs" value={summary.scps_generated ?? data.scps?.length ?? 0} color={COLORS.high} onClick={() => setControlsTab("policies")} active={controlsTab === "policies"} />
-        <StatCard label="RCPs" value={summary.rcps_generated ?? data.rcps?.length ?? 0} color={COLORS.medium} onClick={() => setControlsTab("policies")} active={controlsTab === "policies"} />
+      <div style={{ display: "flex", gap: 12, padding: isNarrow ? "12px" : "16px 24px", flexWrap: "wrap" }}>
+        <StatCard label="Org-Wide" value={summary.org_wide_issues ?? data.org_wide_issues?.length ?? 0} color={COLORS.high} onClick={() => setControlsTab("org-wide")} active={controlsTab === "org-wide"} />
         <StatCard label="Detections" value={summary.detections_generated ?? data.detections?.length ?? 0} color={COLORS.detection} onClick={() => setControlsTab("detections")} active={controlsTab === "detections"} />
+        <StatCard label="Monitoring" value={summary.dashboards ?? data.dashboards?.length ?? 0} color={COLORS.accent} onClick={() => setControlsTab("dashboards")} active={controlsTab === "dashboards"} />
+        <StatCard label="Policies" value={summary.policy_replacements ?? data.policy_replacements?.length ?? 0} color={COLORS.medium} onClick={() => setControlsTab("policies")} active={controlsTab === "policies"} />
         <StatCard label="Remediation" value={summary.remediation_items ?? summary.controls_recommended ?? 0} color={COLORS.low} onClick={() => setControlsTab("remediation")} active={controlsTab === "remediation"} />
-        <StatCard label="Quick Wins" value={summary.quick_wins ?? 0} color={COLORS.accent} onClick={() => setControlsTab("executive")} active={controlsTab === "executive"} />
       </div>
 
       {/* Main Content: Sidebar + Tabbed Center */}
-      <div style={{ flex: 1, display: "flex", padding: "0 24px 24px", gap: 16, minHeight: 0, overflow: "hidden" }}>
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: isNarrow ? "column" : "row",
+        padding: isNarrow ? "0 12px 12px" : "0 24px 24px",
+        gap: isNarrow ? 12 : 16,
+        minHeight: 0,
+        overflow: isNarrow ? "auto" : "hidden",
+      }}>
         {/* Prioritization Sidebar — uses legacy prioritization[] array when present */}
         <PrioritizationSidebar items={data.prioritization} />
 
@@ -2313,10 +3278,10 @@ function ControlsView({ data }) {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
             {[
-              { key: "executive", label: "Executive Summary" },
-              { key: "technical", label: "Tech Recommendations" },
-              { key: "policies", label: "Policies" },
+              { key: "org-wide", label: "Org-Wide" },
               { key: "detections", label: "Detections" },
+              { key: "dashboards", label: "Monitoring Ideas" },
+              { key: "policies", label: "Policies" },
               { key: "remediation", label: "Remediation" },
             ].map((t) => (
               <button
@@ -2335,10 +3300,10 @@ function ControlsView({ data }) {
             ))}
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {controlsTab === "executive" && <ExecutiveSummaryView data={data} />}
-            {controlsTab === "technical" && <TechnicalRecommendationsView data={data} />}
-            {controlsTab === "policies" && <PolicyViewer scps={data.scps} rcps={data.rcps} />}
+            {controlsTab === "org-wide" && <OrgWideIssuesList issues={data.org_wide_issues} />}
             {controlsTab === "detections" && <DetectionRulesList detections={data.detections} />}
+            {controlsTab === "dashboards" && <MonitoringIdeasList ideas={data.dashboards} />}
+            {controlsTab === "policies" && <PolicyReplacementsList replacements={data.policy_replacements} />}
             {controlsTab === "remediation" && (
               data.prioritization?.length
                 ? <ControlsMatrix controls={data.prioritization} />
@@ -2348,9 +3313,9 @@ function ControlsView({ data }) {
                       <div style={{ fontSize: 13, marginBottom: 4 }}>
                         <span style={{ color: "#8899aa" }}>Items: </span>{data.remediationItemCount ?? 0}
                       </div>
-                      <div style={{ fontSize: 12, color: "#8899aa", wordBreak: "break-all" }}>
-                        {data.remediationPlanFile}
-                      </div>
+                      {data.remediationPlanMarkdown
+                        ? <MarkdownBlock markdown={data.remediationPlanMarkdown} />
+                        : <div style={{ fontSize: 12, color: "#8899aa", wordBreak: "break-word" }}>{data.remediationPlanFile}</div>}
                     </div>
                   : <div style={{ color: "#8899aa", fontSize: 13, padding: 20 }}>No remediation plan available.</div>
             )}
@@ -2365,21 +3330,59 @@ function ControlsView({ data }) {
 // ─── Main Dashboard ───
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
+  const isNarrow = useIsNarrowViewport();
   const [allData, setAllData] = useState({});  // { audit: {...}, controls: {...}, exploit: {...} }
   const [selectedPath, setSelectedPath] = useState(null);
   const [tab, setTab] = useState("graph");
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activePhase, setActivePhase] = useState("audit");
-  // Run index state — loaded from index.json when available (enables run selector + status)
-  const [runIndex, setRunIndex] = useState([]);  // array of { run_id, source, date, status, file }
+  // Report index state loads from index.json in dev server mode.
+  const [reportIndex, setReportIndex] = useState([]);
+  const hasInlineData = Boolean(window.__SCOPE_INLINE_DATA__);
 
   // Interactive state
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeSeverities, setActiveSeverities] = useState(new Set(["critical", "high", "medium", "low"]));
-  const [activeCategories, setActiveCategories] = useState(new Set(Object.keys(CATEGORY_CONFIG)));
   const [sortMode, setSortMode] = useState("severity");
   const [activeStatPanel, setActiveStatPanel] = useState(null);
+
+  const handleDataLoad = useCallback((json) => {
+    const { data: normalized, source } = normalizeForDashboard(json);
+    setAllData((prev) => ({ ...prev, [source]: normalized }));
+    setActivePhase(source);
+    setSelectedPath(null);
+    setSelectedNode(null);
+    setSearchQuery("");
+    setActiveStatPanel(null);
+  }, []);
+
+  const loadReport = useCallback(async (report) => {
+    if (!report) return;
+    const loaded = {};
+    const entries = [
+      ["audit", report.audit],
+      ["exploit", report.exploit],
+      ["controls", report.controls],
+    ].filter(([, entry]) => entry?.file);
+
+    for (const [fallbackSource, entry] of entries) {
+      const response = await fetch(entry.file);
+      if (!response.ok) continue;
+      const json = await response.json();
+      json._run_status = report.status || "complete";
+      json._dashboard_run_id = report.report_id;
+      const { data: normalized, source } = normalizeForDashboard(json, fallbackSource);
+      loaded[source] = normalized;
+    }
+
+    if (Object.keys(loaded).length === 0) return;
+    setAllData(loaded);
+    setActivePhase(loaded.audit ? "audit" : loaded.exploit ? "exploit" : Object.keys(loaded)[0]);
+    setSelectedPath(null);
+    setSelectedNode(null);
+    setSearchQuery("");
+    setActiveStatPanel(null);
+  }, []);
 
   // DASH-01: Reset view state when switching between phases to prevent blank pages
   useEffect(() => {
@@ -2421,61 +3424,27 @@ export default function App() {
       }
       setAllData((prev) => ({ ...prev, ...loaded }));
     }
-    // Try to load index.json for run selector (only works in dev server mode, not inline HTML)
-    fetch("index.json").then((r) => r.ok ? r.json() : null).then((idx) => {
-      if (idx?.runs?.length) setRunIndex(idx.runs);
-    }).catch(() => { /* index.json not available — inline mode */ });
+    // Try to load index.json for report selector and latest report in dev server mode.
+    if (!hasInlineData) {
+      fetch("index.json").then((r) => r.ok ? r.json() : null).then((idx) => {
+        const reports = reportsFromIndex(idx);
+        if (reports.length > 0) {
+          setReportIndex(reports);
+          loadReport(reports[0]).catch(() => {});
+        }
+      }).catch(() => { /* index.json not available */ });
+    }
     setLoading(false);
-  }, []);
-
-  const handleDataLoad = useCallback((json) => {
-    const { data: normalized, source } = normalizeForDashboard(json);
-    setAllData((prev) => ({ ...prev, [source]: normalized }));
-    setActivePhase(source);
-    setSelectedPath(null);
-    setSelectedNode(null);
-    setSearchQuery("");
-    setActiveStatPanel(null);
-  }, []);
-
-  const handleToggleCategory = useCallback((cat) => {
-    setActiveCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) {
-        if (next.size > 1) next.delete(cat);
-      } else {
-        next.add(cat);
-      }
-      return next;
-    });
-  }, []);
+  }, [loadReport]);
 
   const handleStatClick = useCallback((key) => {
     setActiveStatPanel((prev) => prev === key ? null : key);
   }, []);
 
-  const handleToggleSeverity = useCallback((sev) => {
-    setActiveSeverities((prev) => {
-      const next = new Set(prev);
-      if (next.has(sev)) {
-        if (next.size > 1) next.delete(sev);
-      } else {
-        next.add(sev);
-      }
-      return next;
-    });
-  }, []);
-
   // Filter and sort attack paths
   const filteredPaths = useMemo(() => {
     if (!data?.attack_paths) return [];
-    let paths = data.attack_paths;
-
-    paths = paths.filter((p) => activeSeverities.has(p.severity));
-    paths = paths.filter((p) => {
-      const cat = p.category || "privilege_escalation";
-      return activeCategories.has(cat);
-    });
+    let paths = displayAttackPathItems(data);
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -2496,7 +3465,7 @@ export default function App() {
     }
 
     return paths;
-  }, [data, activeSeverities, activeCategories, searchQuery, sortMode]);
+  }, [data, searchQuery, sortMode]);
 
   // Empty state
   if (loading) return (
@@ -2520,9 +3489,6 @@ export default function App() {
 
   // Get account info from any available data source (for header)
   const anyData = data || Object.values(allData)[0] || {};
-  const summary = data?.summary || {};
-  const riskColor = { critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low }[summary.risk_score] || COLORS.text;
-  const phaseColor = PHASE_CONFIG[activePhase]?.color || COLORS.accent;
 
   return (
     <div style={{
@@ -2533,46 +3499,45 @@ export default function App() {
     }}>
       {/* Header */}
       <div style={{
-        padding: "12px 24px", borderBottom: `1px solid ${COLORS.border}`,
-        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: isNarrow ? "10px 12px" : "12px 24px", borderBottom: `1px solid ${COLORS.border}`,
+        display: "flex", justifyContent: "space-between", alignItems: isNarrow ? "flex-start" : "center",
+        gap: 12, flexWrap: isNarrow ? "wrap" : "nowrap",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 22 }}>{"\uD83D\uDEE1"}</span>
           <div>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>
+            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: 0 }}>
               SCOPE
             </h1>
-            <span style={{ fontSize: 11, color: COLORS.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400, display: "inline-block" }} title={`Account ${anyData.account_id} \u2022 ${anyData.region || "N/A"}`}>
+            <span style={{
+              fontSize: 11,
+              color: COLORS.textDim,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: isNarrow ? "calc(100vw - 88px)" : 400,
+              display: "inline-block",
+            }} title={`Account ${anyData.account_id} \u2022 ${anyData.region || "N/A"}`}>
               Account {anyData.account_id} {"\u2022"} {anyData.region || "N/A"}
-              {Object.keys(allData).length > 0 && <> {"\u2022"} {Object.keys(allData).map((src) => (
-                <span key={src} style={{ color: PHASE_CONFIG[src]?.color || COLORS.accent, marginLeft: 4 }}>{src}</span>
-              ))}</>}
+              <LoadedPhaseSummary allData={allData} />
             </span>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        {!hasInlineData && <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <FileUpload onDataLoad={handleDataLoad} />
-          {(activePhase === "audit" || activePhase === "exploit") && summary.risk_score && (
-            <div style={{
-              padding: "6px 16px", borderRadius: 6, fontWeight: 700, fontSize: 13,
-              background: riskColor + "20", color: riskColor, border: `1px solid ${riskColor}40`,
-            }}>
-              RISK: {summary.risk_score || "N/A"}
-            </div>
-          )}
-        </div>
+        </div>}
       </div>
 
       {/* Phase Tab Bar + Run Selector */}
       <div style={{
-        display: "flex", gap: 0, padding: "0 24px",
+        display: "flex", gap: 0, padding: isNarrow ? "0 12px" : "0 24px",
         borderBottom: `1px solid ${COLORS.border}`,
         justifyContent: "space-between", alignItems: "center",
+        overflowX: "auto",
       }}>
         <div style={{ display: "flex" }}>
           {Object.entries(PHASE_CONFIG).map(([key, cfg]) => {
             const isActive = activePhase === key;
-            const phaseRuns = runIndex.filter((r) => r.source === key || (key === "audit" && r.source === "audit") || (key === "exploit" && r.source === "exploit"));
             const hasData = !!allData[key] || ((key === "audit" || key === "exploit") && (allData["audit"] || allData["exploit"]));
             // Show amber dot in tab if the loaded run for this phase is partial/failed
             const phaseRunStatus = allData[key]?.runStatus || "complete";
@@ -2582,7 +3547,7 @@ export default function App() {
                 key={key}
                 onClick={() => setActivePhase(key)}
                 style={{
-                  padding: "10px 20px", cursor: "pointer",
+                  padding: isNarrow ? "10px 12px" : "10px 20px", cursor: "pointer",
                   fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em",
                   background: "transparent",
                   border: "none",
@@ -2599,25 +3564,16 @@ export default function App() {
             );
           })}
         </div>
-        {/* Run selector dropdown — only shown when index.json has multiple runs for the active phase */}
+        {/* Report selector dropdown. Controls attach to the selected audit report. */}
         {(() => {
-          const phaseRuns = runIndex.filter((r) => {
-            const matchPhase = activePhase === "audit" ? (r.source === "audit" || r.source === "exploit") : r.source === activePhase;
-            return matchPhase;
-          });
-          if (phaseRuns.length < 2) return null;
-          const runStatusLabel = (s) => s === "partial" ? " \u26A0 partial" : s === "failed" ? " \u26A0 failed" : " \u2714";
-          const currentId = data?.run_id || "";
+          if (reportIndex.length === 0) return null;
+          const currentId = data?.dashboard_run_id || reportIndex[0]?.report_id || "";
           return (
             <select
               value={currentId}
               onChange={(e) => {
-                const run = phaseRuns.find((r) => r.run_id === e.target.value);
-                if (run) fetch(run.file || `${run.run_id}.json`).then((r) => r.json()).then((json) => {
-                  // Attach status from index before normalizing
-                  json._run_status = run.status || "complete";
-                  handleDataLoad(json);
-                }).catch(() => {});
+                const report = reportIndex.find((item) => item.report_id === e.target.value);
+                if (report) loadReport(report).catch(() => {});
               }}
               style={{
                 background: COLORS.bgCard, border: `1px solid ${COLORS.border}`,
@@ -2626,9 +3582,9 @@ export default function App() {
                 marginRight: 0,
               }}
             >
-              {phaseRuns.map((run) => (
-                <option key={run.run_id} value={run.run_id}>
-                  {run.run_id}{runStatusLabel(run.status)}
+              {reportIndex.map((report) => (
+                <option key={report.report_id} value={report.report_id}>
+                  {reportDisplayLabel(report)}
                 </option>
               ))}
             </select>
@@ -2649,6 +3605,7 @@ export default function App() {
       ) : (activePhase === "audit" || activePhase === "exploit") ? (
         <AuditExploitView
           data={data}
+          controlsData={allData.controls}
           filteredPaths={filteredPaths}
           selectedPath={selectedPath}
           setSelectedPath={setSelectedPath}
@@ -2658,17 +3615,14 @@ export default function App() {
           setSelectedNode={setSelectedNode}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          activeSeverities={activeSeverities}
-          handleToggleSeverity={handleToggleSeverity}
-          activeCategories={activeCategories}
-          handleToggleCategory={handleToggleCategory}
           sortMode={sortMode}
           setSortMode={setSortMode}
           activeStatPanel={activeStatPanel}
           handleStatClick={handleStatClick}
+          isNarrow={isNarrow}
         />
       ) : activePhase === "controls" ? (
-        <ControlsView data={data} />
+        <ControlsView data={data} isNarrow={isNarrow} />
       ) : null}
 
     </div>

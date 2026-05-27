@@ -6,10 +6,11 @@ from typing import Any, Callable
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["list_functions"]
-REQUIRED_CHECKS = ["function_url", "resource_policy"]
+REQUIRED_CHECKS = ["function_url", "resource_policy", "event_source_mappings"]
 SECRET_PATTERNS = re.compile(r"password|secret|token|key|credential|api.?key|auth", re.IGNORECASE)
 
 
@@ -37,14 +38,26 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
     for function in functions:
         function_arn = function.get("FunctionArn")
         function_url = None
+        function_url_config = None
         function_url_status = None
         resource_policy_principals: list[str] = []
+        resource_policy_document = None
+        resource_policy_statements = None
         resource_policy_status = None
+        event_source_mappings: list[dict[str, Any]] = []
+        event_source_mappings_status = None
 
         try:
             response = _safe_get(lambda: lambda_client.get_function_url_config(FunctionName=function.get("FunctionName")))
             if response and response.get("FunctionUrl"):
                 function_url = response.get("FunctionUrl")
+                function_url_config = {
+                    "auth_type": response.get("AuthType"),
+                    "invoke_mode": response.get("InvokeMode"),
+                    "cors": response.get("Cors"),
+                    "creation_time": response.get("CreationTime"),
+                    "last_modified_time": response.get("LastModifiedTime"),
+                }
                 function_url_status = "present"
             else:
                 function_url_status = "absent"
@@ -63,6 +76,10 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             response = _safe_get(lambda: lambda_client.get_policy(FunctionName=function.get("FunctionName")))
             if response and response.get("Policy"):
                 resource_policy_principals = _extract_policy_principals(response.get("Policy"))
+                normalized_policy = normalize_resource_policy(response.get("Policy"), account_id=factory.account_id)
+                if normalized_policy is not None:
+                    resource_policy_document = normalized_policy["document"]
+                    resource_policy_statements = normalized_policy["statements"]
                 resource_policy_status = "present"
             else:
                 resource_policy_status = "absent"
@@ -74,6 +91,36 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
                 "resource_policy",
                 resource=function_arn,
                 operation="lambda.GetPolicy",
+                err=err,
+            )
+
+        try:
+            mappings = factory.paginate(
+                lambda_client,
+                "list_event_source_mappings",
+                "EventSourceMappings",
+                FunctionName=function.get("FunctionName"),
+            )
+            event_source_mappings = [
+                {
+                    "uuid": mapping.get("UUID"),
+                    "event_source_arn": mapping.get("EventSourceArn"),
+                    "function_arn": mapping.get("FunctionArn"),
+                    "state": mapping.get("State"),
+                    "batch_size": mapping.get("BatchSize"),
+                }
+                for mapping in mappings
+                if isinstance(mapping, dict)
+            ]
+            event_source_mappings_status = "present"
+            tracker.record_ok("event_source_mappings", resource=function_arn)
+        except Exception as err:
+            code = _error_code(err)
+            event_source_mappings_status = _classify_status(code)
+            tracker.record_resource_failure(
+                "event_source_mappings",
+                resource=function_arn,
+                operation="lambda.ListEventSourceMappings",
                 err=err,
             )
 
@@ -101,10 +148,17 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             "function_url_status": function_url_status,
             "resource_policy_principals": resource_policy_principals,
             "resource_policy_status": resource_policy_status,
+            "event_source_mappings": event_source_mappings,
+            "event_source_mappings_status": event_source_mappings_status,
             "env_var_names": env_var_names,
             "secret_pattern_names": secret_pattern_names,
             "findings": [],
         }
+        if function_url_config is not None:
+            finding["function_url_config"] = function_url_config
+        if resource_policy_document is not None:
+            finding["resource_policy_document"] = resource_policy_document
+            finding["resource_policy_statements"] = resource_policy_statements or []
 
         if secret_pattern_names:
             finding["findings"].append(

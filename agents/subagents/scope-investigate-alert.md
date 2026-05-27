@@ -1,7 +1,7 @@
 ---
 name: scope-investigate-alert
-description: Investigation mode intake for scope-investigate. Parses alert input (metadata, notable ID, natural language, Splunk queue), builds investigation_context, and generates HYPO-01 hypothesis. Dispatched by scope-investigate parent when MODE=INVESTIGATION. Returns structured handoff to parent.
-model: claude-sonnet-4-6
+description: Investigation mode intake for scope-investigate. Parses alert input (metadata or natural language), builds investigation_context, and generates HYPO-01 hypothesis. Dispatched by scope-investigate parent when MODE=INVESTIGATION. Returns structured handoff to parent.
+model: reasoning
 tools: Read, Bash, search_splunk, search_oneshot, splunk_search, splunk_run_query
 ---
 
@@ -16,9 +16,9 @@ You do NOT:
 
 You receive from the parent:
 - `MCP_MODE`: CONNECTED or MANUAL
-- `working_tool`: the Splunk MCP tool name (only relevant for Mode D — Splunk queue pull)
+- `working_tool`: the Splunk MCP query tool name, when connected
 - `KNOWLEDGE_CONTEXT`: bounded environment knowledge from the parent, used only as context
-- The operator's alert input (raw text, notable ID, or empty for queue pull)
+- The operator's alert input (raw text or pasted alert metadata)
 
 You return a `INVESTIGATE_HANDOFF` block that the parent reads to set up the investigation session.
 </role>
@@ -34,47 +34,12 @@ After receiving MCP mode and context, present the alert intake options. The opti
 Ready to investigate. How would you like to provide the alert?
 
   1. Paste alert details (alert type, user, IP, time — any format)
-  2. Check Splunk alert queue — pull the latest unacknowledged notable event
-
 Select an option or paste your alert details directly.
 ```
 
-**Option 1:** Proceeds to `<input_parsing>` (Modes A/B/C as before).
+**Option 1:** Proceeds to `<input_parsing>` (Modes A/B).
 
-**Option 2 — Splunk Alert Queue Intake (Mode D):**
-
-Query the Splunk notable index for the latest unacknowledged alert using `working_tool`:
-
-```spl
-index=notable status!="resolved" status!="closed" | sort -_time | head 1
-```
-
-If results are returned:
-
-1. Display the alert summary to the analyst:
-```
-LATEST UNACKNOWLEDGED ALERT
-  Alert:     [search_name or rule_name]
-  Time:      [_time]
-  User:      [src_user or user]
-  Source IP:  [src_ip or src]
-  Status:    [status]
-  Notable ID: [event_id]
-```
-
-2. Parse fields into `investigation_context` using the same field mapping as Mode B (Notable Event ID).
-
-3. Parse the alert's `description` and `drilldown_search` fields (if present) into `investigation_context.alert_suggestions`:
-   - `description` → extract any investigation steps or recommended actions mentioned
-   - `drilldown_search` → store as a suggested initial query
-
-4. Ask the analyst to confirm:
-```
-Investigate this alert? (yes / no — show me the next one / no — I'll paste my own)
-```
-
-If "next one": query with `| head 1 | tail 1` offset pattern or add `event_id!="[previous_id]"` filter. Repeat.
-If "paste my own": fall back to Mode A/B/C via `<input_parsing>`.
+If the operator wants SCOPE to pull alerts from Splunk Cloud, ask for an alert index and field mapping first. Do not assume any prebuilt alert index or field schema exists.
 
 ### MANUAL Mode
 
@@ -82,21 +47,16 @@ If "paste my own": fall back to Mode A/B/C via `<input_parsing>`.
 Ready to investigate. Provide the alert details in any of these formats:
 
   1. Alert metadata: CreateAccessKey alert, user arn:aws:iam::123456789012:user/alice, source IP 185.220.101.42, time 2026-03-01 14:30 UTC
-  2. Notable event ID: notable_id=5f8a2c91-3bb4-4d2e-9f01-abc123def456
-  3. Natural language: "We got a weird CreateAccessKey for bob's account around 2pm today from some IP in Russia"
+  2. Natural language: "We got a weird CreateAccessKey for bob's account around 2pm today from some IP in Russia"
 ```
 
-MANUAL mode does not offer the Splunk alert queue option (requires MCP). Proceeds to `<input_parsing>` Modes A/B/C.
-
-### Alert-Suggested Steps
-
-When alert intake (Mode D) populates `investigation_context.alert_suggestions`, note these suggestions in the handoff but do NOT dictate step order — the parent's reasoning framework determines step order independently.
+MANUAL mode does not offer Splunk alert queue pull. Proceeds to `<input_parsing>` Modes A/B.
 </alert_intake>
 
 <input_parsing>
-## Input Parsing — Four-Mode Alert Intake
+## Input Parsing — Alert Intake
 
-All four input modes normalize to a common `investigation_context` structure. This normalization step is mandatory — do not produce the handoff until `investigation_context` is fully populated (or as fully populated as the input allows).
+All input modes normalize to a common `investigation_context` structure. This normalization step is mandatory — do not produce the handoff until `investigation_context` is fully populated (or as fully populated as the input allows).
 
 ### investigation_context Structure
 
@@ -112,7 +72,7 @@ investigation_context:
   time_range_latest:   string — ISO 8601, default 1 hour after event_time
   missing_fields:      list — fields that are null/unknown, to be surfaced by early queries
   notes:               list — any analyst-provided context not captured in structured fields
-  alert_suggestions:   list or null — investigation steps/queries suggested by the alert itself (from Mode D)
+  alert_suggestions:   list or null — investigation steps/queries suggested by the alert itself when present in pasted alert metadata
 ```
 
 **ARN decomposition rules:**
@@ -151,40 +111,7 @@ Key fields to extract: alert/event name, user ARN or username, source IP, approx
 
 ---
 
-### Mode B — Notable Event ID
-
-**Input pattern:**
-```
-notable_id=5f8a2c91-3bb4-4d2e-9f01-abc123def456
-```
-
-**If MCP_MODE=CONNECTED:**
-Run the following via `working_tool`:
-```spl
-index=notable event_id="5f8a2c91-3bb4-4d2e-9f01-abc123def456" | head 1
-```
-Parse the returned event fields into `investigation_context`. Map Splunk notable fields:
-- `search_name` or `rule_name` → alert_type
-- `src_user` or `user` → user_arn or user_name
-- `src_ip` or `src` → source_ip
-- `_time` → event_time
-- Recalculate time_range_earliest and time_range_latest from event_time
-
-**If MCP_MODE=MANUAL:**
-```
-To pull notable event details, run this in Splunk:
-
-index=notable event_id="5f8a2c91-3bb4-4d2e-9f01-abc123def456" | head 1
-
-Paste the results here and I will parse the fields into investigation context.
-```
-Wait for the analyst to paste results. Parse pasted output into `investigation_context` using the same field mapping above.
-
-**Do NOT produce the handoff** until `investigation_context` is populated from the notable event result.
-
----
-
-### Mode C — Natural Language Description
+### Mode B — Natural Language Description
 
 **Input pattern:** Any free-form description in quotes or natural prose.
 
@@ -224,34 +151,9 @@ Wait for analyst confirmation before producing the handoff.
 
 ---
 
-### Mode D — Splunk Alert Queue (CONNECTED Mode Only)
-
-**Input pattern:** Analyst selects option 2 from the alert intake prompt and confirms the pulled alert.
-
-The alert fields are parsed into `investigation_context` by `<alert_intake>` before reaching this section. Mode D adds the `alert_suggestions` field:
-
-```
-investigation_context:
-  alert_type:        [search_name or rule_name from notable event]
-  user_arn:          [parsed from src_user or user field]
-  user_name:         [extracted from ARN or user field]
-  account_id:        [extracted from ARN if available]
-  source_ip:         [src_ip or src field]
-  event_time:        [_time field]
-  time_range_earliest: [30 min before event_time]
-  time_range_latest:   [1 hour after event_time]
-  missing_fields:    [any fields not present in the notable event]
-  notes:             [any additional notable event fields not captured above]
-  alert_suggestions:
-    - description_steps: [investigation steps extracted from description field, if any]
-    - drilldown_search:  [raw drilldown_search SPL from the notable event, if present]
-```
-
----
-
 ### Confirmation Block (All Modes)
 
-After parsing (Modes A, B, and D display this automatically; Mode C shows it as part of the confirmation ask):
+After parsing (Mode A displays this automatically; Mode B shows it as part of the confirmation ask):
 
 ```
 INVESTIGATION CONTEXT
@@ -263,7 +165,7 @@ Account:        [account_id or "unknown"]
 Alert suggestions: [present / none]
 ```
 
-For Modes A, B, and D, display this confirmation block and proceed immediately. For Mode C, this is shown as the confirmation prompt — wait for analyst approval.
+For Mode A, display this confirmation block and proceed immediately. For Mode B, this is shown as the confirmation prompt — wait for analyst approval.
 </input_parsing>
 
 <hypothesis_engine_investigation>

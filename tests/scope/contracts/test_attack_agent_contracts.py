@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -9,6 +10,17 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def read(path: str) -> str:
     return (ROOT / path).read_text()
+
+
+def git_ls_files(pathspec: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files", pathspec],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
 
 
 def assert_matches(text: str, pattern: str, message: str = "") -> None:
@@ -60,6 +72,13 @@ def test_attack_analyze_agent_contract() -> None:
 
     assert "skills/scope-attack-path-analysis/SKILL.md" in prompt
     assert "skills/scope-evidence-logging/SKILL.md" in prompt
+    assert "Preserve deterministic candidates already present in `candidate_attack_paths[]`" in prompt
+    assert "public/service-connected chains such as ALB to ECS task role" in prompt
+    assert "CodeBuild `StartBuild` paths" in prompt
+    assert "Cognito identity-pool credential issuance" in prompt
+    assert "DynamoDB or SSM data impacts" in prompt
+    assert "do not also write a `security_observations[]` item that says the same seed has no path" in prompt
+    assert "Append new candidates after existing deterministic entries" in prompt
     assert "uv run python -m scope.attack.lint --run-dir \"$RUN_DIR\" --stage candidates" in prompt
     assert "public_entrypoints[]" in prompt
     assert "attack_path_seed" in prompt
@@ -154,6 +173,7 @@ def test_attack_verify_and_exploit_contract_regressions() -> None:
     assert "Do not call AWS APIs." in verify
     assert_not_matches(verify, r"\b(Edit|Bash)\b", "scope-verify must not edit files or run shell commands")
     assert_not_matches(verify, r"\bGuaranteed\b|\bSpeculative\b", "scope-verify must not use stale confidence taxonomy")
+    assert "SSM/EventBridge" not in verify
     assert_matches(verify, r"validation_status[\s\S]{0,120}validated[\s\S]{0,120}conditional")
     assert_matches(verify, r"unsupported[\s\S]{0,120}(strip|reject)")
 
@@ -171,6 +191,110 @@ def test_attack_verify_and_exploit_contract_regressions() -> None:
         "aws iam get-role-policy",
     ]:
         assert text in exploit
+
+
+def test_scope_exploit_dispatches_gated_aws_cli_generator() -> None:
+    exploit = read("agents/scope-exploit.md")
+
+    for text in [
+        "scope-awscli-replay",
+        "aws-cli-replay.json",
+        "`aws_cli_commands[]`",
+        "Do not infer executable AWS CLI commands from audit hops inside the dashboard",
+        "The dashboard may render AWS CLI replay commands only from `attack_paths[].aws_cli_commands`",
+    ]:
+        assert text in exploit
+
+    assert_matches(
+        exploit,
+        r"After Gate 3 approval[\s\S]{0,500}dispatch `scope-awscli-replay`",
+        "exploit must dispatch AWS CLI generation only after path approval",
+    )
+    assert_matches(
+        exploit,
+        r"Gate 4[\s\S]{0,500}playbook\.md[\s\S]{0,500}aws-cli-replay\.json",
+        "Gate 4 must review the playbook and command artifact before writes",
+    )
+    assert_matches(
+        exploit,
+        r"results\.json[\s\S]{0,400}`aws_cli_commands\[\]`[\s\S]{0,400}dashboard/public",
+        "results and dashboard export must carry command artifacts",
+    )
+    assert_not_matches(
+        exploit,
+        r"dashboard[\s\S]{0,120}(synthesizes|infers|generates)[\s\S]{0,120}AWS CLI",
+        "dashboard must not synthesize replay commands",
+    )
+
+
+def test_scope_awscli_replay_subagent_contract() -> None:
+    prompt = read("agents/subagents/scope-awscli-replay.md")
+
+    assert_matches(prompt, r"^name: scope-awscli-replay$", "frontmatter name missing")
+    assert "model: reasoning" in prompt
+    assert "AWS_CLI_REPLAY" in prompt
+    assert "aws-cli-replay.json" in prompt
+    assert "aws_cli_commands[]" in prompt
+    assert "Do not execute AWS CLI commands." in prompt
+    assert "Do not deploy or mutate AWS resources." in prompt
+    assert "Do not include CloudTrail event names" in prompt
+    assert "Do not include OPSEC" in prompt
+    assert "Use actual ARNs, account IDs, regions, and resource names from approved path evidence." in prompt
+    assert "Use placeholders only for operator-supplied payload files or names that cannot exist yet" in prompt
+    assert_matches(
+        prompt,
+        r"command[\s\S]{0,120}must start with `aws `",
+        "commands must be AWS CLI commands",
+    )
+    for field in [
+        '"path_name"',
+        '"commands"',
+        '"step"',
+        '"description"',
+        '"command"',
+        '"requires_operator_approval"',
+        '"mutates_aws"',
+        '"prerequisites"',
+        '"cleanup"',
+        '"source_basis"',
+    ]:
+        assert field in prompt
+
+
+def test_scope_audit_dispatches_review_only_aws_cli_replay_after_gate_4() -> None:
+    audit = read("agents/scope-audit.md")
+
+    for text in [
+        "scope-awscli-replay",
+        "aws-cli-replay.json",
+        "CALLER=audit",
+        "Treat commands as user validation material, not agent execution steps.",
+        "Do not infer commands inside the dashboard.",
+        "Refresh `dashboard/public/$RUN_ID.json` from the updated `$RUN_DIR/results.json`",
+    ]:
+        assert text in audit
+
+    assert_matches(
+        audit,
+        r"After Gate 4 approval[\s\S]{0,500}dispatch `scope-awscli-replay`",
+        "audit must dispatch replay generation only after Gate 4 approval",
+    )
+    assert_matches(
+        audit,
+        r"Map `AWS_CLI_REPLAY\.paths\[\]\.commands\[\]`[\s\S]{0,220}`attack_paths\[\]\.aws_cli_commands\[\]`",
+        "audit must map replay commands into attack_paths for the dashboard",
+    )
+    assert_matches(
+        audit,
+        r"Zero attack path replay exception:[\s\S]{0,160}`aws-cli-replay\.json` is skipped",
+        "audit must not require replay artifact when no attack paths exist",
+    )
+    assert "Controls failure is non-blocking" in audit
+    assert_not_matches(
+        audit,
+        r"scope-controls[\s\S]{0,260}scope-awscli-replay|scope-awscli-replay[\s\S]{0,260}scope-controls[\s\S]{0,120}commands",
+        "controls must not own replay generation",
+    )
 
 
 def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_catalogue() -> None:
@@ -202,6 +326,7 @@ def test_scope_exploit_uses_curated_reasoning_notes_without_static_cloudtrail_ca
 
 def test_scope_investigate_uses_curated_hunt_notes() -> None:
     investigate = read("agents/scope-investigate.md")
+    intel = read("agents/subagents/scope-investigate-intel.md")
 
     assert "knowledge/hunt-reasoning-notes.md" in investigate
     assert_matches(
@@ -236,6 +361,8 @@ def test_scope_investigate_uses_curated_hunt_notes() -> None:
     )
     assert_not_matches(investigate, r"\bREF_PATTERN\b", "scope-investigate must not keep stale reference-pattern variable")
     assert_not_matches(investigate, r"Reference Pattern Loading", "scope-investigate must remove stale reference-pattern loading section")
+    assert "EKS" not in intel
+    assert "EventBridge" not in intel
 
 
 def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
@@ -245,15 +372,16 @@ def test_attack_analyze_prioritizes_red_team_chain_quality() -> None:
         "entry point -> new execution context -> new permission set -> impact",
         "single-hop candidate",
         "Do not create a candidate from a lone permission, lone trust relationship, lone public flag, or lone sensitive resource.",
-        "public API Gateway or function URL",
-        "Lambda function or compute resource",
+        "public API Gateway, function URL, load balancer, or CloudFront distribution",
+        "collected service integration or event source",
         "execution role",
         "s3:GetObject",
         "secretsmanager:GetSecretValue",
         "kms:Decrypt",
+        "Do not assume SSRF, RCE, application behavior, or response content.",
         "RoleA can assume RoleB",
         "RoleB can assume RoleC",
-        "new reachable account, principal tier, permission set, service control point bypass, or impact action",
+        "new reachable account, principal tier, permission set, organization-policy boundary bypass, or impact action",
     ]:
         assert text in prompt
 
@@ -295,7 +423,7 @@ def test_attack_validate_agent_contract() -> None:
     prompt = read("agents/subagents/scope-attack-validate.md")
 
     assert_matches(prompt, r"^name: scope-attack-validate$", "frontmatter name missing")
-    for text in ["candidate_attack_paths[]", "attack_validation[]", "attack_paths[]"]:
+    for text in ["candidate_attack_paths[]", "attack_validation[]", "attack_paths[]", "attack_path_groups[]"]:
         assert text in prompt
 
     candidate_lint = prompt.index('uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage candidates')
@@ -311,12 +439,14 @@ def test_attack_validate_agent_contract() -> None:
         "Do not generate new paths.",
         "Do not call AWS APIs.",
         "Do not run AWS IAM Policy Simulator by default.",
+        "AWS-managed policy names are known permission profiles",
+        "do not require fetching or parsing AWS-managed policy documents",
         "Never promote rejected candidates.",
         "Rejected candidates must remain represented in `attack_validation[]`",
         "Rejected candidates must never appear in `attack_paths[]`",
         "Update only attack-owned fields",
-        'for field in ("attack_validation", "attack_paths"):',
-        'if key.startswith("attack_"):',
+        '"public_exposure_findings",',
+        "merged_summary.update(validated[\"summary\"])",
         "Do not perform a second manual validation pass.",
         "chain quality gate",
         "single-hop candidate does not prove complete attacker progression",
@@ -324,12 +454,18 @@ def test_attack_validate_agent_contract() -> None:
         "candidate does not end in a concrete impact transition",
         "Public endpoint candidates must reference a `public_entrypoints[]` record with `attack_path_seed: true`",
         "Public reachability alone is not a validated attack path.",
+        "`attack_validation[]` entries must use only validator fields",
+        "Do not add candidate-only or final-path fields such as `mitre_techniques`",
+        "Each promoted `attack_paths[]` item must set `source_candidate_id` to a matching promoted `attack_validation[].candidate_id`",
+        "`attack_path_groups[]` is a reporting layer over final paths",
+        "Do not remove raw final paths after grouping.",
     ]:
         assert text in prompt
     assert_matches(prompt, r"modules.+iam.+global\.json")
     assert_matches(prompt, r"resource_type.*iam_user")
     assert_matches(prompt, r"resource_type.*iam_role")
     assert_matches(prompt, r"resource_type.*iam_group")
+    assert_matches(prompt, r"Missing customer-managed or inline policy documents")
     assert "needed to evaluate each candidate hop" not in prompt
     assert_matches(
         prompt,
@@ -342,18 +478,32 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     prompt = read("agents/scope-audit.md")
 
     exposure = prompt.index("Dispatch `scope-public-exposure-analysis` with:")
+    deterministic_seed = prompt.index('uv run python -m scope.attack.candidates --run-dir "$RUN_DIR" --write')
     analyze = prompt.index("Dispatch `scope-attack-analyze` with:")
     candidate_lint = prompt.index('uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage candidates')
     validate = prompt.index("Dispatch `scope-attack-validate` with:")
     validation_lint = prompt.index('uv run python -m scope.attack.lint --run-dir "$RUN_DIR" --stage validation')
     gate4 = prompt.index("<gate_4_results_approval>")
-    assert exposure < analyze < candidate_lint < validate < validation_lint < gate4
+    assert exposure < deterministic_seed < analyze < candidate_lint < validate < validation_lint < gate4
 
     assert_matches(prompt, r"Dispatch `scope-public-exposure-analysis` with:[\s\S]*- `RUN_DIR`[\s\S]*- `ACCOUNT_ID`[\s\S]*- `OWNED_ACCOUNTS`")
-    assert_matches(prompt, r"Expected output:[\s\S]*`public_entrypoints\[\]`[\s\S]*`\$RUN_DIR/results\.json`")
+    assert_matches(prompt, r"Expected output:[\s\S]*`public_entrypoints\[\]`[\s\S]*`public_exposure_findings\[\]`[\s\S]*`\$RUN_DIR/results\.json`")
     assert_matches(prompt, r"Public exposure alone is not an attack path")
     assert_matches(prompt, r"attack_path_seed: true[\s\S]{0,160}execution context[\s\S]{0,160}sensitive resource reachability")
     assert_matches(prompt, r"public_entrypoints\[\][\s\S]{0,160}preferred external starting positions")
+    assert "Deterministic candidate seeding" in prompt
+    assert_matches(
+        prompt,
+        r"Deterministic candidate seeding[\s\S]{0,700}`sts:AssumeRole`[\s\S]{0,160}`iam:PassRole`[\s\S]{0,160}CodeBuild `StartBuild`[\s\S]{0,260}identity issuance[\s\S]{0,260}DynamoDB[\s\S]{0,80}SSM[\s\S]{0,500}Preserve these candidates",
+        "audit must seed deterministic IAM, service, identity, and concrete data-impact candidates before the LLM analyzer and preserve them",
+    )
+    assert_matches(
+        prompt,
+        r"public endpoint reachability[\s\S]{0,160}AWS-level evidence[\s\S]{0,180}data flow[\s\S]{0,180}event source",
+        "audit must not promote public reachability to backend role permissions without AWS-level proof",
+    )
+    assert "AWS-managed policy names are known permission profiles" in prompt
+    assert "Customer-managed and inline policies remain document-evaluated evidence" in prompt
     assert_matches(prompt, r"Dispatch `scope-attack-analyze` with:[\s\S]*- `RUN_DIR`[\s\S]*- `ACCOUNT_ID`[\s\S]*- `OWNED_ACCOUNTS`")
     assert_matches(prompt, r"Expected analyze output:[\s\S]*`candidate_attack_paths\[\]`[\s\S]*`security_observations\[\]`[\s\S]*`\$RUN_DIR/results\.json`")
     assert_matches(prompt, r"If candidate lint fails,[\s\S]{0,120}stop before validation[\s\S]{0,120}linter errors")
@@ -368,6 +518,7 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     assert exposure_section.index("scope-public-exposure-analysis") < attack_section.index("scope-attack-analyze")
     assert "Public exposure analysis must run first." in attack_section
     assert "public_entrypoints[]" in attack_section
+    assert attack_section.index("scope.attack.candidates") < attack_section.index("Dispatch `scope-attack-analyze`")
     assert attack_section.index("scope-attack-analyze") < attack_section.index("stage candidates")
     assert attack_section.index("stage candidates") < attack_section.index("scope-attack-validate")
     assert attack_section.index("scope-attack-validate") < attack_section.index("stage validation")
@@ -379,16 +530,25 @@ def test_audit_orchestrates_attack_pipeline() -> None:
     gate4_section = section(prompt, "gate_4_results_approval")
     for text in [
         "candidates generated",
+        "public exposure findings",
         "validated paths",
         "conditional paths",
         "rejected paths",
         "final attack path count by severity",
-        "top 3 validated/conditional paths",
+        "attack path group count",
+        "top 3 grouped attack paths",
         "On skip, still write `$RUN_DIR/findings.md`",
         "Do not dispatch scope-controls.",
     ]:
         assert text in gate4_section
     assert_not_matches(gate4_section, r"confidence|confidence tier|confidence tiers")
+
+    findings = section(prompt, "findings_md")
+    assert_matches(findings, r"Layer 1[\s\S]{0,260}Public Exposure subsection")
+    assert_matches(findings, r"Layer 2[\s\S]{0,260}public exposure findings by severity")
+    assert_matches(findings, r"Layer 3[\s\S]{0,360}`attack_path_groups\[\]`[\s\S]{0,260}representative path ID")
+    assert_matches(findings, r"Do not omit raw `attack_paths\[\]` from `results\.json`")
+    assert_not_matches(findings, r"Layer 3[\s\S]{0,260}public_exposure_findings")
 
     assert_matches(prompt, r"Gate 4 skip exception:[\s\S]{0,180}\$RUN_DIR/results\.json[\s\S]{0,120}findings\.md[\s\S]{0,120}remain required")
     assert_not_matches(prompt, r"skips results\.json|results\.json[\s\S]{0,80}skipped")
@@ -432,6 +592,42 @@ def test_scope_audit_boundary_contract() -> None:
     results_export = section(prompt, "results_export")
     assert "neither Gate 3 nor Gate 4 was skipped" in results_export
     assert "Gate 3 skip exception" in results_export
+
+
+def test_scope_audit_service_routing_matches_runtime_modules() -> None:
+    prompt = read("agents/scope-audit.md")
+    expected_services = [
+        "iam",
+        "sts",
+        "s3",
+        "kms",
+        "secrets",
+        "lambda",
+        "ec2",
+        "ecs",
+        "rds",
+        "sns",
+        "sqs",
+        "apigateway",
+        "codebuild",
+        "bedrock",
+        "cloudfront",
+        "cognito",
+        "dynamodb",
+        "route53",
+        "ssm",
+    ]
+
+    assert "All 19 services" in prompt
+    all_line = next(line for line in prompt.splitlines() if line.startswith("**`--all`**"))
+    for service in expected_services:
+        assert service in all_line
+    assert "- `ecs` → [ecs]" in prompt
+    assert "- `cloudfront` → [cloudfront]" in prompt
+    assert "- `route53` → [route53]" in prompt
+    assert "| `ecs` | ecs |" in prompt
+    assert "| `cdn`, `cloudfront` | cloudfront |" in prompt
+    assert "| `dns`, `route53` | route53 |" in prompt
 
     controls = section(prompt, "controls_auto_chain")
     assert "Gate 3 skip exception" in controls
@@ -514,10 +710,10 @@ def test_scope_research_agent_contract() -> None:
 def test_scope_research_docs_do_not_claim_investigation_or_synthesis_support() -> None:
     readme = read("README.md")
     architecture = read("ARCHITECTURE.md")
-    installer = read("bin/install.js")
+    installer = read("scope/install.py")
 
     assert "scope-research` - shared external technique research for attack analysis and exploit playbooks" in readme
-    assert "dispatches `scope-attack-analyze`, optionally enriches candidates through `scope-research`, then chains controls" in readme
+    assert "dispatches `scope-attack-analyze`, optionally enriches candidates through `scope-research`, then can generate review-only AWS CLI replay artifacts" in readme
 
     assert "| **scope-research** | Dispatched by attack-paths and exploit |" in architecture
     assert "scope-research may enrich attack candidates with bounded external technique context" in architecture
@@ -536,6 +732,7 @@ def test_public_exposure_analysis_agent_contract() -> None:
     assert_matches(prompt, r"^name: scope-public-exposure-analysis$", "frontmatter name missing")
     for text in [
         "public_entrypoints[]",
+        "public_exposure_findings[]",
         "attack_path_seed",
         "Public exposure alone is not an attack path.",
         "Do not call AWS APIs.",
@@ -546,13 +743,23 @@ def test_public_exposure_analysis_agent_contract() -> None:
         "Cognito",
         "SNS/SQS resource policies",
         "Set `attack_path_seed: false` when the exposure is real but lacks an observed internal transition or impact.",
+        "internet-facing ALBs",
+        "public management ports",
+        "anonymous SNS/SQS policies",
+        "public bucket, API, and Lambda surfaces",
+        "unknown public surfaces",
+        '"source_entrypoint_id"',
+        '"security_relevance"',
+        '"reason_not_attack_path"',
+        '"promoted_attack_path_ids"',
+        '"coverage_needed"',
         '"starting_position"',
         '"external_unauthenticated|external_authenticated|external_cross_account|external_unknown"',
         '"invokes"',
         '"execution_roles"',
         '"reachable_resources"',
         '"seed_reason"',
-        'METRICS: {"public_entrypoints": 0, "attack_path_seeds": 0, "observations": 0}',
+        'METRICS: {"public_entrypoints": 0, "public_exposure_findings": 0, "attack_path_seeds": 0}',
     ]:
         assert text in prompt
 
@@ -561,7 +768,37 @@ def test_public_exposure_analysis_agent_contract() -> None:
         r"attack_path_seed: true[\s\S]{0,220}execution context[\s\S]{0,220}identity/resource-policy context[\s\S]{0,220}sensitive resource",
     )
     assert "You do not write `candidate_attack_paths[]`, `attack_paths[]`, controls, detections, or remediation plans." in prompt
+    assert_matches(
+        prompt,
+        r"Never promote a public exposure to an attack path without an observed internal transition",
+    )
+    assert_matches(
+        prompt,
+        r"Load `\$RUN_DIR/results\.json`, preserve all existing fields, and update only:[\s\S]{0,120}`public_entrypoints`[\s\S]{0,120}`public_exposure_findings`",
+    )
     assert_not_matches(prompt, r"update only:[\s\S]{0,120}candidate_attack_paths")
+    for out_of_scope in ["EKS", "ECR", "EventBridge"]:
+        assert out_of_scope not in prompt
+
+
+def test_attack_pipeline_contract_respects_current_service_scope() -> None:
+    prompts = "\n".join(
+        read(path)
+        for path in [
+            "agents/scope-audit.md",
+            "agents/subagents/scope-attack-analyze.md",
+            "agents/subagents/scope-attack-validate.md",
+            "skills/scope-attack-path-analysis/SKILL.md",
+            "config/project-docs/PROJECT.md",
+        ]
+    )
+
+    assert "CodeBuild trigger executes as BuildRole, BuildRole creates CloudFormation stack" not in prompts
+    assert "The first implementation can validate" not in prompts
+    assert "CodeBuild `StartBuild`" in prompts
+    assert "Cognito unauthenticated identity pools" in prompts
+    assert "DynamoDB table reads and SSM parameter reads" in prompts
+    assert git_ls_files("docs/architecture") == [], "private architecture notes must stay ignored and untracked"
 
 
 def test_downstream_prompts_use_validation_status_contract() -> None:
@@ -572,7 +809,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
             "agents/scope-controls.md",
             "agents/subagents/scope-controls-detections.md",
             "agents/subagents/scope-controls-remediation.md",
-            "agents/subagents/scope-controls-guardrails.md",
+            "agents/subagents/scope-controls-org-wide.md",
             "agents/subagents/scope-controls-policy.md",
             "agents/subagents/scope-controls-validate.md",
             "agents/subagents/scope-investigate-run.md",
@@ -600,7 +837,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         "agents/scope-controls.md",
         "agents/subagents/scope-controls-detections.md",
         "agents/subagents/scope-controls-remediation.md",
-        "agents/subagents/scope-controls-guardrails.md",
+        "agents/subagents/scope-controls-org-wide.md",
         "agents/subagents/scope-controls-policy.md",
         "agents/subagents/scope-controls-validate.md",
     ]:
@@ -617,11 +854,33 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
         ]:
             assert forbidden_source in body
 
+    for path in [
+        "agents/scope-controls.md",
+        "agents/subagents/scope-controls-detections.md",
+        "agents/subagents/scope-controls-remediation.md",
+        "agents/subagents/scope-controls-org-wide.md",
+        "agents/subagents/scope-controls-validate.md",
+    ]:
+        body = prompts[path]
+        assert "public_exposure_findings[]" in body
+        assert_matches(
+            body,
+            r"public_exposure_findings\[\][\s\S]{0,260}(remediation|detections|dashboard|org-wide|defensive)",
+            f"{path} must allow defensive use of public exposure findings",
+        )
+        assert_matches(
+            body,
+            r"source_attack_paths[\s\S]{0,220}(must not|never)[\s\S]{0,180}public exposure",
+            f"{path} must forbid public exposure IDs in source_attack_paths",
+        )
+        if path != "agents/subagents/scope-controls-remediation.md":
+            assert "source_public_exposure_findings[]" in body
+
     detections = prompts["agents/subagents/scope-controls-detections.md"]
     assert_matches(detections, r"attack_paths\[\][\s\S]{0,500}validation_status[\s\S]{0,500}runtime_assumptions[\s\S]{0,500}coverage_caveats")
     assert_matches(detections, r"Validation Status:[\s\S]{0,300}Runtime Assumptions:[\s\S]{0,300}Coverage Caveats:")
 
-    for path in ["agents/subagents/scope-controls-remediation.md", "agents/subagents/scope-controls-guardrails.md"]:
+    for path in ["agents/subagents/scope-controls-remediation.md", "agents/subagents/scope-controls-org-wide.md"]:
         assert "validation_status" in prompts[path]
         assert_matches(prompts[path], r"runtime_assumptions[\s\S]{0,180}coverage_caveats|coverage_caveats[\s\S]{0,180}runtime_assumptions")
 
@@ -635,7 +894,7 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     validate_controls = prompts["agents/subagents/scope-controls-validate.md"]
     assert_matches(
         validate_controls,
-        r"source_attack_paths[\s\S]{0,180}candidate[\s\S]{0,180}public entrypoint[\s\S]{0,180}final `attack_paths\[\]` name",
+        r"source_attack_paths[\s\S]{0,180}candidate[\s\S]{0,220}public entrypoint[\s\S]{0,220}public exposure[\s\S]{0,180}final `attack_paths\[\]` name",
     )
 
     investigate_run = prompts["agents/subagents/scope-investigate-run.md"]
@@ -676,10 +935,10 @@ def test_downstream_prompts_use_validation_status_contract() -> None:
     controls = prompts["agents/scope-controls.md"]
     assert controls.count("## Wave 2: Validate-Fix Loop") == 1
     assert "subagent-owned structured JSON artifacts" in controls
-    assert "guardrails.json" in controls
+    assert "org-wide-issues.json" in controls
     assert "detections.json" in controls
     assert "policy-replacements.json" in controls
-    assert "Do not infer guardrail mappings" in controls
+    assert "Do not infer org-wide issue mappings" in controls
     assert "The orchestrator does not parse markdown to invent results fields." in controls
     assert "ATTACK_PATH_CONTEXT=" not in controls
     assert "source_attack_paths: $source_attack_paths" not in controls
@@ -706,15 +965,23 @@ def test_controls_validation_and_artifact_contracts() -> None:
         r"STATUS: complete\|partial[\s\S]{0,220}complete[\s\S]{0,220}partial",
     )
     assert "STRUCTURED_FILE: {controls_run_dir}/detections.json" in controls
+    assert "attach this controls run to the matching dashboard report" in controls
+    assert "AUDIT_RUNS_ANALYZED=$(jq -c '.audit_runs_analyzed // []'" in controls
+    assert "const reports = Array.isArray(idx.reports) ? idx.reports : [];" in controls
+    assert "const report = reports.find((entry) => auditRunIds.includes(entry.audit && entry.audit.run_id));" in controls
+    assert "report.controls = { run_id: DASHBOARD_RUN_ID, file: DASHBOARD_RUN_ID + '.json' };" in controls
+    assert "delete idx.runs;" in controls
+    assert "source: 'controls'" not in controls
 
     assert_matches(
         detections,
-        r"If results\.json has no `attack_paths` array or it is empty[\s\S]{0,260}detections\.md[\s\S]{0,260}detections\.json[\s\S]{0,120}\[\]",
+        r"If results\.json has no `attack_paths` array or it is empty and `public_exposure_findings\[\]` is empty[\s\S]{0,260}detections\.md[\s\S]{0,260}detections\.json[\s\S]{0,120}\[\]",
     )
     assert_matches(
         detections,
-        r"If `attack_paths` is empty[\s\S]{0,220}detections\.md[\s\S]{0,220}detections\.json[\s\S]{0,120}\[\]",
+        r"If `attack_paths` is empty but `public_exposure_findings\[\]` contains risky public configuration[\s\S]{0,260}generate public-exposure detections",
     )
+    assert "source_public_exposure_findings" in detections
     assert "STRUCTURED_FILE: {controls_run_dir}/detections.json" in detections
     assert_not_matches(detections, r"jq -r '\.audit_runs_analyzed\[0\]")
     assert_matches(detections, r"\.run_id[\s\S]{0,120}basename \"\$AUDIT_RUN_DIR\"")
@@ -726,34 +993,86 @@ def test_controls_validation_and_artifact_contracts() -> None:
     )
 
 
+def test_controls_dashboard_ideas_agent_contract() -> None:
+    prompt = read("agents/subagents/scope-controls-dashboards.md")
+    controls = read("agents/scope-controls.md")
+    validate = read("agents/subagents/scope-controls-validate.md")
+
+    assert_matches(prompt, r"^name: scope-controls-dashboards$", "frontmatter name missing")
+    assert "model: reasoning" in prompt
+    assert "dashboards.md" in prompt
+    assert "dashboards.json" in prompt
+    assert "monitoring_dashboard" in prompt
+    assert "review_dashboard" in prompt
+    assert "coverage_dashboard" in prompt
+    assert "trend_dashboard" in prompt
+    assert "Do not build deployable dashboards" in prompt
+    assert "Do not generate Splunk Dashboard Studio JSON" in prompt
+    assert "Do not generate saved searches" in prompt
+    assert "Use final `attack_paths[]` as the only attack-path source of truth." in prompt
+    assert "Do not read or derive dashboard ideas from" in prompt
+    assert "public_exposure_findings[]" in prompt
+    assert_matches(prompt, r"public_exposure_findings\[\][\s\S]{0,260}dashboard ideas")
+    assert_matches(prompt, r"source_attack_paths[\s\S]{0,220}must not[\s\S]{0,180}public exposure")
+    assert "source_public_exposure_findings" in prompt
+    assert "why_dashboard_not_detection" in prompt
+    assert "promotion_triggers" in prompt
+
+    for text in [
+        "scope-controls-dashboards",
+        "DASHBOARDS_COUNT",
+        "dashboards.json",
+        "dashboards.md",
+        "--argjson dashboards \"$DASHBOARDS_ARRAY\"",
+        "summary.dashboards",
+        "KNOWLEDGE_CONTEXT: {knowledge_context}",
+        "FIX_REQUIRED:",
+        "METRICS: {org_wide_issues: N, detections: N, dashboards: N}",
+    ]:
+        assert text in controls
+
+    for text in [
+        "dashboards.md dashboards.json",
+        "Review 3: Dashboard Ideas",
+        "`dashboards.json` is not an array",
+        "why_dashboard_not_detection",
+        "suggested_panels",
+        "deployable dashboard JSON",
+        "duplicates a detection without a distinct monitoring rationale",
+        "org-wide issue, detection, dashboard idea, or remediation",
+    ]:
+        assert text in validate
+
+
 def test_controls_workers_own_structured_output_for_assembly() -> None:
     controls = read("agents/scope-controls.md")
-    guardrails = read("agents/subagents/scope-controls-guardrails.md")
+    org_wide = read("agents/subagents/scope-controls-org-wide.md")
     policy = read("agents/subagents/scope-controls-policy.md")
     validate = read("agents/subagents/scope-controls-validate.md")
 
     assert_matches(
         controls,
-        r"scope-controls-guardrails[\s\S]{0,120}`guardrails\.json`[\s\S]{0,120}`guardrails\[\]`",
+        r"scope-controls-org-wide[\s\S]{0,120}`org-wide-issues\.json`[\s\S]{0,120}`org_wide_issues\[\]`",
     )
     assert_matches(
         controls,
         r"scope-controls-policy[\s\S]{0,120}`policy-replacements\.json`[\s\S]{0,120}`policy_replacements\[\]`",
     )
-    assert_matches(controls, r"jq -e 'type == \"array\"' \"\$CONTROLS_RUN_DIR/guardrails\.json\"")
+    assert_matches(controls, r"jq -e 'type == \"array\"' \"\$CONTROLS_RUN_DIR/org-wide-issues\.json\"")
     assert_matches(controls, r"jq -e 'type == \"array\"' \"\$CONTROLS_RUN_DIR/policy-replacements\.json\"")
-    assert_not_matches(controls, r"Build guardrails array from policy JSON files")
+    assert_not_matches(controls, r"Build org-wide issue array from policy JSON files")
     assert_not_matches(controls, r"Build policy_replacements array from")
     assert_not_matches(controls, r"original_policy_arn: \"unknown\"")
     assert_not_matches(controls, r"See policy-replacements\.md for detailed reasoning")
 
     for text in [
-        "Write guardrails.json",
-        "`source_attack_paths` must include only the attack paths this guardrail addresses",
-        "`impact_analysis` must contain the actual reasoning",
-        "STRUCTURED_FILE: {controls_run_dir}/guardrails.json",
+        "Write org-wide-issues.json",
+        "`source_attack_paths` must include only final `attack_paths[]` names",
+        "`source_public_exposure_findings` must include only `public_exposure_findings[]` IDs",
+        "`recommended_next_step` must be advisory and non-deployable",
+        "STRUCTURED_FILE: {controls_run_dir}/org-wide-issues.json",
     ]:
-        assert text in guardrails
+        assert text in org_wide
 
     for text in [
         "policy-replacements.json",
@@ -763,9 +1082,11 @@ def test_controls_workers_own_structured_output_for_assembly() -> None:
     ]:
         assert text in policy
 
-    assert "guardrails.md guardrails.json detections.md detections.json policy-replacements.md policy-replacements.json remediation-plan.md" in validate
-    assert "source_attack_paths` maps every guardrail to every attack path without evidence" in validate
+    assert "org-wide-issues.md org-wide-issues.json detections.md detections.json dashboards.md dashboards.json policy-replacements.md policy-replacements.json remediation-plan.md" in validate
+    assert "source_attack_paths` maps every issue to every attack path without evidence" in validate
     assert "source_attack_paths` maps every replacement to every attack path without role/resource evidence" in validate
+    assert "remediation coverage-table contradictions" in validate
+    assert "S3 `GetObject` paths must include the S3 access fix" in read("agents/subagents/scope-controls-remediation.md")
 
 
 def test_controls_detections_use_production_detection_bar() -> None:
@@ -791,6 +1112,9 @@ def test_controls_detections_use_production_detection_bar() -> None:
         "CreateAccessKey",
         "hunt_query",
         "coverage_gap",
+        "skills/scope-detection-format/SKILL.md",
+        "The detection format skill owns artifact shape only.",
+        "You still own detection quality decisions",
     ]:
         assert text in prompt
 
@@ -815,6 +1139,7 @@ def test_controls_detections_use_production_detection_bar() -> None:
         '"noise_controls"',
         '"expected_volume"',
         '"validation_status"',
+        '"source_public_exposure_findings"',
         '"coverage_caveats"',
         '"tuning_guidance"',
     ]:

@@ -91,9 +91,11 @@ def build_results(
         },
         "modules": modules,
         "failed_items": summary.get("failed_items", []),
+        "public_exposure_findings": [],
         "candidate_attack_paths": [],
         "attack_validation": [],
         "attack_paths": [],
+        "attack_path_groups": [],
         "security_observations": [],
         "principals": [],
         "trust_relationships": [],
@@ -108,6 +110,10 @@ def write_results(run_dir: Path, results: dict[str, Any]) -> Path:
     path = run_dir / "results.json"
     path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
+
+
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def run_post_processing(
@@ -162,6 +168,70 @@ def run_post_processing(
     return results
 
 
+def _legacy_runs_to_reports(runs: Any) -> list[dict[str, Any]]:
+    if not isinstance(runs, list):
+        return []
+    reports: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for run in runs:
+        if not isinstance(run, dict) or run.get("source") != "audit":
+            continue
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            continue
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        file_name = run.get("file") if isinstance(run.get("file"), str) else f"{run_id}.json"
+        report: dict[str, Any] = {
+            "report_id": run_id,
+            "created_at": run.get("date") or run.get("created_at") or "",
+            "target": run.get("target") or "",
+            "risk": run.get("risk") or "low",
+            "status": run.get("status") or "complete",
+            "audit": {
+                "run_id": run_id,
+                "file": file_name,
+            },
+        }
+        if isinstance(run.get("account_id"), str):
+            report["account_id"] = run["account_id"]
+        reports.append(report)
+    return reports
+
+
+def _load_dashboard_index(index_path: Path) -> dict[str, Any]:
+    if not index_path.exists():
+        return {"version": "2.0.0", "reports": []}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"version": "2.0.0", "reports": []}
+    if not isinstance(index, dict):
+        return {"version": "2.0.0", "reports": []}
+    reports = index.get("reports")
+    if not isinstance(reports, list):
+        reports = _legacy_runs_to_reports(index.get("runs"))
+    return {
+        "version": "2.0.0",
+        "reports": [report for report in reports if isinstance(report, dict)],
+    }
+
+
+def _upsert_report(index: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    reports = [
+        existing
+        for existing in index.get("reports", [])
+        if isinstance(existing, dict) and existing.get("report_id") != report["report_id"]
+    ]
+    reports.insert(0, report)
+    return {
+        "version": "2.0.0",
+        "updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "reports": reports,
+    }
+
+
 def export_dashboard_results(
     *,
     project_root: Path,
@@ -178,38 +248,20 @@ def export_dashboard_results(
     shutil.copy2(results_path, export_path)
 
     index_path = public_dir / "index.json"
-    if index_path.exists():
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            index = {"version": "1.1.0", "runs": []}
-    else:
-        index = {"version": "1.1.0", "runs": []}
-
-    if not isinstance(index, dict):
-        index = {"version": "1.1.0", "runs": []}
-    raw_runs = index.get("runs", [])
-    if not isinstance(raw_runs, list):
-        raw_runs = []
-    runs = [run for run in raw_runs if isinstance(run, dict) and run.get("run_id") != run_id]
-    runs.insert(
-        0,
-        {
+    index = _load_dashboard_index(index_path)
+    report = {
+        "report_id": run_id,
+        "created_at": _utc_iso(started_at),
+        "account_id": account.account_id,
+        "target": account.account_name or account.account_id,
+        "risk": "low",
+        "status": summary.get("status", "error"),
+        "audit": {
             "run_id": run_id,
-            "date": started_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "source": "audit",
-            "target": account.account_name or account.account_id,
-            "risk": "low",
-            "status": summary.get("status", "error"),
             "file": f"{run_id}.json",
         },
-    )
-
-    index = {
-        "version": "1.1.0",
-        "updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "runs": runs,
     }
+    index = _upsert_report(index, report)
     index_path.write_text(
         json.dumps(index, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

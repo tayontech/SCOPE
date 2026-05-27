@@ -21,6 +21,33 @@ def valid_envelope(module_name: str) -> dict[str, Any]:
     }
 
 
+def valid_dashboard_idea() -> dict[str, Any]:
+    return {
+        "name": "Privileged Role Usage Review",
+        "type": "review_dashboard",
+        "objective": "Track usage of high-privilege roles involved in validated attack paths.",
+        "why_dashboard_not_detection": "Role usage may be legitimate and needs trend review before alert thresholds exist.",
+        "severity": "high",
+        "category": "privilege_escalation",
+        "source_attack_paths": ["Validated policy mutation path"],
+        "source_run_ids": ["audit-20260517-120000-all"],
+        "suggested_panels": [
+            {
+                "title": "Top principals assuming privileged roles",
+                "visualization": "table",
+                "question": "Which principals assume privileged roles most often?",
+                "fields": ["userIdentity.arn", "requestParameters.roleArn", "sourceIPAddress", "awsRegion", "count"],
+            }
+        ],
+        "required_data_sources": ["aws_api"],
+        "useful_fields": ["eventName", "userIdentity.arn", "requestParameters.roleArn", "sourceIPAddress", "awsRegion"],
+        "refresh_cadence": "daily",
+        "owner": "cloud security",
+        "coverage_caveats": [],
+        "promotion_triggers": ["new principal assumes role"],
+    }
+
+
 def valid_controls_results() -> dict[str, Any]:
     return {
         "account_id": "123456789012",
@@ -29,14 +56,15 @@ def valid_controls_results() -> dict[str, Any]:
         "timestamp": "2026-05-17T12:00:00Z",
         "audit_runs_analyzed": ["audit-20260517-120000-all"],
         "summary": {
-            "guardrails": 0,
+            "org_wide_issues": 0,
             "detections": 1,
+            "dashboards": 1,
             "policy_replacements": 0,
             "remediation_items": 0,
             "validation_status": "pass",
             "severity": "high",
         },
-        "guardrails": [],
+        "org_wide_issues": [],
         "detections": [
             {
                 "name": "Policy Mutation Sequence",
@@ -55,6 +83,7 @@ def valid_controls_results() -> dict[str, Any]:
                 "validation_status": "not_validated",
             }
         ],
+        "dashboards": [valid_dashboard_idea()],
         "policy_replacements": [],
         "remediation": {"file": "remediation-plan.md", "items": 0},
         "validation": {"status": "pass", "blocks": 0, "warns": 0},
@@ -96,6 +125,18 @@ def valid_exploit_results() -> dict[str, Any]:
                     {
                         "description": "Set the default policy version.",
                         "action": "aws iam set-default-policy-version --policy-arn arn:aws:iam::123456789012:policy/example --version-id v2",
+                    }
+                ],
+                "aws_cli_commands": [
+                    {
+                        "step": 1,
+                        "description": "Set the default policy version.",
+                        "command": "aws iam set-default-policy-version --policy-arn arn:aws:iam::123456789012:policy/example --version-id v2",
+                        "requires_operator_approval": True,
+                        "mutates_aws": True,
+                        "prerequisites": [],
+                        "cleanup": [],
+                        "source_basis": ["validated role policy escalation"],
                     }
                 ],
                 "iam_policy": {"Version": "2012-10-17", "Statement": []},
@@ -170,7 +211,7 @@ def assert_blocked(result: subprocess.CompletedProcess[str], label: str) -> None
 
 
 def test_hook_recognizes_new_module_envelopes(tmp_path: Path) -> None:
-    for module_name in ["bedrock", "cognito", "dynamodb", "ssm"]:
+    for module_name in ["bedrock", "cognito", "dynamodb", "ecs", "ssm"]:
         envelope = valid_envelope(module_name)
         del envelope["resources"]
         result = run_hook(tmp_path, envelope, f"{module_name}.json")
@@ -239,6 +280,57 @@ def test_hook_accepts_envelope_without_coverage_and_errors(tmp_path: Path) -> No
     assert_accepted(result, "envelope without optional coverage/errors")
 
 
+def test_audit_hook_rejects_malformed_aws_cli_commands(tmp_path: Path) -> None:
+    payload = valid_audit_results()
+    payload["attack_paths"] = [
+        {
+            "id": "path-1",
+            "source_candidate_id": "candidate-1",
+            "validation_status": "validated",
+            "name": "Validated PassRole path",
+            "severity": "critical",
+            "category": "privilege_escalation",
+            "description": "Validated path with replay commands.",
+            "hops": [
+                {
+                    "id": "hop-1",
+                    "transition": "permission_escalation",
+                    "from_context": {"principal": "arn:aws:iam::123456789012:user/example"},
+                    "action": "iam:PassRole",
+                    "target": "arn:aws:iam::123456789012:role/Admin",
+                    "resulting_context": {"principal": "arn:aws:iam::123456789012:user/example"},
+                    "capability_gained": "Can pass role",
+                    "required": ["iam:PassRole"],
+                    "validation_type": "graph_edge",
+                    "evidence": [{"type": "graph_edge", "id": "edge-1"}],
+                    "assumptions": [],
+                }
+            ],
+            "runtime_assumptions": [],
+            "coverage_caveats": [],
+            "aws_cli_commands": [
+                {
+                    "step": 1,
+                    "description": "Bad command",
+                    "command": "python replay.py",
+                    "requires_operator_approval": True,
+                    "mutates_aws": True,
+                    "prerequisites": [],
+                    "cleanup": [],
+                    "source_basis": ["hop-1"],
+                }
+            ],
+        }
+    ]
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "malformed audit aws_cli_commands should fail")
+    reason = parse_decision(result.stdout)["reason"]
+    assert "aws_cli_commands" in reason
+    assert "must start with 'aws '" in reason
+
+
 def test_exploit_hook_accepts_attack_paths_contract(tmp_path: Path) -> None:
     result = run_hook(tmp_path, valid_exploit_results(), "results.json")
     assert_accepted(result, "exploit attack_paths contract should pass")
@@ -254,6 +346,17 @@ def test_exploit_hook_rejects_legacy_paths_contract(tmp_path: Path) -> None:
     reason = parse_decision(result.stdout)["reason"]
     assert "attack_paths" in reason
     assert "legacy 'paths'" in reason
+
+
+def test_exploit_hook_rejects_malformed_aws_cli_commands(tmp_path: Path) -> None:
+    payload = valid_exploit_results()
+    payload["attack_paths"][0]["aws_cli_commands"][0]["command"] = "python exploit.py"
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_blocked(result, "malformed aws_cli_commands should fail")
+    assert "aws_cli_commands" in parse_decision(result.stdout)["reason"]
+    assert "must start with 'aws '" in parse_decision(result.stdout)["reason"]
 
 
 def test_audit_hook_blocks_malformed_public_entrypoints(tmp_path: Path) -> None:
@@ -332,6 +435,90 @@ def test_audit_hook_accepts_public_entrypoint_observation_without_transition(
     result = run_hook(tmp_path, payload, "results.json")
 
     assert_accepted(result, "public entrypoint observation without transition")
+
+
+def test_audit_hook_accepts_all_schema_graph_edge_types(tmp_path: Path) -> None:
+    payload = valid_audit_results()
+    edge_types = [
+        "priv_esc",
+        "trust",
+        "data_access",
+        "network",
+        "service",
+        "public_access",
+        "cross_account",
+        "membership",
+        "executes_as",
+        "invokes",
+        "authenticates_to",
+        "resource_policy_allows",
+        "resource_policy_statement",
+        "event_source",
+        "encrypted_by",
+    ]
+    payload["graph"] = {
+        "nodes": [
+            {"id": "node-a", "label": "node-a", "type": "role"},
+            {"id": "node-b", "label": "node-b", "type": "data"},
+        ],
+        "edges": [
+            {"source": "node-a", "target": "node-b", "edge_type": edge_type}
+            for edge_type in edge_types
+        ],
+    }
+
+    result = run_hook(tmp_path, payload, "results.json")
+
+    assert_accepted(result, "audit graph edge types allowed by schema")
+
+
+def test_schema_hook_reads_graph_edge_types_from_audit_schema() -> None:
+    body = HOOK.read_text()
+
+    assert "audit_schema_edge_types_json" in body
+    assert ".properties.graph.properties.edges.items.properties.edge_type.enum" in body
+    assert "--argjson valid \"$ALLOWED_EDGE_TYPES_JSON\"" in body
+
+
+def test_controls_hook_rejects_malformed_dashboard_ideas(tmp_path: Path) -> None:
+    controls = valid_controls_results()
+    controls["dashboards"][0].pop("why_dashboard_not_detection")
+    result = run_hook(tmp_path, controls, "controls-results.json")
+    assert_blocked(result, "controls malformed dashboards")
+    assert "dashboards" in result.stdout
+    assert "why_dashboard_not_detection" in result.stdout
+
+
+def test_controls_hook_rejects_dashboards_when_not_array(tmp_path: Path) -> None:
+    controls = valid_controls_results()
+    controls["dashboards"] = {}
+    controls["summary"]["dashboards"] = 0
+
+    result = run_hook(tmp_path, controls, "controls-results.json")
+
+    assert_blocked(result, "controls dashboards must be array")
+    assert "'dashboards' must be an array" in parse_decision(result.stdout)["reason"]
+
+
+def test_controls_hook_rejects_dashboard_panel_visualization_enum(tmp_path: Path) -> None:
+    controls = valid_controls_results()
+    controls["dashboards"][0]["suggested_panels"][0]["visualization"] = "pie"
+
+    result = run_hook(tmp_path, controls, "controls-results.json")
+
+    assert_blocked(result, "controls dashboard panel visualization enum")
+    assert "suggested_panels[].visualization" in parse_decision(result.stdout)["reason"]
+
+
+def test_controls_hook_rejects_dashboard_panel_missing_required_fields(tmp_path: Path) -> None:
+    for field in ["title", "visualization", "question", "fields"]:
+        controls = valid_controls_results()
+        controls["dashboards"][0]["suggested_panels"][0].pop(field)
+
+        result = run_hook(tmp_path, controls, "controls-results.json")
+
+        assert_blocked(result, f"controls dashboard panel missing {field}")
+        assert "suggested_panels[] entries must include title, visualization, question, and fields" in parse_decision(result.stdout)["reason"]
 
 
 def test_controls_hook_requires_detection_production_fields(tmp_path: Path) -> None:

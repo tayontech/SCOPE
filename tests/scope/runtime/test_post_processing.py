@@ -229,19 +229,23 @@ def test_export_dashboard_results_writes_public_json_and_upserts_index(tmp_path:
     index = json.loads(
         (project_root / "dashboard" / "public" / "index.json").read_text(encoding="utf-8")
     )
-    assert index["version"] == "1.1.0"
+    assert index["version"] == "2.0.0"
     assert "updated" in index
-    assert index["runs"] == [
+    assert index["reports"] == [
         {
-            "run_id": "prod-123456789012-2026-05-21T003147Z",
-            "date": "2026-05-21T00:31:47Z",
-            "source": "audit",
+            "report_id": "prod-123456789012-2026-05-21T003147Z",
+            "created_at": "2026-05-21T00:31:47Z",
+            "account_id": "123456789012",
             "target": "prod",
             "risk": "low",
             "status": "complete",
-            "file": "prod-123456789012-2026-05-21T003147Z.json",
+            "audit": {
+                "run_id": "prod-123456789012-2026-05-21T003147Z",
+                "file": "prod-123456789012-2026-05-21T003147Z.json",
+            },
         }
     ]
+    assert "runs" not in index
 
 
 def test_export_dashboard_results_replaces_existing_run_and_preserves_others(tmp_path: Path) -> None:
@@ -251,10 +255,16 @@ def test_export_dashboard_results_replaces_existing_run_and_preserves_others(tmp
     (public_dir / "index.json").write_text(
         json.dumps(
             {
-                "version": "1.1.0",
-                "runs": [
-                    {"run_id": "old", "file": "old.json", "source": "audit"},
-                    {"run_id": "current", "file": "stale.json", "source": "audit"},
+                "version": "2.0.0",
+                "reports": [
+                    {
+                        "report_id": "old",
+                        "audit": {"run_id": "old", "file": "old.json"},
+                    },
+                    {
+                        "report_id": "current",
+                        "audit": {"run_id": "current", "file": "stale.json"},
+                    },
                 ],
             }
         ),
@@ -276,17 +286,17 @@ def test_export_dashboard_results_replaces_existing_run_and_preserves_others(tmp
     )
 
     index = json.loads((public_dir / "index.json").read_text(encoding="utf-8"))
-    assert [run["run_id"] for run in index["runs"]] == ["current", "old"]
-    assert index["runs"][0]["file"] == "current.json"
-    assert index["runs"][0]["target"] == "123456789012"
-    assert index["runs"][0]["status"] == "partial"
+    assert [report["report_id"] for report in index["reports"]] == ["current", "old"]
+    assert index["reports"][0]["audit"]["file"] == "current.json"
+    assert index["reports"][0]["target"] == "123456789012"
+    assert index["reports"][0]["status"] == "partial"
 
 
 def test_export_dashboard_results_replaces_malformed_index_shape(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     public_dir = project_root / "dashboard" / "public"
     public_dir.mkdir(parents=True)
-    (public_dir / "index.json").write_text('{"runs": "bad"}\n', encoding="utf-8")
+    (public_dir / "index.json").write_text('{"reports": "bad"}\n', encoding="utf-8")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     results_path = run_dir / "results.json"
@@ -303,7 +313,51 @@ def test_export_dashboard_results_replaces_malformed_index_shape(tmp_path: Path)
     )
 
     index = json.loads((public_dir / "index.json").read_text(encoding="utf-8"))
-    assert index["version"] == "1.1.0"
-    assert len(index["runs"]) == 1
-    assert index["runs"][0]["run_id"] == "current"
-    assert index["runs"][0]["target"] == "prod"
+    assert index["version"] == "2.0.0"
+    assert len(index["reports"]) == 1
+    assert index["reports"][0]["report_id"] == "current"
+    assert index["reports"][0]["target"] == "prod"
+
+
+def test_export_dashboard_results_migrates_legacy_runs_to_reports(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    public_dir = project_root / "dashboard" / "public"
+    public_dir.mkdir(parents=True)
+    (public_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "version": "1.1.0",
+                "runs": [
+                    {
+                        "run_id": "legacy",
+                        "date": "2026-05-20T00:00:00Z",
+                        "source": "audit",
+                        "target": "prod",
+                        "risk": "medium",
+                        "status": "complete",
+                        "file": "legacy.json",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    results_path = run_dir / "results.json"
+    results_path.write_text("{}\n", encoding="utf-8")
+    account = AccountContext("123456789012", "prod", True, "config/accounts.json")
+
+    export_dashboard_results(
+        project_root=project_root,
+        results_path=results_path,
+        run_id="current",
+        started_at=datetime(2026, 5, 21, 0, 31, 47, tzinfo=timezone.utc),
+        account=account,
+        summary={"status": "complete"},
+    )
+
+    index = json.loads((public_dir / "index.json").read_text(encoding="utf-8"))
+    assert [report["report_id"] for report in index["reports"]] == ["current", "legacy"]
+    assert index["reports"][1]["audit"] == {"run_id": "legacy", "file": "legacy.json"}
+    assert "runs" not in index

@@ -151,3 +151,85 @@ def test_lambda_does_not_emit_env_values_and_flags_policy_wildcard():
         "function_url_enabled",
         "wildcard_resource_policy",
     }
+
+
+def test_lambda_preserves_resource_policy_statements_and_function_url_auth_type():
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "FunctionUrlInvoke",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "lambda:InvokeFunctionUrl",
+                "Resource": "arn:aws:lambda:us-east-1:123456789012:function:my-test-function",
+                "Condition": {"StringEquals": {"lambda:FunctionUrlAuthType": "NONE"}},
+            }
+        ],
+    }
+    lambda_client = FakeClient(
+        {
+            "list_functions": {"Functions": [_function()]},
+            "get_function_url_config": {
+                "FunctionUrl": "https://example.lambda-url.us-east-1.on.aws/",
+                "AuthType": "NONE",
+                "InvokeMode": "BUFFERED",
+                "Cors": {"AllowOrigins": ["*"]},
+            },
+            "get_policy": {"Policy": json.dumps(policy)},
+        }
+    )
+
+    envelope = run(FakeFactory(**{"lambda": lambda_client}), "us-east-1")
+
+    function = envelope.resources[0]
+    assert function["function_url_config"]["auth_type"] == "NONE"
+    assert function["function_url_config"]["invoke_mode"] == "BUFFERED"
+    assert function["resource_policy_document"] == policy
+    assert function["resource_policy_statements"][0]["sid"] == "FunctionUrlInvoke"
+    assert function["resource_policy_statements"][0]["normalized_actions"] == ["lambda:InvokeFunctionUrl"]
+
+
+def test_lambda_collects_event_source_mappings_for_sqs_sources():
+    function_arn = "arn:aws:lambda:us-east-1:123456789012:function:processor"
+    queue_arn = "arn:aws:sqs:us-east-1:123456789012:uploads-queue"
+    lambda_client = FakeClient(
+        {
+            "list_functions": {
+                "Functions": [
+                    _function(
+                        FunctionName="processor",
+                        FunctionArn=function_arn,
+                        Role="arn:aws:iam::123456789012:role/processor-role",
+                    )
+                ]
+            },
+            "get_function_url_config": {},
+            "get_policy": {},
+            "list_event_source_mappings": {
+                "EventSourceMappings": [
+                    {
+                        "UUID": "mapping-1",
+                        "EventSourceArn": queue_arn,
+                        "FunctionArn": function_arn,
+                        "State": "Enabled",
+                        "BatchSize": 10,
+                    }
+                ]
+            },
+        }
+    )
+
+    envelope = run(FakeFactory(**{"lambda": lambda_client}), "us-east-1")
+
+    function = envelope.resources[0]
+    assert function["event_source_mappings_status"] == "present"
+    assert function["event_source_mappings"] == [
+        {
+            "uuid": "mapping-1",
+            "event_source_arn": queue_arn,
+            "function_arn": function_arn,
+            "state": "Enabled",
+            "batch_size": 10,
+        }
+    ]

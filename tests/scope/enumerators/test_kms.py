@@ -184,3 +184,61 @@ def test_kms_rotation_unsupported_is_optional_skip():
     coverage = next(entry for entry in envelope.coverage if entry.check == "rotation_status")
     assert coverage.status == "skipped"
     assert coverage.skipped == 1
+
+
+def test_kms_preserves_key_policy_statements_and_grant_constraints():
+    key_arn = "arn:aws:kms:us-east-1:123456789012:key/aaaa-1111-bbbb-2222"
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "AllowS3Decrypt",
+                "Effect": "Allow",
+                "Principal": {"Service": "s3.amazonaws.com"},
+                "Action": "kms:Decrypt",
+                "Resource": "*",
+                "Condition": {"StringEquals": {"kms:ViaService": "s3.us-east-1.amazonaws.com"}},
+            }
+        ],
+    }
+    kms = FakeClient(
+        {
+            "list_keys": {"Keys": [{"KeyId": "aaaa-1111-bbbb-2222"}]},
+            "describe_key": {
+                "KeyMetadata": {
+                    "KeyId": "aaaa-1111-bbbb-2222",
+                    "Arn": key_arn,
+                    "KeyManager": "CUSTOMER",
+                    "KeyState": "Enabled",
+                    "KeyUsage": "ENCRYPT_DECRYPT",
+                },
+            },
+            "get_key_policy": {"Policy": json.dumps(policy)},
+            "list_grants": {
+                "Grants": [
+                    {
+                        "GrantId": "grant-1",
+                        "GranteePrincipal": "arn:aws:iam::999999999999:role/Reader",
+                        "Operations": ["Decrypt"],
+                        "RetiringPrincipal": "arn:aws:iam::123456789012:root",
+                        "Constraints": {
+                            "EncryptionContextEquals": {
+                                "aws:s3:arn": "arn:aws:s3:::sensitive/object"
+                            }
+                        },
+                    }
+                ]
+            },
+            "get_key_rotation_status": {"KeyRotationEnabled": True},
+        }
+    )
+
+    envelope = run(FakeFactory(kms=kms), "us-east-1")
+
+    key = envelope.resources[0]
+    assert key["resource_policy_document"] == policy
+    assert key["resource_policy_statements"][0]["service_principals"] == ["s3.amazonaws.com"]
+    assert key["resource_policy_statements"][0]["normalized_actions"] == ["kms:Decrypt"]
+    assert key["grants"][0]["constraints"] == {
+        "EncryptionContextEquals": {"aws:s3:arn": "arn:aws:s3:::sensitive/object"}
+    }

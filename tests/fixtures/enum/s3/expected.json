@@ -35,6 +35,7 @@
       "encryption_status": "present",
       "logging": null,
       "logging_status": "absent",
+      "notification_configuration_status": "absent",
       "acl_grants": [
         {
           "grantee_type": "CanonicalUser",
@@ -95,6 +96,15 @@
     },
     {
       "check": "bucket_logging",
+      "scope": "per_resource",
+      "status": "complete",
+      "succeeded": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reasons": []
+    },
+    {
+      "check": "bucket_notification_configuration",
       "scope": "per_resource",
       "status": "complete",
       "succeeded": 1,

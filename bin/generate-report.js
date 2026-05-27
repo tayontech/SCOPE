@@ -6,17 +6,17 @@
 // Usage:
 //   node bin/generate-report.js [output-path]
 //   npm run dashboard                          (from dashboard/)
-//   npm run dashboard -- ../dashboard.html     (custom output path)
+//   npm run dashboard -- ../dashboard/reports/custom.html     (custom output path)
 //
 // The script:
 //   1. Runs `vite build` to produce dist/
 //   2. Reads the built HTML, JS, and CSS from dist/
 //   3. Reads all JSON data from dashboard/public/ (via index.json)
 //   4. Inlines everything into a single dashboard.html
-//   5. Writes to the specified output path (default: $RUN_DIR/dashboard.html or ./<run-id>-dashboard.html)
+//   5. Writes to the specified output path (default: $RUN_DIR/dashboard.html or dashboard/reports/<run-id>-dashboard.html)
 
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync } from "node:fs";
 import { join, dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +25,26 @@ const __dirname = dirname(__filename);
 const dashboardDir = join(__dirname, "..", "dashboard");
 const publicDir = join(dashboardDir, "public");
 const distDir = join(dashboardDir, "dist");
+const reportsDir = join(dashboardDir, "reports");
+const validSources = new Set(["audit", "exploit", "controls"]);
+
+function canonicalSource(explicitSource, fallbackSource = "audit") {
+  if (validSources.has(explicitSource)) return explicitSource;
+  if (typeof explicitSource === "string" && explicitSource.startsWith("svc:")) {
+    return validSources.has(fallbackSource) ? fallbackSource : "audit";
+  }
+  if (explicitSource) return null;
+  return validSources.has(fallbackSource) ? fallbackSource : null;
+}
+
+function jsonForInlineScript(value) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+}
 
 function readAuditModule(auditRunDir, service) {
   const nestedDir = join(auditRunDir, "modules", service);
@@ -49,6 +69,84 @@ function resourcesOf(moduleData) {
   if (Array.isArray(moduleData?.resources)) return moduleData.resources;
   if (Array.isArray(moduleData?.findings)) return moduleData.findings;
   return [];
+}
+
+function inlineControlsArtifacts(json) {
+  const file = json?.remediation?.file;
+  if (json?.source !== "controls" || typeof file !== "string" || json.remediation.markdown) {
+    return json;
+  }
+  const remediationPath = resolve(file);
+  if (!existsSync(remediationPath)) {
+    return json;
+  }
+  return {
+    ...json,
+    remediation: {
+      ...json.remediation,
+      markdown: readFileSync(remediationPath, "utf-8"),
+    },
+  };
+}
+
+function reportSortValue(report) {
+  const parsed = Date.parse(report?.created_at || report?.date || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function migrateRunsToReports(runs) {
+  const byId = new Map();
+  for (const run of Array.isArray(runs) ? runs : []) {
+    const source = canonicalSource(run?.source);
+    if (source !== "audit" && source !== "exploit") continue;
+    const runId = run?.run_id;
+    if (!runId) continue;
+    if (!byId.has(runId)) {
+      const report = {
+        report_id: runId,
+        created_at: run.date || "",
+        account_id: run.account_id,
+        target: run.target || "",
+        risk: run.risk || "low",
+        status: run.status || "complete",
+      };
+      report[source] = {
+        run_id: runId,
+        file: run.file || `${runId}.json`,
+      };
+      byId.set(runId, report);
+    }
+  }
+  return [...byId.values()];
+}
+
+function normalizeReports(reports) {
+  const clean = [];
+  for (const report of Array.isArray(reports) ? reports : []) {
+    if (!report || typeof report !== "object") continue;
+    if (!report.report_id || (!report.audit?.file && !report.exploit?.file)) continue;
+    clean.push(report);
+  }
+  return clean.sort((a, b) => reportSortValue(b) - reportSortValue(a));
+}
+
+function reportsFromIndex(index) {
+  const reports = normalizeReports(index?.reports);
+  if (reports.length > 0) return reports;
+  return migrateRunsToReports(index?.runs || []);
+}
+
+function selectReportForInline(reports) {
+  if (currentRunId) {
+    const selected = reports.find((report) => (
+      report.report_id === currentRunId ||
+      report.audit?.run_id === currentRunId ||
+      report.exploit?.run_id === currentRunId ||
+      report.controls?.run_id === currentRunId
+    ));
+    if (selected) return selected;
+  }
+  return reports[0] || null;
 }
 
 // --- Step 1: Install dependencies if needed, then build the dashboard ---
@@ -105,7 +203,7 @@ const currentRunId = runDir ? basename(runDir) : null;
 if (existsSync(dashboardIndexPath)) {
   try {
     let dashIndex = JSON.parse(readFileSync(dashboardIndexPath, "utf-8"));
-    const existingRuns = dashIndex?.runs || [];
+    const reports = reportsFromIndex(dashIndex);
 
     // Look up status for the current run from data/index.json (if available)
     let currentRunStatus = "complete";
@@ -119,67 +217,34 @@ if (existsSync(dashboardIndexPath)) {
       }
     }
 
-    // Single-pass filter: cull orphans + dedup for current run_id
-    const culledRuns = [];
+    // Single-pass filter: cull report entries whose source files are gone.
+    const culledReports = [];
     let orphanCount = 0;
-    for (const run of existingRuns) {
-      const file = run.file || `${run.run_id}.json`;
-      const filePath = join(publicDir, file);
-      if (!existsSync(filePath)) {
-        // Orphan entry — the data file is gone; skip
+    for (const report of reports) {
+      const auditFile = report.audit?.file;
+      const exploitFile = report.exploit?.file;
+      const controlsFile = report.controls?.file;
+      if ((auditFile && !existsSync(join(publicDir, auditFile))) || (exploitFile && !existsSync(join(publicDir, exploitFile))) || (controlsFile && !existsSync(join(publicDir, controlsFile)))) {
         orphanCount++;
-        console.log(`[SCOPE] Culled orphan dashboard entry: ${run.run_id}`);
+        console.log(`[SCOPE] Culled orphan dashboard report: ${report.report_id}`);
         continue;
       }
-      if (run.run_id === currentRunId) {
-        // Dedup: remove the stale entry; fresh one will be prepended below
-        continue;
+      if (currentRunId && (report.report_id === currentRunId || report.audit?.run_id === currentRunId || report.exploit?.run_id === currentRunId || report.controls?.run_id === currentRunId)) {
+        report.status = currentRunStatus || report.status || "complete";
       }
-      culledRuns.push(run);
-    }
-
-    // Propagate status: update status field on each run in the culled list using data/index.json
-    // (so existing entries get status backfilled if they were written before status support)
-    if (existsSync(dataIndexPath)) {
-      try {
-        const dataIndex = JSON.parse(readFileSync(dataIndexPath, "utf-8"));
-        const dataRunMap = new Map((dataIndex?.runs || []).map((r) => [r.run_id, r]));
-        for (const run of culledRuns) {
-          if (!run.status) {
-            const dataEntry = dataRunMap.get(run.run_id);
-            if (dataEntry?.status) run.status = dataEntry.status;
-            else run.status = "complete"; // backward compat default
-          }
-        }
-      } catch (_) { /* status backfill is best-effort */ }
-    }
-
-    // Prepend the new/updated entry (if we know the current run_id and file exists)
-    if (currentRunId) {
-      const currentFile = `${currentRunId}.json`;
-      const currentFilePath = join(publicDir, currentFile);
-      if (existsSync(currentFilePath)) {
-        // Find any existing run in existingRuns for metadata (source, date, etc.)
-        const existingEntry = existingRuns.find((r) => r.run_id === currentRunId) || {};
-        culledRuns.unshift({
-          ...existingEntry,
-          run_id: currentRunId,
-          status: currentRunStatus,
-          file: currentFile,
-        });
-      }
+      culledReports.push(report);
     }
 
     // Write updated index atomically
     const updatedIndex = {
-      version: "1.1.0",
+      version: "2.0.0",
       updated: new Date().toISOString(),
-      runs: culledRuns,
+      reports: culledReports.sort((a, b) => reportSortValue(b) - reportSortValue(a)),
     };
     writeFileSync(dashboardIndexTmpPath, JSON.stringify(updatedIndex, null, 2), "utf-8");
     renameSync(dashboardIndexTmpPath, dashboardIndexPath);
     if (orphanCount > 0) {
-      console.log(`[SCOPE] Dashboard index updated: culled ${orphanCount} orphan(s), version 1.1.0`);
+      console.log(`[SCOPE] Dashboard index updated: culled ${orphanCount} orphan(s), version 2.0.0`);
     }
   } catch (err) {
     console.warn("[SCOPE] Dashboard index update failed (non-blocking):", err.message);
@@ -191,21 +256,21 @@ const inlineData = {};
 
 if (existsSync(join(publicDir, "index.json"))) {
   const index = JSON.parse(readFileSync(join(publicDir, "index.json"), "utf-8"));
-  const runs = index?.runs || [];
+  const reports = reportsFromIndex(index);
+  const selectedReport = selectReportForInline(reports);
+  const selectedFiles = selectedReport ? [
+    ["audit", selectedReport.audit],
+    ["exploit", selectedReport.exploit],
+    ["controls", selectedReport.controls],
+  ].filter(([, entry]) => entry?.file) : [];
 
-  // Find latest run per source type (same logic as App.jsx)
-  const latestBySource = {};
-  for (const run of runs) {
-    const src = run.source || "audit";
-    if (!latestBySource[src]) latestBySource[src] = run;
-  }
-
-  for (const [src, run] of Object.entries(latestBySource)) {
-    const file = run.file || `${run.run_id}.json`;
+  for (const [src, entry] of selectedFiles) {
+    const file = entry.file;
     const filePath = join(publicDir, file);
     if (existsSync(filePath)) {
       try {
-        const json = JSON.parse(readFileSync(filePath, "utf-8"));
+        let json = JSON.parse(readFileSync(filePath, "utf-8"));
+        json = inlineControlsArtifacts(json);
         // Note: controls account_id backfill is done in a second pass below
         // (after all sources are loaded) to avoid order-dependence.
         // Edge backfill: derive graph edges from IAM trust policies when edges are empty
@@ -222,6 +287,7 @@ if (existsSync(join(publicDir, "index.json"))) {
             }
           }
           // 2. Fallback: parse IAM module data from the audit run directory for role trust policies
+          const run = entry;
           if (edges.length === 0 && run.run_id) {
             // Detect format: ARN-based ("arn:aws:...") or short ("user:name")
             const firstId = json.graph.nodes?.[0]?.id || "";
@@ -245,7 +311,8 @@ if (existsSync(join(publicDir, "index.json"))) {
                     edges.push({
                       source: `role:${role.resource_id}`,
                       target: targetId,
-                      type: 'trusts',
+                      edge_type: 'trust',
+                      trust_type: tr.trust_type || 'same-account',
                       label: `${tr.trust_type} trust`,
                     });
                   }
@@ -262,11 +329,12 @@ if (existsSync(join(publicDir, "index.json"))) {
           }
         }
         // Propagate status field from index entry into inlined data for dashboard badge rendering
-        if (run.status && run.status !== "complete") {
-          json._run_status = run.status;
+        if (selectedReport?.status && selectedReport.status !== "complete") {
+          json._run_status = selectedReport.status;
         }
+        json._dashboard_run_id = selectedReport.report_id;
         inlineData[src] = json;
-        console.log(`[SCOPE] Inlined ${src} data from ${file}${run.status && run.status !== "complete" ? ` [${run.status}]` : ""}`);
+        console.log(`[SCOPE] Inlined ${src} data from ${file}${selectedReport?.status && selectedReport.status !== "complete" ? ` [${selectedReport.status}]` : ""}`);
       } catch (err) {
         console.warn(`[SCOPE] Failed to read ${file}:`, err.message);
       }
@@ -285,8 +353,13 @@ if (existsSync(join(publicDir, "index.json"))) {
     const bySource = {};
     for (const file of jsonFiles.sort().reverse()) {
       try {
-        const json = JSON.parse(readFileSync(join(publicDir, file), "utf-8"));
-        const src = json.source || (file.startsWith("controls") ? "controls" : "audit");
+        let json = JSON.parse(readFileSync(join(publicDir, file), "utf-8"));
+        json = inlineControlsArtifacts(json);
+        const src = canonicalSource(json.source, file.startsWith("controls") ? "controls" : "audit");
+        if (!src) {
+          console.warn(`[SCOPE] Skipping ${file} with unsupported source: ${json.source}`);
+          continue;
+        }
         if (!bySource[src]) {
           bySource[src] = { json, file };
         }
@@ -300,10 +373,15 @@ if (existsSync(join(publicDir, "index.json"))) {
     // Last resort: try results.json
     const fallback = join(publicDir, "results.json");
     if (existsSync(fallback)) {
-      const json = JSON.parse(readFileSync(fallback, "utf-8"));
-      const src = json.source || "audit";
-      inlineData[src] = json;
-      console.log(`[SCOPE] Inlined ${src} data from results.json`);
+      let json = JSON.parse(readFileSync(fallback, "utf-8"));
+      json = inlineControlsArtifacts(json);
+      const src = canonicalSource(json.source);
+      if (src) {
+        inlineData[src] = json;
+        console.log(`[SCOPE] Inlined ${src} data from results.json`);
+      } else {
+        console.warn(`[SCOPE] Skipping results.json with unsupported source: ${json.source}`);
+      }
     }
   }
 }
@@ -320,7 +398,7 @@ if (Object.keys(inlineData).length === 0) {
 }
 
 // --- Step 5: Build self-contained HTML ---
-const dataScript = `<script>window.__SCOPE_INLINE_DATA__ = ${JSON.stringify(inlineData)};</script>`;
+const dataScript = `<script>window.__SCOPE_INLINE_DATA__ = ${jsonForInlineScript(inlineData)};</script>`;
 
 // Extract the original <head> content from the built HTML
 const headMatch = distHtml.match(/<head>([\s\S]*?)<\/head>/);
@@ -339,6 +417,7 @@ const reportHtml = `<!DOCTYPE html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SCOPE — Security Report</title>
+    <link rel="icon" href="data:," />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -370,15 +449,16 @@ if (!outputPath) {
   } else {
     // Derive filename from the latest run ID to avoid overwriting prior dashboards.
     // Each run gets its own dashboard file (e.g., audit-20260408-123456-all-dashboard.html).
-    const latestRunId = null
+    const latestRunId = currentRunId
       || (existsSync(join(publicDir, "index.json"))
-        ? (JSON.parse(readFileSync(join(publicDir, "index.json"), "utf-8")).runs?.[0]?.run_id)
+        ? selectReportForInline(reportsFromIndex(JSON.parse(readFileSync(join(publicDir, "index.json"), "utf-8"))))?.report_id
         : null);
     const dashName = latestRunId ? `${latestRunId}-dashboard.html` : "dashboard.html";
-    outputPath = join(dashboardDir, dashName);
+    outputPath = join(reportsDir, dashName);
   }
 }
 outputPath = resolve(outputPath);
+mkdirSync(dirname(outputPath), { recursive: true });
 
 writeFileSync(outputPath, reportHtml, "utf-8");
 const sizeKB = (Buffer.byteLength(reportHtml, "utf-8") / 1024).toFixed(1);

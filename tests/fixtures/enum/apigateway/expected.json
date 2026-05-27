@@ -7,6 +7,8 @@
       "region": "us-east-1",
       "name": "TestRestApi",
       "api_type": "REST",
+      "endpoint_configuration": null,
+      "public_endpoint": null,
       "authorizers": [
         {
           "type": "COGNITO_USER_POOLS",
@@ -31,6 +33,8 @@
       "region": "us-east-1",
       "name": "TestHttpApi",
       "api_type": "HTTP",
+      "disable_execute_api_endpoint": null,
+      "public_endpoint": null,
       "authorizers": [],
       "authorizers_status": "present",
       "stages": [

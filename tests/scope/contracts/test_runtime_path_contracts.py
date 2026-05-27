@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -20,19 +21,32 @@ def assert_not_contains(relative_path: str, needle: str) -> None:
     assert needle not in body, f"{relative_path} should not contain {needle!r}"
 
 
+def git_ls_files(pathspec: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files", pathspec],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
 def test_controls_naming_is_canonical() -> None:
     expected_paths = [
         "agents/scope-controls.md",
-        "agents/subagents/scope-controls-guardrails.md",
+        "agents/subagents/scope-controls-org-wide.md",
         "agents/subagents/scope-controls-policy.md",
         "agents/subagents/scope-controls-remediation.md",
         "agents/subagents/scope-controls-detections.md",
+        "agents/subagents/scope-controls-dashboards.md",
         "agents/subagents/scope-controls-validate.md",
         "config/schemas/controls.schema.json",
     ]
     removed_paths = [
         "agents/scope-defend.md",
         "agents/subagents/scope-defend-guardrails.md",
+        "agents/subagents/scope-controls-guardrails.md",
         "agents/subagents/scope-defend-policy.md",
         "agents/subagents/scope-defend-remediation.md",
         "agents/subagents/scope-defend-splunk.md",
@@ -94,16 +108,21 @@ def test_controls_naming_is_canonical() -> None:
 
 
 def test_runtime_path_contracts_use_runs_directory() -> None:
-    assert_contains("README.md", "scope/core/")
+    assert_contains("README.md", "ARCHITECTURE.md")
+    assert_contains("ARCHITECTURE.md", "scope.core")
     assert_not_contains("README.md", "scope.core/")
     assert_contains("README.md", "config/project-docs/PROJECT.md")
+    assert_contains("README.md", "docs/LLM-CONTEXT.md")
     assert_not_contains("README.md", "blob/main/PROJECT.md")
+    assert_contains("bin/generate-report.js", 'const reportsDir = join(dashboardDir, "reports")')
+    assert_contains("bin/generate-report.js", "dashboard/reports/<run-id>-dashboard.html")
+    assert_contains(".gitignore", "dashboard/reports/")
+    assert_not_contains(".gitignore", "dashboard/*-dashboard.html")
     assert_contains("agents/scope-controls.md", "/runs/audit-*")
     assert_not_contains("agents/scope-controls.md", "/audit/audit-*")
     assert_contains("agents/scope-investigate.md", "`runs/`")
     assert_not_contains("agents/scope-investigate.md", "`audit/`")
-    assert_not_contains("config/scps/README.md", "./audit/audit-*")
-    assert_contains("config/scps/README.md", "./runs/audit-*/controls/controls-*/policies/scp-deny-root.json")
+    assert not (ROOT / "config/scps").exists(), "config/scps should be removed"
     assert_contains("config/hooks/scope-agent-logger.sh", '"$CWD/runs/audit-"*')
     assert_not_contains("config/hooks/scope-agent-logger.sh", '"$CWD/audit/audit-"*')
     assert_contains("config/hooks/scope-artifact-check.sh", 'find "$CWD/runs" -maxdepth 1 -type d -name "audit-*"')
@@ -118,12 +137,49 @@ def test_runtime_path_contracts_use_runs_directory() -> None:
     assert_not_contains("bin/generate-report.js", 'join(dashboardDir, "..", "audit", run.run_id)')
 
 
+def test_project_docs_are_split_by_ownership() -> None:
+    project_docs = sorted(path.name for path in (ROOT / "config" / "project-docs").glob("*.md"))
+
+    assert project_docs == ["PROJECT.md"]
+    assert (ROOT / "docs" / "LLM-CONTEXT.md").exists()
+    assert "docs/architecture/" in read_repo_file(".gitignore")
+    assert git_ls_files("docs/architecture") == [], "docs/architecture should remain private and untracked"
+
+
+def test_architecture_uses_mermaid_and_current_platform_paths() -> None:
+    architecture = read_repo_file("ARCHITECTURE.md")
+
+    assert "```mermaid" in architecture
+    assert architecture.count("```mermaid") >= 5
+    assert "uv run python -m scope audit" in architecture
+    assert ".agents/hooks.json" in architecture
+    assert ".codex/hooks.json" in architecture
+    assert "runs `python -m scope audit`" not in architecture
+    assert "install.js" not in architecture
+    assert "scope-controls-guardrails" not in architecture
+    assert "scope-defend" not in architecture
+
+
+def test_agent_dashboard_index_contract_uses_reports_manifest() -> None:
+    audit = read_repo_file("agents/scope-audit.md")
+    exploit = read_repo_file("agents/scope-exploit.md")
+
+    for body in [audit, exploit]:
+        assert "dashboard/public/index.json" in body
+        assert "reports[]" in body
+        assert "Dashboard index | `dashboard/public/index.json` | Updated: upsert this run into `runs[]` array" not in body
+
+    assert 'INDEX_DATA=\'{"reports": []}\'' in exploit
+    assert ".reports |=" in exploit
+
+
 def test_controls_prompts_reject_legacy_audit_module_paths() -> None:
     controls_prompts = [
         "agents/scope-controls.md",
-        "agents/subagents/scope-controls-guardrails.md",
+        "agents/subagents/scope-controls-org-wide.md",
         "agents/subagents/scope-controls-remediation.md",
         "agents/subagents/scope-controls-policy.md",
+        "agents/subagents/scope-controls-dashboards.md",
         "agents/subagents/scope-controls-validate.md",
     ]
     stale_needles = [
@@ -140,7 +196,7 @@ def test_controls_prompts_reject_legacy_audit_module_paths() -> None:
             assert needle not in body, f"{relative_path} contains legacy handoff path {needle!r}"
 
     assert_contains("agents/scope-controls.md", "$AUDIT_RUN_DIR/modules/$SVC")
-    assert_contains("agents/subagents/scope-controls-guardrails.md", "$AUDIT_RUN_DIR/modules/<service>/<region>.json")
+    assert_contains("agents/subagents/scope-controls-org-wide.md", "$AUDIT_RUN_DIR/modules/<service>/<region>.json")
     assert_contains("agents/subagents/scope-controls-remediation.md", "AUDIT_RUN_DIR/modules/<service>/<region>.json")
     assert_contains("agents/subagents/scope-controls-policy.md", "$AUDIT_RUN_DIR/modules/iam/global.json")
     assert_contains("agents/subagents/scope-controls-validate.md", "$AUDIT_RUN_DIR/modules/iam/global.json")
@@ -182,7 +238,7 @@ def test_investigate_command_replaces_scope_hunt() -> None:
         assert not (ROOT / relative_path).exists(), f"{relative_path} should be removed"
 
     for relative_path in [
-        "bin/install.js",
+        "scope/install.py",
         "README.md",
         "ARCHITECTURE.md",
         "config/mcp-setup.md",
@@ -226,13 +282,122 @@ def test_investigate_prompt_uses_declared_splunk_tools_for_index_discovery() -> 
     splunk_patterns = read_repo_file("config/splunk-patterns.md")
     mcp_setup = read_repo_file("config/mcp-setup.md")
 
-    assert "get_indexes" not in body
-    assert "| rest /services/data/indexes" in body
-    assert "using `working_tool`" in body
+    assert "splunk_run_query" in body
+    assert "splunk_get_info" in body
+    assert "splunk_get_indexes" in body
+    assert "| rest /services/data/indexes" not in body
+    assert "Do not use SPL `rest` commands for index discovery" in body
+    assert "Store approved groupings in session memory as `index_catalog`" in body
+    assert "config/index.json" not in body
     assert "For RUN and INTEL modes, run this probe after subagent handoff" in body
-    assert "get_indexes MCP tool" not in splunk_patterns
-    assert "| rest /services/data/indexes | fields title" in splunk_patterns
-    assert "SCOPE does not depend on this tool" in mcp_setup
+    assert "splunk_get_indexes" in splunk_patterns
+    assert "There is no static index configuration file" in splunk_patterns
+    assert "config/index.json" not in splunk_patterns
+    assert "| rest /services/data/indexes | fields title" not in splunk_patterns
+    assert "Splunk MCP is optional" in mcp_setup
+    assert "current Splunk MCP 1.1 uses `splunk_run_query`, `splunk_get_info`, and `splunk_get_indexes`" in mcp_setup
+    assert "connected-mode runtime discovery" in mcp_setup
+
+
+def test_static_splunk_index_config_is_removed() -> None:
+    assert not (ROOT / "config/index.example.json").exists()
+    gitignore = read_repo_file(".gitignore")
+    for relative_path in [
+        "skills/scope-knowledge-load/SKILL.md",
+        "agents/subagents/scope-controls-detections.md",
+        "config/hooks/scope-spl-lint.sh",
+        "config/README.md",
+        ".gitignore",
+    ]:
+        assert "config/index.json" not in read_repo_file(relative_path)
+    assert "config/scps" not in gitignore
+    assert "install.js" not in gitignore
+    assert "runs/" in gitignore
+    assert "investigations/" in gitignore
+    assert "audit/" not in gitignore
+    assert "hunt/" not in gitignore
+    assert ".agents/mcp_config.json" in gitignore
+    assert ".gemini/antigravity-cli/mcp_config.json" in gitignore
+
+
+def test_splunk_cloud_path_does_not_assume_enterprise_security() -> None:
+    for relative_path in [
+        "agents/scope-investigate.md",
+        "agents/subagents/scope-investigate-alert.md",
+        "config/splunk-patterns.md",
+        "config/hooks/scope-spl-lint.sh",
+    ]:
+        body = read_repo_file(relative_path)
+        assert "index=notable" not in body
+        assert "notable_id" not in body
+        assert "Splunk ES" not in body
+        assert "Enterprise Security" not in body
+
+
+def test_splunk_patterns_expose_detection_building_blocks() -> None:
+    splunk_patterns = read_repo_file("config/splunk-patterns.md")
+    detections = read_repo_file("agents/subagents/scope-controls-detections.md")
+    lint_hook = read_repo_file("config/hooks/scope-spl-lint.sh")
+
+    expected_terms = [
+        "Detection Building Blocks",
+        "`eval` with `case`, `if`, `coalesce`, `lower`, `replace`",
+        "`rex field=<field>`",
+        "`spath input=<field>`",
+        "`json_extract` / `json_extract_exact`",
+        "`bin _time span=<window>` + `stats`",
+        "`timechart span=<window>`",
+        "Expensive correlation or fan-out commands",
+        "Side-effect commands",
+        "Use environment-dependent commands",
+    ]
+    for term in expected_terms:
+        assert term in splunk_patterns
+
+    assert "Splunk Cloud detection building blocks" in detections
+    assert "lookup enrichment" not in detections
+    assert "`lookup ... OUTPUTNEW ...`" not in splunk_patterns
+    assert "No environment-dependent commands" not in detections
+    assert "Environment-dependent command detected" not in lint_hook
+    assert "outputlookup" in lint_hook
+
+
+def test_mcp_docs_do_not_overclaim_generic_siem_support() -> None:
+    readme = read_repo_file("README.md")
+    mcp_setup = read_repo_file("config/mcp-setup.md")
+    installer = read_repo_file("scope/install.py")
+
+    assert "you can use any SIEM" not in readme
+    assert "adapts accordingly" not in readme
+    assert "SCOPE remains SPL-first" in readme
+    assert "Different SIEM MCP" in mcp_setup
+    assert "Current limitation: SCOPE controls detections and investigation templates generate SPL" in mcp_setup
+    assert "--no-splunk-mcp" in installer
+    assert "strip_splunk_mcp_servers" in installer
+
+
+def test_dashboard_controls_surface_uses_current_policy_language() -> None:
+    body = read_repo_file("dashboard/src/App.jsx")
+
+    expected_terms = [
+        "PolicyReplacementsList",
+        "policy_replacements",
+        "Policies",
+        "No policy replacements generated.",
+    ]
+    for term in expected_terms:
+        assert term in body
+
+    stale_terms = [
+        "Legacy Preventive",
+        "Legacy Resource",
+        "bundle.scp_names",
+        "bundle.rcp_names",
+        'category === "scp"',
+        'category === "rcp"',
+    ]
+    for term in stale_terms:
+        assert term not in body
 
 
 def test_investigate_intel_prompt_uses_investigation_terminology() -> None:

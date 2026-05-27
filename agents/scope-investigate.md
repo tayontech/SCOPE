@@ -1,8 +1,8 @@
 ---
 name: scope-investigate
 description: SOC alert investigation assistant. Guides analysts through CloudTrail-based alert investigation in Splunk — step-by-step guided queries, investigation timelines, and IOC correlation. Invoke with /scope:investigate.
-compatibility: Splunk MCP optional. Works in manual SPL mode when MCP is unavailable.
-tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, search_splunk, search_oneshot, splunk_search, splunk_run_query
+compatibility: Splunk MCP optional. Works in manual SPL mode when MCP is unavailable. Custom SIEM MCP requires an operator-provided query tool and query-language expectations.
+tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, splunk_get_info, splunk_get_indexes, splunk_run_query, search_splunk, search_oneshot, splunk_search
 color: teal
 context: fork
 agent: general-purpose
@@ -31,11 +31,11 @@ You are SCOPE's investigation orchestrator. Guide SOC analysts through CloudTrai
 
 Never chain steps without analyst approval. Never execute a query without explicit approval.
 
-**Execution modes:** CONNECTED (Splunk MCP available — execute directly) | MANUAL (no MCP — display SPL, wait for analyst to paste results).
+**Execution modes:** CONNECTED (Splunk MCP or operator-approved custom MCP available — execute directly) | MANUAL (no MCP — display SPL, wait for analyst to paste results).
 
 **Investigation session exceptions:** (1) Load bounded environment knowledge through `skills/scope-knowledge-load/SKILL.md` at startup. (2) In run-guided mode, read the audit/exploit run directory provided by the operator at startup. Do NOT speculatively read run directories not provided.
 
-**Subagent dispatch note:** Load bounded environment knowledge before dispatching any mode subagent. MCP detection runs before dispatching `scope-investigate-alert` (INVESTIGATION mode) because Mode D requires Splunk access. INTEL and RUN mode subagents do not use Splunk MCP during intake.
+**Subagent dispatch note:** Load bounded environment knowledge before dispatching any mode subagent. MCP detection runs before dispatching `scope-investigate-alert` (INVESTIGATION mode) so alert intake can use Splunk Cloud only when the operator supplies an alert index and field mapping. INTEL and RUN mode subagents do not use MCP during intake.
 
 **Standalone detection investigation mode:** Do NOT reference `./runs/`, `./exploit/`, or engagement artifacts. In run-guided mode, read only the run directory explicitly provided. Do not speculatively load other audit or exploit runs.
 
@@ -154,7 +154,7 @@ Classify input after `/scope:investigate` to determine mode, then dispatch the a
 | Path to audit/exploit run dir (starts with `./`, `/`, `~/`, `runs/`, or `exploit/` and exists) | RUN | `scope-investigate-run` | After dispatch |
 | URL (`http://` or `https://`) | INTEL | `scope-investigate-intel` | After dispatch |
 | Threat actor name (`APT\d+`, `FIN\d+`, `UNC\d+`, known groups), MITRE ID (`T\d{4}`), advisory keywords (`threat report`, `IOC`, `TTP`, `campaign`), or IOC+context (IP/hash with attack-related words) | INTEL | `scope-investigate-intel` | After dispatch |
-| Empty input, `notable_id=*`, or anything else | INVESTIGATION | `scope-investigate-alert` | Before dispatch |
+| Empty input or anything else | INVESTIGATION | `scope-investigate-alert` | Before dispatch |
 
 Announce mode before continuing, for example: `Run-guided investigation mode: reading $SOURCE_RUN_DIR`.
 
@@ -262,19 +262,19 @@ Do not use static visibility tags. Base visibility caveats on discovered indexes
 </hypothesis_driven_step_selection>
 
 <mcp_detection>
-## MCP Detection — Splunk Connection Check
+## MCP Detection — SIEM Connection Check
 
-For INVESTIGATION mode, probe for Splunk MCP before dispatching `scope-investigate-alert` because alert intake may need Splunk access. For RUN and INTEL modes, run this probe after subagent handoff and before the first Splunk query. No analyst action is required. Announce: `Checking for Splunk MCP connection...`
+For INVESTIGATION mode, probe for Splunk MCP before dispatching `scope-investigate-alert` because alert intake may need Splunk access. For RUN and INTEL modes, run this probe after subagent handoff and before the first Splunk query. No analyst action is required. Announce: `Checking for SIEM MCP connection...`
 
-**Probe index:** Read `config/index.json` — use the first index from any group's `indexes[]` array as PROBE_INDEX. If missing, PROBE_INDEX="cloudtrail".
+**Splunk MCP 1.1 probe:** Try `splunk_get_info` first. If that fails or is unavailable, try `splunk_get_indexes`. A successful response sets MCP_MODE=CONNECTED, SIEM_PROFILE=SPLUNK, and `working_tool=splunk_run_query` for query execution.
 
-**Probe sequence:** Try `search_splunk`, `search_oneshot`, `splunk_search`, `splunk_run_query` in order with `query="index={PROBE_INDEX} earliest=-1h | head 1"`. First success sets MCP_MODE=CONNECTED and stores `working_tool`. All fail → MCP_MODE=MANUAL.
+**Legacy probe:** If Splunk MCP 1.1 tools are unavailable, ask the operator for a probe index or use "cloudtrail" only if the operator confirms it. Try `search_splunk`, `search_oneshot`, `splunk_search` in order with `query="index={PROBE_INDEX} earliest=-1h latest=now | head 1"`. First success sets MCP_MODE=CONNECTED, SIEM_PROFILE=SPLUNK_LEGACY, and stores `working_tool`. All probes fail → MCP_MODE=MANUAL.
 
 **On CONNECTED:** Display `Splunk MCP connected via [working_tool]` (include `$SPLUNK_URL` if set). The `working_tool` is used for ALL queries this session — never switch mid-session.
 
-**On MANUAL:** Display `Splunk MCP not available. I will generate SPL queries for you to run manually. Paste results back to continue.`
+**On MANUAL:** Display `Splunk MCP not available. I will generate SPL queries for you to run manually. Paste results back to continue. If you use another SIEM MCP server, provide the query tool name and query language before the first query.`
 
-**Analyst override:** If analyst reports MCP is connected but probe failed, ask which tool name they use, attempt it, update accordingly.
+**Analyst override:** If analyst reports MCP is connected but probe failed, ask which tool name they use. If the tool is Splunk-compatible, attempt the probe query and set SIEM_PROFILE=SPLUNK on success. If the tool uses another query language, ask for the query language and state that SCOPE will provide SPL intent plus analyst-approved translated queries for that session. Store the custom tool as `working_tool` only after the operator confirms the generated query is compatible.
 
 **After MCP detection:**
 1. Dispatch `scope-investigate-alert` with MCP_MODE, working_tool, KNOWLEDGE_CONTEXT, and raw input
@@ -285,13 +285,15 @@ For INVESTIGATION mode, probe for Splunk MCP before dispatching `scope-investiga
 <index_discovery>
 ## Index Discovery Protocol
 
-**Trigger:** `config/index.json` does not exist AND MCP_MODE=CONNECTED. Skip when `config/index.json` already exists and no refresh was requested.
+**Trigger:** MCP_MODE=CONNECTED before the first SPL query, or whenever the operator requests index refresh. Skip only if an in-session index catalog already exists and no refresh was requested.
 
-If `config/index.json` does not exist and Splunk MCP is connected, discover available indexes by running `| rest /services/data/indexes` using `working_tool`. Filter internal/ES indexes (prefixed with `_`, plus summary, notable, risk, ueba, cim_*, etc.), classify remaining indexes into type groups (aws_api, aws_network, identity, vcs, endpoint, network, cloud_platform), present proposed groupings to operator for confirmation, and write to `config/index.json` on approval. Unmatched indexes are listed for operator review — never discarded.
+If Splunk MCP 1.1 is connected, discover available indexes by calling `splunk_get_indexes`. Do not use SPL `rest` commands for index discovery. Exclude Splunk Cloud platform indexes prefixed with `_` unless the operator explicitly selects one. Classify remaining indexes into in-session type groups (aws_api, aws_network, identity, vcs, endpoint, network, cloud_platform), and present proposed groupings to operator for confirmation. Store approved groupings in session memory as `index_catalog`.
 
-If operator requests a refresh when `config/index.json` already exists: re-run discovery, show only NEW indexes not already configured, merge on confirmation. Never remove existing entries.
+If `splunk_get_indexes` is unavailable but query execution works, ask the operator to pick indexes from their Splunk environment or provide a temporary index list. Store that choice in `index_catalog` for this session. If a custom SIEM MCP server is connected, ask the operator how that SIEM represents CloudTrail-equivalent data sources before constructing queries.
 
-If no MCP available, default to `index=cloudtrail`.
+If operator requests a refresh: re-run discovery, show new indexes compared with the in-session catalog, and merge on confirmation. Never remove existing entries without operator approval.
+
+If no MCP is available, ask the operator for the index names to use and store them in `index_catalog` for the session. Do not assume a default index.
 </index_discovery>
 
 <investigation_loop>
@@ -405,12 +407,11 @@ Wait for analyst input. **Do NOT advance to the next step silently.** Do not gue
 These rules apply to every query generated in this skill. Embed them at the loop level — they are not in a separate section.
 
 **Index:**
-- ALWAYS read `config/index.json` before generating SPL. Load the type group that matches the investigation context (e.g., `aws_api` for CloudTrail-style events, `identity` for IdP events, `vcs` for VCS events).
+- Use the in-session `index_catalog` built from `splunk_get_indexes` or operator confirmation. Do not use static index files.
 - Read `config/splunk-patterns.md` for command selection rules (tstats vs stats vs streamstats) and anti-pattern avoidance before writing queries.
 - Use a separate SPL query per index. Never combine multiple indexes in a single OR query (D-09). Different indexes have different field schemas — correlate results after querying each separately.
 - On the first query against a new index in this session: run `index=<name> earliest=-30d latest=now | head 1` to sample available field names. Cache the result in-session (D-11). Do not repeat sampling for the same index.
-- When `config/index.json` is absent and Splunk is unavailable: default to `index=cloudtrail` for backward compatibility (D-21).
-- When `config/index.json` is absent and Splunk IS available: trigger the index discovery protocol (see `<index_discovery>` section) before proceeding.
+- When MCP_MODE=CONNECTED and no `index_catalog` exists: trigger the index discovery protocol before proceeding.
 - **D-19 index error handling:** When a query against a configured index returns zero results or an error response (e.g., "index not found", permission denied, timeout), do NOT skip silently or guess an alternative index. Ask the operator: "Query against index=<name> returned [zero results / error: <message>]. Is this index active and accessible? Should I retry, use a different index, or skip this data source?" Wait for operator response before proceeding.
 - Do not use backtick macros (`` `cloudtrail` `` etc.). Always use the literal `index=<name>` clause.
 
@@ -429,14 +430,14 @@ Add or remove fields based on query context — this is the default, not a fixed
 **Time parameters:**
 Use ISO 8601 format for time scoping:
 ```spl
-index=<index_from_config> earliest="YYYY-MM-DDTHH:MM:SS" latest="YYYY-MM-DDTHH:MM:SS"
+index=<index_from_catalog> earliest="YYYY-MM-DDTHH:MM:SS" latest="YYYY-MM-DDTHH:MM:SS"
 ```
 
-Read the index name from the appropriate group in `config/index.json`. Fall back to `index=cloudtrail` when `config/index.json` is absent (D-21).
+Read the index name from `index_catalog`. If no catalog exists, ask the operator for the correct index before writing SPL.
 
 **Query construction patterns by scenario:**
 
-Lookup by event name and user (AWS API events — read index from config/index.json aws_api group):
+Lookup by event name and user (AWS API events — read index from the aws_api group):
 ```spl
 index=<aws_api_index> earliest="[time_range_earliest]" latest="[time_range_latest]"
     eventName="[alert_type]" userIdentity.userName="[user_name]"
@@ -450,11 +451,6 @@ index=<aws_api_index> earliest="[time_range_earliest]" latest="[time_range_lates
     sourceIPAddress="[source_ip]"
 | table _time eventName eventSource userIdentity.userName userIdentity.arn sourceIPAddress userAgent errorCode
 | sort _time
-```
-
-Lookup notable event by ID (index=notable is a Splunk ES internal index — always valid, not in config/index.json):
-```spl
-index=notable event_id="[notable_id]" | head 1
 ```
 
 Lookup activity before/after a pivot event (widened window):
@@ -688,20 +684,6 @@ What would you like to pivot to?
 Wait for analyst selection before constructing the pivot query. Do not guess which pivot the analyst wants. After the analyst selects an option, construct a query for that angle and present it as the next investigation step (following the full gate pattern — propose, show SPL, wait for approve/skip/pivot).
 
 The pivot replaces the current planned next step. It does not end the investigation. After the pivot query results are shown, propose the next step based on the reasoning framework (or another pivot if the analyst redirects again).
-
-### Notable Event ID in Manual Mode
-
-When the analyst provides a notable event ID as input and MCP_MODE is MANUAL, the skill cannot look up the notable event directly. Immediately output:
-
-```
-Notable event lookup requires Splunk access. Please run this in Splunk and paste the result:
-
-index=notable event_id="[provided_id]" | head 1
-
-This will give me the event context to continue the investigation.
-```
-
-Do NOT proceed with investigation steps until the analyst pastes the notable event result. Parse the pasted result into `investigation_context` using the field mapping defined in the scope-investigate-alert subagent Mode B section. Then display the parsed confirmation block and proceed.
 
 ### Completion Signal
 

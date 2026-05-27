@@ -28,6 +28,7 @@ Transition = Literal[
     "data_access",
     "decrypt",
     "event_injection",
+    "authenticate",
 ]
 ValidationType = Literal[
     "graph",
@@ -180,6 +181,17 @@ class AttackValidation(AttackBaseModel):
         return self
 
 
+class AwsCliCommand(AttackBaseModel):
+    step: int
+    description: NonEmptyStr
+    command: NonEmptyStr
+    requires_operator_approval: bool
+    mutates_aws: bool
+    prerequisites: list[NonEmptyStr] = Field(default_factory=list)
+    cleanup: list[NonEmptyStr] = Field(default_factory=list)
+    source_basis: list[NonEmptyStr] = Field(default_factory=list)
+
+
 class FinalAttackPath(AttackBaseModel):
     id: NonEmptyStr
     source_candidate_id: NonEmptyStr
@@ -195,6 +207,8 @@ class FinalAttackPath(AttackBaseModel):
     detection_opportunities: list[NonEmptyStr] = Field(default_factory=list)
     mitre_techniques: list[NonEmptyStr] = Field(default_factory=list)
     remediation: list[NonEmptyStr] = Field(default_factory=list)
+    aws_cli_commands: list[AwsCliCommand] = Field(default_factory=list)
+    aws_cli_command_warnings: list[NonEmptyStr] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def require_consistent_final_path(self) -> FinalAttackPath:
@@ -207,3 +221,33 @@ class FinalAttackPath(AttackBaseModel):
                 "conditional final paths require runtime assumptions or coverage caveats"
             )
         return self
+
+
+class AttackPathGroupImpact(AttackBaseModel):
+    action: NonEmptyStr
+    resource: NonEmptyStr
+    resulting_context: NonEmptyStr
+
+
+class AttackPathGroupLeveragingAsset(AttackBaseModel):
+    id: NonEmptyStr
+    type: Literal["user", "role", "external", "resource", "unknown"]
+    arn: NonEmptyStr | None = None
+    path_ids: list[NonEmptyStr]
+
+
+class AttackPathGroup(AttackBaseModel):
+    id: NonEmptyStr
+    name: NonEmptyStr
+    severity: Severity
+    category: Category
+    validation_statuses: list[FinalValidationStatus]
+    primitive: NonEmptyStr
+    impact: AttackPathGroupImpact
+    representative_path_id: NonEmptyStr
+    member_path_ids: list[NonEmptyStr]
+    member_count: int = Field(ge=1)
+    source_principals: list[NonEmptyStr] = Field(default_factory=list)
+    leveraging_assets: list[AttackPathGroupLeveragingAsset] = Field(default_factory=list)
+    affected_resources: list[NonEmptyStr] = Field(default_factory=list)
+    description: NonEmptyStr

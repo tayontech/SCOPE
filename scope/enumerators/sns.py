@@ -5,10 +5,11 @@ from typing import Any
 
 from scope.core.coverage import CoverageTracker
 from scope.core.models import ModuleEnvelope
+from scope.enumerators.resource_policy import normalize_resource_policy
 
 
 PRIMARY_CHECKS = ["list_topics"]
-REQUIRED_CHECKS = ["topic_attributes"]
+REQUIRED_CHECKS = ["topic_attributes", "topic_subscriptions"]
 
 
 def _topic_name_from_arn(arn: str | None) -> str | None:
@@ -76,6 +77,8 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             "resource_policy": None,
             "kms_key_id": None,
             "subscriptions_confirmed": 0,
+            "subscriptions": [],
+            "subscriptions_status": None,
             "topic_attributes_status": None,
             "findings": [],
         }
@@ -85,6 +88,10 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             attributes = response.get("Attributes", {})
             principals = _extract_policy_principals(attributes.get("Policy"))
             topic_finding["resource_policy"] = {"principals": principals} if principals else None
+            normalized_policy = normalize_resource_policy(attributes.get("Policy"), account_id=factory.account_id)
+            if normalized_policy is not None:
+                topic_finding["resource_policy_document"] = normalized_policy["document"]
+                topic_finding["resource_policy_statements"] = normalized_policy["statements"]
             topic_finding["kms_key_id"] = attributes.get("KmsMasterKeyId")
             topic_finding["subscriptions_confirmed"] = int(attributes.get("SubscriptionsConfirmed") or 0)
             topic_finding["topic_attributes_status"] = "present"
@@ -98,6 +105,36 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
                 "topic_attributes",
                 resource=topic_arn,
                 operation="sns.GetTopicAttributes",
+                err=err,
+            )
+
+        try:
+            subscriptions = factory.paginate(
+                sns,
+                "list_subscriptions_by_topic",
+                "Subscriptions",
+                TopicArn=topic_arn,
+            )
+            topic_finding["subscriptions"] = [
+                {
+                    "subscription_arn": subscription.get("SubscriptionArn"),
+                    "protocol": subscription.get("Protocol"),
+                    "endpoint": subscription.get("Endpoint"),
+                }
+                for subscription in subscriptions
+                if isinstance(subscription, dict)
+            ]
+            topic_finding["subscriptions_status"] = "present"
+            tracker.record_ok("topic_subscriptions", resource=topic_arn)
+        except Exception as err:
+            code = _error_code(err)
+            topic_finding["subscriptions_status"] = (
+                "access_denied" if code in {"AccessDenied", "AccessDeniedException"} else "error"
+            )
+            tracker.record_resource_failure(
+                "topic_subscriptions",
+                resource=topic_arn,
+                operation="sns.ListSubscriptionsByTopic",
                 err=err,
             )
 

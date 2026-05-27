@@ -151,6 +151,9 @@ def test_schema_contains_module_enum_values():
 
     assert "sts" in module_enum
     assert "bedrock" in module_enum
+    assert "cloudfront" in module_enum
+    assert "ecs" in module_enum
+    assert "route53" in module_enum
 
 
 def test_schema_regeneration_helpers_render_required_contract():

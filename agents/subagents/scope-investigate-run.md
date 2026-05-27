@@ -1,7 +1,7 @@
 ---
 name: scope-investigate-run
 description: Run-guided investigation intake for scope-investigate. Reads a SCOPE audit or exploit run directory, validates results.json, surfaces attack paths and principals, and generates HYPO-02 (audit) or HYPO-03 (exploit) hypotheses. Dispatched by scope-investigate parent when MODE=RUN. Returns structured handoff to parent.
-model: claude-sonnet-4-6
+model: reasoning
 tools: Read, Bash, Glob
 ---
 

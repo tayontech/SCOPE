@@ -73,7 +73,7 @@
         "id": { "$ref": "#/$defs/nonEmptyString" },
         "transition": {
           "type": "string",
-          "enum": ["invoke", "execute_as", "assume_role", "pass_role", "create_compute", "mutate_policy", "resource_policy_access", "data_access", "decrypt", "event_injection"]
+          "enum": ["invoke", "execute_as", "assume_role", "pass_role", "create_compute", "mutate_policy", "resource_policy_access", "data_access", "decrypt", "event_injection", "authenticate"]
         },
         "from_context": { "$ref": "#/$defs/nonEmptyString" },
         "action": { "$ref": "#/$defs/nonEmptyString" },
@@ -152,6 +152,128 @@
         "seed_reason": { "$ref": "#/$defs/nonEmptyString" },
         "risk": { "$ref": "#/$defs/severity" },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } }
+      },
+      "additionalProperties": false
+    },
+    "publicExposureFinding": {
+      "type": "object",
+      "required": [
+        "id",
+        "source_entrypoint_id",
+        "severity",
+        "category",
+        "resource",
+        "title",
+        "assessment",
+        "security_relevance",
+        "attack_path_seed",
+        "reason_not_attack_path",
+        "coverage_needed",
+        "evidence"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "source_entrypoint_id": { "$ref": "#/$defs/nonEmptyString" },
+        "severity": { "$ref": "#/$defs/severity" },
+        "category": { "$ref": "#/$defs/nonEmptyString" },
+        "resource": { "$ref": "#/$defs/nonEmptyString" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "assessment": { "$ref": "#/$defs/nonEmptyString" },
+        "security_relevance": { "$ref": "#/$defs/nonEmptyString" },
+        "attack_path_seed": { "type": "boolean" },
+        "reason_not_attack_path": { "$ref": "#/$defs/nonEmptyString" },
+        "promoted_attack_path_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "coverage_needed": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceRef" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "attackPathGroup": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "severity",
+        "category",
+        "validation_statuses",
+        "primitive",
+        "impact",
+        "representative_path_id",
+        "member_path_ids",
+        "member_count",
+        "source_principals",
+        "leveraging_assets",
+        "affected_resources",
+        "description"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "severity": { "$ref": "#/$defs/severity" },
+        "category": { "$ref": "#/$defs/category" },
+        "validation_statuses": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["validated", "conditional"] }
+        },
+        "primitive": { "$ref": "#/$defs/nonEmptyString" },
+        "impact": {
+          "type": "object",
+          "required": ["action", "resource", "resulting_context"],
+          "properties": {
+            "action": { "$ref": "#/$defs/nonEmptyString" },
+            "resource": { "$ref": "#/$defs/nonEmptyString" },
+            "resulting_context": { "$ref": "#/$defs/nonEmptyString" }
+          },
+          "additionalProperties": false
+        },
+        "representative_path_id": { "$ref": "#/$defs/nonEmptyString" },
+        "member_path_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "member_count": { "type": "integer", "minimum": 1 },
+        "source_principals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "leveraging_assets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attackPathGroupLeveragingAsset" }
+        },
+        "affected_resources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "description": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "attackPathGroupLeveragingAsset": {
+      "type": "object",
+      "required": ["id", "type", "arn", "path_ids"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "type": {
+          "type": "string",
+          "enum": ["user", "role", "external", "resource", "unknown"]
+        },
+        "arn": { "$ref": "#/$defs/nullableNonEmptyString" },
+        "path_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
       },
       "additionalProperties": false
     }
@@ -275,7 +397,7 @@
               "trust_type": { "type": "string" },
               "edge_type": {
                 "type": "string",
-                "enum": ["priv_esc", "trust", "data_access", "network", "service", "public_access", "cross_account", "membership", "executes_as", "invokes", "authenticates_to", "resource_policy_allows", "encrypted_by"]
+                "enum": ["priv_esc", "trust", "data_access", "network", "service", "public_access", "cross_account", "membership", "executes_as", "invokes", "authenticates_to", "resource_policy_allows", "resource_policy_statement", "event_source", "encrypted_by"]
               },
               "severity": { "type": "string" },
               "label": { "type": "string" },
@@ -307,6 +429,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/publicEntrypoint" }
     },
+    "public_exposure_findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/publicExposureFinding" }
+    },
     "attack_paths": {
       "type": "array",
       "items": {
@@ -324,6 +450,50 @@
           "runtime_assumptions": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
           "coverage_caveats": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
           "steps": { "type": "array", "items": { "type": "string" } },
+          "aws_cli_commands": {
+            "type": "array",
+            "description": "Review-only AWS CLI replay commands generated by scope-awscli-replay for operator validation",
+            "items": {
+              "type": "object",
+              "required": [
+                "step",
+                "description",
+                "command",
+                "requires_operator_approval",
+                "mutates_aws",
+                "prerequisites",
+                "cleanup",
+                "source_basis"
+              ],
+              "properties": {
+                "step": { "type": "integer", "minimum": 1 },
+                "description": { "type": "string" },
+                "command": {
+                  "type": "string",
+                  "pattern": "^aws\\s+"
+                },
+                "requires_operator_approval": { "type": "boolean" },
+                "mutates_aws": { "type": "boolean" },
+                "prerequisites": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/nonEmptyString" }
+                },
+                "cleanup": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/nonEmptyString" }
+                },
+                "source_basis": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/nonEmptyString" }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "aws_cli_command_warnings": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/nonEmptyString" }
+          },
           "mitre_techniques": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
           "detection_opportunities": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
           "remediation": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
@@ -331,6 +501,10 @@
         },
         "additionalProperties": false
       }
+    },
+    "attack_path_groups": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/attackPathGroup" }
     },
     "candidate_attack_paths": {
       "type": "array",

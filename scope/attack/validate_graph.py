@@ -18,6 +18,17 @@ def graph_edges_by_id(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def graph_nodes_by_id(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    nodes = graph.get("nodes", [])
+    if not isinstance(nodes, list):
+        return {}
+    return {
+        node["id"]: node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+
+
 def graph_node_ids(graph: dict[str, Any]) -> set[str]:
     nodes = graph.get("nodes", [])
     if not isinstance(nodes, list):

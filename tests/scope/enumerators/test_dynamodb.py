@@ -141,3 +141,42 @@ def test_dynamodb_optional_backup_access_denied_is_skipped_not_partial():
     coverage = next(entry for entry in envelope.coverage if entry.check == "list_backups")
     assert coverage.status == "skipped"
     assert coverage.skipped == 1
+
+
+def test_dynamodb_preserves_resource_policy_statements_and_conditions():
+    table_arn = "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable"
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "CrossAccountRead",
+                "Effect": "Allow",
+                "Principal": {"AWS": "arn:aws:iam::999999999999:role/Reader"},
+                "Action": ["dynamodb:GetItem"],
+                "Resource": table_arn,
+                "Condition": {"StringEquals": {"aws:SourceAccount": "999999999999"}},
+            }
+        ],
+    }
+    dynamodb = FakeClient(
+        {
+            "list_tables": {"TableNames": ["TestTable"], "LastEvaluatedTableName": None},
+            "describe_table": {"Table": {"TableName": "TestTable", "TableArn": table_arn}},
+            "describe_continuous_backups": {},
+            "list_backups": {},
+            "get_resource_policy": {"Policy": json.dumps(policy)},
+        }
+    )
+
+    envelope = run(FakeFactory(dynamodb=dynamodb), "us-east-1")
+
+    table = envelope.resources[0]
+    assert table["resource_policy"] == policy
+    assert table["resource_policy_document"] == policy
+    assert table["resource_policy_statements"][0]["sid"] == "CrossAccountRead"
+    assert table["resource_policy_statements"][0]["normalized_principals"] == [
+        "arn:aws:iam::999999999999:role/Reader"
+    ]
+    assert table["resource_policy_statements"][0]["normalized_actions"] == ["dynamodb:GetItem"]
+    assert table["resource_policy_statements"][0]["source_accounts"] == ["999999999999"]
+    assert table["resource_policy_statements"][0]["is_cross_account"] is True

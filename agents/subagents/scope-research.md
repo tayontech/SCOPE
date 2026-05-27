@@ -1,7 +1,7 @@
 ---
 name: scope-research
 description: Research subagent - uses WebSearch and available MCP tools to find real-world abuse context for AWS permissions and services. Dispatched by attack-paths and exploit. Returns structured RESEARCH_RESULT handoff block to parent.
-model: claude-sonnet-4-6
+model: reasoning
 tools: WebSearch, WebFetch, Read, Bash, Grep, Glob
 ---
 

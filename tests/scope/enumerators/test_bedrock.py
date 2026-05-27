@@ -27,20 +27,6 @@ def _contract(envelope, expected: dict) -> dict:
 def test_bedrock_matches_js_fixture_contract_except_legacy_unknown_account():
     bedrock = FakeClient(
         {
-            "list_foundation_models": {
-                "modelSummaries": [
-                    {
-                        "modelId": "anthropic.claude-3-sonnet-20240229-v1:0",
-                        "modelName": "Claude 3 Sonnet",
-                        "providerName": "Anthropic",
-                        "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
-                        "inputModalities": ["TEXT"],
-                        "outputModalities": ["TEXT"],
-                        "customizationsSupported": [],
-                        "inferenceTypesSupported": ["ON_DEMAND"],
-                    }
-                ]
-            },
             "list_custom_models": {
                 "modelSummaries": [
                     {
@@ -98,18 +84,23 @@ def test_bedrock_matches_js_fixture_contract_except_legacy_unknown_account():
 
     assert envelope.account_id == "123456789012"
     assert normalize_envelope(_contract(envelope, expected)) == normalize_envelope(expected)
+    assert all(resource["resource_type"] != "bedrock_model" for resource in envelope.resources)
 
 
 def test_bedrock_region_not_available_returns_complete_empty():
+    unavailable = ClientError(
+        {"Error": {"Code": "UnknownEndpoint", "Message": "could not resolve endpoint"}},
+        "ListCustomModels",
+    )
     bedrock = FakeClient(
         {
-            "list_foundation_models": ClientError(
-                {"Error": {"Code": "UnknownEndpoint", "Message": "could not resolve endpoint"}},
-                "ListFoundationModels",
-            ),
+            "list_custom_models": unavailable,
+            "list_guardrails": unavailable,
+            "get_model_invocation_logging_configuration": unavailable,
+            "list_provisioned_model_throughputs": unavailable,
         }
     )
-    agent = FakeClient({})
+    agent = FakeClient({"list_agents": unavailable, "list_knowledge_bases": unavailable})
 
     envelope = run(FakeFactory(bedrock=bedrock, bedrock_agent=agent), "us-west-1")
 
@@ -121,7 +112,6 @@ def test_bedrock_region_not_available_returns_complete_empty():
 def test_bedrock_secondary_failure_marks_partial_with_error_record():
     bedrock = FakeClient(
         {
-            "list_foundation_models": {"modelSummaries": []},
             "list_custom_models": ClientError(
                 {"Error": {"Code": "AccessDeniedException", "Message": "denied"}},
                 "ListCustomModels",
@@ -145,7 +135,6 @@ def test_bedrock_secondary_failure_marks_partial_with_error_record():
 def test_bedrock_unsupported_optional_operation_is_skipped():
     bedrock = FakeClient(
         {
-            "list_foundation_models": {"modelSummaries": []},
             "list_custom_models": ClientError(
                 {"Error": {"Code": "UnknownOperationException", "Message": "Unknown Operation"}},
                 "ListCustomModels",
@@ -167,7 +156,6 @@ def test_bedrock_unsupported_optional_operation_is_skipped():
 def test_bedrock_logging_enabled_does_not_emit_logging_disabled_finding():
     bedrock = FakeClient(
         {
-            "list_foundation_models": {"modelSummaries": []},
             "list_custom_models": {"modelSummaries": []},
             "list_guardrails": {"guardrails": []},
             "get_model_invocation_logging_configuration": {"loggingConfig": {"textDataDeliveryEnabled": True}},

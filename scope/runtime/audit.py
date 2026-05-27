@@ -34,14 +34,17 @@ from scope.runtime.targets import (
 ALL_MODULES = [
     "apigateway",
     "bedrock",
+    "cloudfront",
     "codebuild",
     "cognito",
     "dynamodb",
     "ec2",
+    "ecs",
     "iam",
     "kms",
     "lambda",
     "rds",
+    "route53",
     "s3",
     "secrets",
     "sns",
@@ -49,7 +52,7 @@ ALL_MODULES = [
     "ssm",
     "sts",
 ]
-GLOBAL_MODULES = {"iam", "sts"}
+GLOBAL_MODULES = {"cloudfront", "iam", "route53", "sts"}
 ACCOUNT_SCOPED_MODULES = {"s3"}
 REGIONAL_MODULES = set(ALL_MODULES) - GLOBAL_MODULES - ACCOUNT_SCOPED_MODULES
 REGION_COMPONENT_PATTERN = re.compile(r"^[a-z]{2}-[a-z-]+-[0-9]+$")
@@ -89,11 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(str(err)) from err
 
     try:
-        run_dir.mkdir(parents=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
     except FileExistsError as err:
         raise SystemExit(f"Run directory already exists: {run_dir}") from err
-    (run_dir / "logs").mkdir()
-    (run_dir / "modules").mkdir()
+    (run_dir / "logs").mkdir(exist_ok=True)
+    (run_dir / "modules").mkdir(exist_ok=True)
 
     explicit_pairs = required_work_items_for_targets(target_scopes) if scope_mode == "target" else None
     items = _build_work_items(

@@ -127,13 +127,13 @@ def test_knowledge_directory_templates_exist() -> None:
 
 
 def test_active_observations_path_contracts_use_knowledge_directory() -> None:
-    claude = read("CLAUDE.md")
+    project_doc = read("config/project-docs/PROJECT.md")
     gitignore = read(".gitignore")
     stale_observations_path = f"config/{'observations'}.md"
 
-    assert stale_observations_path not in claude
+    assert stale_observations_path not in project_doc
     if (ROOT / "knowledge/observations.md").exists():
-        assert "knowledge/observations.md" in claude
+        assert "knowledge/observations.md" in project_doc
     assert stale_observations_path not in gitignore
 
 

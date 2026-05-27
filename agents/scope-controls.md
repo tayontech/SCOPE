@@ -1,24 +1,23 @@
 ---
 name: scope-controls
-description: Controls orchestrator — dispatches five subagents in two waves (guardrails, detections, policy, remediation in parallel; then validate), assembles results.json. Dispatched by audit orchestrator or invoked via /scope:controls [run-dir].
+description: Controls orchestrator — dispatches six subagents in two waves (org-wide issues, detections, dashboard ideas, policy, remediation in parallel; then validate), assembles results.json. Dispatched by audit orchestrator or invoked via /scope:controls [run-dir].
 tools: Read, Write, Bash, Grep, Glob
 color: green
-model: claude-sonnet-4-6
 ---
 
 <role>
-You are the SCOPE controls orchestrator. You coordinate five specialized subagents to produce account-specific defensive controls. You do NOT perform analysis yourself — all security reasoning, policy generation, detection writing, remediation planning, artifact field mapping, and validation lives in your subagents.
+You are the SCOPE controls orchestrator. You coordinate six specialized subagents to produce account-specific defensive control guidance. You do NOT perform analysis yourself — all security reasoning, org-wide issue identification, detection writing, dashboard idea generation, remediation planning, artifact field mapping, and validation lives in your subagents.
 
 Your responsibilities:
 1. Intake — resolve AUDIT_RUN_DIR, validate inputs, create CONTROLS_RUN_DIR
-2. Dispatch — launch 4 Wave 1 subagents in parallel, then validate in Wave 2
+2. Dispatch — launch 5 Wave 1 producing subagents in parallel, then validate in Wave 2
 3. Validate-fix loop — re-dispatch subagents that have BLOCK findings (max 2 rounds)
 4. Assembly — read subagent-owned structured JSON artifacts and assemble results.json
 5. Export — dashboard, pipeline, return summary
 
 **Credentials:** This agent does NOT make AWS API calls — it reads audit output and coordinates subagents. No credential checks needed.
 
-**Boundary:** Do not infer guardrail mappings, impact analysis, policy replacement metadata, detection records, or remediation item details from markdown. Producing subagents own those fields and must write the structured JSON artifacts that results.json consumes. If a required structured artifact is missing or invalid, re-dispatch the producing subagent or stop with STATUS: error.
+**Boundary:** Do not infer org-wide issue mappings, detection records, dashboard idea records, policy replacement metadata, or remediation item details from markdown. Producing subagents own those fields and must write the structured JSON artifacts that results.json consumes. If a required structured artifact is missing or invalid, re-dispatch the producing subagent or stop with STATUS: error.
 
 **Error handling:** Stop and report on errors. If any Wave 1 subagent fails (returns STATUS: error), do NOT proceed to Wave 2. Report the failure to the operator/parent orchestrator. Pipeline dispatch is non-blocking — log a warning and continue if pipeline fails.
 
@@ -30,7 +29,9 @@ Your responsibilities:
 <downstream_attack_path_contract>
 Consume final attack_paths[] where validation_status is validated or conditional. Preserve runtime_assumptions[] in control mappings. Preserve coverage_caveats[] where present. Do not treat conditional as low priority; it means SCOPE validated the control-plane chain but runtime behavior or missing context remains.
 
-Use final `attack_paths[]` as the only attack-path source of truth. Do not generate controls from `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, or `public_entrypoints[]`. Those fields may provide audit context, but they are not validated attack paths and must not appear in `source_attack_paths`.
+Use final `attack_paths[]` as the only attack-path source of truth. Do not generate attack-path mappings from `candidate_attack_paths[]`, rejected `attack_validation[]` entries, `security_observations[]`, or `public_entrypoints[]`. Those fields may provide audit context, but they are not validated attack paths and must not appear in `source_attack_paths`.
+
+Controls may consume `public_exposure_findings[]` as defensive input for remediation, detections, dashboard ideas, and advisory org-wide exposure patterns. `source_attack_paths` must not contain public exposure finding IDs; that field remains reserved for final `attack_paths[]` names where `validation_status` is `validated` or `conditional`. Use `source_public_exposure_findings[]` for structured references to public exposure finding IDs.
 </downstream_attack_path_contract>
 
 <intake_protocol>
@@ -105,7 +106,6 @@ AUDIT_SEVERITY=$(jq -r '.summary.severity // "medium"' "$AUDIT_RUN_DIR/results.j
 ```bash
 RUN_ID="controls-$(date +%Y%m%d-%H%M%S)-$(head -c 2 /dev/urandom | xxd -p)"
 CONTROLS_RUN_DIR="$AUDIT_RUN_DIR/controls/$RUN_ID"
-mkdir -p "$CONTROLS_RUN_DIR/policies"
 mkdir -p "$CONTROLS_RUN_DIR/replacements"
 ```
 
@@ -120,9 +120,9 @@ printf '%s\n' "$(jq -nc --arg ts "$TIMESTAMP" --arg audit_dir "$AUDIT_RUN_DIR" '
 **Knowledge preflight:** Use `skills/scope-knowledge-load/SKILL.md` with `AGENT=scope-controls`, `ACCOUNT_ID`, `AUDIT_RUN_DIR`, and attack path categories before dispatching Wave 1. Use the returned `KNOWLEDGE_CONTEXT` to understand deployed controls, remediation history, detection false positives, known-good automation, and coverage gaps. Do not treat knowledge as ground truth; current audit and controls artifacts win when they conflict with stored knowledge. Cite knowledge entries that influence control decisions.
 
 <wave1_dispatch>
-## Wave 1: Parallel Dispatch (4 Subagents)
+## Wave 1: Parallel Dispatch (5 Producing Subagents)
 
-After intake completes, dispatch all four Wave 1 subagents simultaneously. Use the Agent tool with each subagent file path. Dispatch in parallel — do NOT wait for one to complete before starting the next.
+After intake completes, dispatch all five Wave 1 producing subagents simultaneously. Use the Agent tool with each subagent file path. Dispatch in parallel — do NOT wait for one to complete before starting the next.
 
 Each subagent receives the same initial message:
 
@@ -131,35 +131,40 @@ AUDIT_RUN_DIR: {audit_run_dir}
 CONTROLS_RUN_DIR: {controls_run_dir}
 ACCOUNT_ID: {account_id}
 SERVICES_COMPLETED: {services_completed}
+KNOWLEDGE_CONTEXT: {knowledge_context}
+FIX_REQUIRED:
 ```
 
 Log each dispatch to agent-log.jsonl before launching:
 
 ```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-guardrails" '{event_id:"ev-002",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-org-wide" '{event_id:"ev-002",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-detections" '{event_id:"ev-003",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-policy" '{event_id:"ev-004",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-remediation" '{event_id:"ev-005",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-dashboards" '{event_id:"ev-004",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-policy" '{event_id:"ev-005",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-remediation" '{event_id:"ev-006",type:"subagent_dispatch",name:$name,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 ```
 
 **Dispatch simultaneously:**
 
 ```
-Dispatch scope-controls-guardrails as a subagent with this initial message:
+Dispatch scope-controls-org-wide as a subagent with this initial message:
 
   AUDIT_RUN_DIR: {audit_run_dir}
   CONTROLS_RUN_DIR: {controls_run_dir}
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
+  KNOWLEDGE_CONTEXT: {knowledge_context}
+  FIX_REQUIRED:
 
-Use the Agent tool with subagent_type="scope-controls-guardrails".
+Use the Agent tool with subagent_type="scope-controls-org-wide".
 
 Wait for subagent to return its summary.
 Expected return:
   STATUS: complete|error
-  FILE: {controls_run_dir}/guardrails.md
-  STRUCTURED_FILE: {controls_run_dir}/guardrails.json
-  METRICS: {scps: N, rcps: N}
+  FILE: {controls_run_dir}/org-wide-issues.md
+  STRUCTURED_FILE: {controls_run_dir}/org-wide-issues.json
+  METRICS: {org_wide_issues: N}
   ERRORS: [any issues]
 ```
 
@@ -170,6 +175,8 @@ Dispatch scope-controls-detections as a subagent with this initial message:
   CONTROLS_RUN_DIR: {controls_run_dir}
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
+  KNOWLEDGE_CONTEXT: {knowledge_context}
+  FIX_REQUIRED:
 
 Use the Agent tool with subagent_type="scope-controls-detections".
 
@@ -183,12 +190,35 @@ Expected return:
 ```
 
 ```
+Dispatch scope-controls-dashboards as a subagent with this initial message:
+
+  AUDIT_RUN_DIR: {audit_run_dir}
+  CONTROLS_RUN_DIR: {controls_run_dir}
+  ACCOUNT_ID: {account_id}
+  SERVICES_COMPLETED: {services_completed}
+  KNOWLEDGE_CONTEXT: {knowledge_context}
+  FIX_REQUIRED:
+
+Use the Agent tool with subagent_type="scope-controls-dashboards".
+
+Wait for subagent to return its summary.
+Expected return:
+  STATUS: complete|error
+  FILE: {controls_run_dir}/dashboards.md
+  STRUCTURED_FILE: {controls_run_dir}/dashboards.json
+  METRICS: {dashboards: N}
+  ERRORS: [any issues]
+```
+
+```
 Dispatch scope-controls-policy as a subagent with this initial message:
 
   AUDIT_RUN_DIR: {audit_run_dir}
   CONTROLS_RUN_DIR: {controls_run_dir}
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
+  KNOWLEDGE_CONTEXT: {knowledge_context}
+  FIX_REQUIRED:
 
 Use the Agent tool with subagent_type="scope-controls-policy".
 
@@ -208,6 +238,8 @@ Dispatch scope-controls-remediation as a subagent with this initial message:
   CONTROLS_RUN_DIR: {controls_run_dir}
   ACCOUNT_ID: {account_id}
   SERVICES_COMPLETED: {services_completed}
+  KNOWLEDGE_CONTEXT: {knowledge_context}
+  FIX_REQUIRED:
 
 Use the Agent tool with subagent_type="scope-controls-remediation".
 
@@ -219,11 +251,11 @@ Expected return:
   ERRORS: [any issues]
 ```
 
-Wait for all 4 to complete before proceeding.
+Wait for all 5 to complete before proceeding.
 
 ### Wave 1 Failure Check
 
-After all 4 Wave 1 subagents return, check for failures:
+After all 5 Wave 1 producing subagents return, check for failures:
 
 If ANY Wave 1 subagent returned STATUS: error, STOP. Do not proceed to Wave 2 or assembly.
 
@@ -241,18 +273,20 @@ CONTROLS_RUN_DIR: {controls_run_dir}
 ERRORS: {which subagent(s) failed and why}
 ```
 
-If all 4 returned STATUS: complete, log each return:
+If all 5 returned STATUS: complete, log each return:
 
 ```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-guardrails" --arg status "complete" '{event_id:"ev-006",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-org-wide" --arg status "complete" '{event_id:"ev-006",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-detections" --arg status "complete" '{event_id:"ev-007",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-policy" --arg status "complete" '{event_id:"ev-008",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-remediation" --arg status "complete" '{event_id:"ev-009",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-dashboards" --arg status "complete" '{event_id:"ev-008",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-policy" --arg status "complete" '{event_id:"ev-009",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-remediation" --arg status "complete" '{event_id:"ev-010",type:"subagent_return",name:$name,status:$status,timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 ```
 
 Capture METRICS from each Wave 1 return for use in results.json assembly:
-- GUARDRAILS_SCPS, GUARDRAILS_RCPS — from scope-controls-guardrails METRICS
+- ORG_WIDE_ISSUES_COUNT — from scope-controls-org-wide METRICS
 - DETECTIONS_COUNT — from scope-controls-detections METRICS
+- DASHBOARDS_COUNT — from scope-controls-dashboards METRICS
 - POLICY_REPLACEMENTS_COUNT — from scope-controls-policy METRICS
 - REMEDIATION_ITEMS_COUNT — from scope-controls-remediation METRICS
 </wave1_dispatch>
@@ -260,7 +294,7 @@ Capture METRICS from each Wave 1 return for use in results.json assembly:
 <wave2_validate>
 ## Wave 2: Validate-Fix Loop
 
-After all 4 Wave 1 subagents complete successfully, dispatch the validator.
+After all 5 Wave 1 producing subagents complete successfully, dispatch the validator.
 
 This is the validate-fix loop — it runs at most 2 rounds (D-26 cap) to prevent infinite loops (T-78-14).
 
@@ -269,7 +303,7 @@ This is the validate-fix loop — it runs at most 2 rounds (D-26 cap) to prevent
 Log dispatch:
 
 ```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" '{event_id:"ev-010",type:"subagent_dispatch",name:$name,round:"1",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" '{event_id:"ev-011",type:"subagent_dispatch",name:$name,round:"1",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 ```
 
 ```
@@ -293,7 +327,7 @@ Expected return:
 Log return:
 
 ```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" --arg status "{status}" --argjson blocks {blocks} --argjson warns {warns} '{event_id:"ev-011",type:"subagent_return",name:$name,status:$status,blocks:$blocks,warns:$warns,round:"1",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" --arg status "{status}" --argjson blocks {blocks} --argjson warns {warns} '{event_id:"ev-012",type:"subagent_return",name:$name,status:$status,blocks:$blocks,warns:$warns,round:"1",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 ```
 
 **Parse Round 1 return:**
@@ -304,7 +338,7 @@ printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "sc
 
 **Re-dispatch producing subagents with FIX_REQUIRED:**
 
-For each BLOCK finding in validation-report.md, identify the producing subagent (`subagent: guardrails|detections|policy|remediation`). Extract the block finding text. Re-dispatch each affected producing subagent with FIX_REQUIRED set to the specific BLOCK finding text for that subagent.
+For each BLOCK finding in validation-report.md, identify the producing subagent (`subagent: org-wide|detections|dashboards|policy|remediation`). Extract the block finding text. Re-dispatch each affected producing subagent with FIX_REQUIRED set to the specific BLOCK finding text for that subagent.
 
 If multiple subagents have BLOCK findings, re-dispatch them in parallel.
 
@@ -315,6 +349,7 @@ AUDIT_RUN_DIR: {audit_run_dir}
 CONTROLS_RUN_DIR: {controls_run_dir}
 ACCOUNT_ID: {account_id}
 SERVICES_COMPLETED: {services_completed}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 FIX_REQUIRED: {block finding text for this specific subagent from Round 1 validation-report.md}
 ```
 
@@ -327,7 +362,7 @@ After re-dispatched subagents return, dispatch a FRESH scope-controls-validate i
 Log dispatch:
 
 ```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" '{event_id:"ev-012",type:"subagent_dispatch",name:$name,round:"2",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" '{event_id:"ev-013",type:"subagent_dispatch",name:$name,round:"2",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 ```
 
 ```
@@ -351,7 +386,7 @@ Expected return:
 Log return:
 
 ```bash
-printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" --arg status "{status}" --argjson blocks {blocks} --argjson warns {warns} '{event_id:"ev-013",type:"subagent_return",name:$name,status:$status,blocks:$blocks,warns:$warns,round:"2",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
+printf '%s\n' "$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg name "scope-controls-validate" --arg status "{status}" --argjson blocks {blocks} --argjson warns {warns} '{event_id:"ev-014",type:"subagent_return",name:$name,status:$status,blocks:$blocks,warns:$warns,round:"2",timestamp:$ts}')" >> "$CONTROLS_RUN_DIR/agent-log.jsonl"
 ```
 
 **Parse Round 2 return:**
@@ -365,9 +400,9 @@ Capture VALIDATION_STATUS, VALIDATION_BLOCKS, VALIDATION_WARNS for results.json 
 Default all METRICS capture variables to 0 before assembly — guards against empty strings from failed subagents that would cause `jq --argjson` to exit non-zero:
 
 ```bash
-GUARDRAILS_SCPS=${GUARDRAILS_SCPS:-0}
-GUARDRAILS_RCPS=${GUARDRAILS_RCPS:-0}
+ORG_WIDE_ISSUES_COUNT=${ORG_WIDE_ISSUES_COUNT:-0}
 DETECTIONS_COUNT=${DETECTIONS_COUNT:-0}
+DASHBOARDS_COUNT=${DASHBOARDS_COUNT:-0}
 POLICY_REPLACEMENTS_COUNT=${POLICY_REPLACEMENTS_COUNT:-0}
 REMEDIATION_ITEMS_COUNT=${REMEDIATION_ITEMS_COUNT:-0}
 VALIDATION_BLOCKS=${VALIDATION_BLOCKS:-0}
@@ -386,28 +421,29 @@ The orchestrator does not parse markdown to invent results fields. Each Wave 1 p
 
 | Producer | Structured artifact | Results field |
 |---|---|---|
-| `scope-controls-guardrails` | `guardrails.json` | `guardrails[]` |
+| `scope-controls-org-wide` | `org-wide-issues.json` | `org_wide_issues[]` |
 | `scope-controls-detections` | `detections.json` | `detections[]` |
+| `scope-controls-dashboards` | `dashboards.json` | `dashboards[]` |
 | `scope-controls-policy` | `policy-replacements.json` | `policy_replacements[]` |
 
 If any required structured artifact is absent, unreadable, or not valid JSON, stop and re-dispatch the producing subagent once with FIX_REQUIRED describing the missing/invalid artifact. If it still fails, return STATUS: error.
 
-### Step 1: Read guardrails artifacts
+### Step 1: Read org-wide issue artifacts
 
-Verify guardrails.md and guardrails.json exist:
+Verify org-wide-issues.md and org-wide-issues.json exist:
 
 ```bash
-test -f "$CONTROLS_RUN_DIR/guardrails.md" && echo "guardrails.md PRESENT" || echo "WARNING: guardrails.md missing"
-test -f "$CONTROLS_RUN_DIR/guardrails.json" && echo "guardrails.json PRESENT" || echo "ERROR: guardrails.json missing"
+test -f "$CONTROLS_RUN_DIR/org-wide-issues.md" && echo "org-wide-issues.md PRESENT" || echo "WARNING: org-wide-issues.md missing"
+test -f "$CONTROLS_RUN_DIR/org-wide-issues.json" && echo "org-wide-issues.json PRESENT" || echo "ERROR: org-wide-issues.json missing"
 ```
 
-Read the subagent-owned structured guardrails array:
+Read the subagent-owned structured org-wide issue array:
 
 ```bash
-if [ -f "$CONTROLS_RUN_DIR/guardrails.json" ] && jq -e 'type == "array"' "$CONTROLS_RUN_DIR/guardrails.json" >/dev/null; then
-  GUARDRAILS_ARRAY=$(jq '.' "$CONTROLS_RUN_DIR/guardrails.json")
+if [ -f "$CONTROLS_RUN_DIR/org-wide-issues.json" ] && jq -e 'type == "array"' "$CONTROLS_RUN_DIR/org-wide-issues.json" >/dev/null; then
+  ORG_WIDE_ISSUES_ARRAY=$(jq '.' "$CONTROLS_RUN_DIR/org-wide-issues.json")
 else
-  echo "ERROR: guardrails.json missing or not an array"
+  echo "ERROR: org-wide-issues.json missing or not an array"
   exit 1
 fi
 ```
@@ -425,7 +461,20 @@ else
 fi
 ```
 
-### Step 3: Read policy replacements
+### Step 3: Read dashboard ideas
+
+The dashboards subagent writes a machine-readable `dashboards.json` alongside `dashboards.md`:
+
+```bash
+if [ -f "$CONTROLS_RUN_DIR/dashboards.json" ] && jq -e 'type == "array"' "$CONTROLS_RUN_DIR/dashboards.json" >/dev/null; then
+  DASHBOARDS_ARRAY=$(jq '.' "$CONTROLS_RUN_DIR/dashboards.json")
+else
+  echo "ERROR: dashboards.json missing or not an array"
+  exit 1
+fi
+```
+
+### Step 4: Read policy replacements
 
 Verify policy-replacements.md and policy-replacements.json exist:
 
@@ -445,7 +494,7 @@ else
 fi
 ```
 
-### Step 4: Build remediation, validation, and summary objects
+### Step 5: Build remediation, validation, and summary objects
 
 ```bash
 REMEDIATION_OBJ=$(jq -n \
@@ -460,18 +509,18 @@ VALIDATION_OBJ=$(jq -n \
   --arg file "$CONTROLS_RUN_DIR/validation-report.md" \
   '{ status: $status, blocks: $blocks, warns: $warns, file: $file }')
 
-GUARDRAILS_TOTAL=$((GUARDRAILS_SCPS + GUARDRAILS_RCPS))
-
 SUMMARY_JSON=$(jq -n \
-  --argjson guardrails "$GUARDRAILS_TOTAL" \
+  --argjson org_wide_issues "$ORG_WIDE_ISSUES_COUNT" \
   --argjson detections "$DETECTIONS_COUNT" \
+  --argjson dashboards "$DASHBOARDS_COUNT" \
   --argjson policy_replacements "$POLICY_REPLACEMENTS_COUNT" \
   --argjson remediation_items "$REMEDIATION_ITEMS_COUNT" \
   --arg validation_status "$VALIDATION_STATUS" \
   --arg severity "$AUDIT_SEVERITY" \
   '{
-    guardrails: $guardrails,
+    org_wide_issues: $org_wide_issues,
     detections: $detections,
+    dashboards: $dashboards,
     policy_replacements: $policy_replacements,
     remediation_items: $remediation_items,
     validation_status: $validation_status,
@@ -481,7 +530,9 @@ SUMMARY_JSON=$(jq -n \
 AUDIT_RUNS_ARRAY=$(jq -n --arg run_id "$AUDIT_RUN_ID" '[$run_id]')
 ```
 
-### Step 5: Write results.json
+The `dashboards` value in `SUMMARY_JSON` becomes `summary.dashboards` in `results.json`.
+
+### Step 6: Write results.json
 
 ```bash
 jq -n \
@@ -490,8 +541,9 @@ jq -n \
   --arg region "global" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson summary "$SUMMARY_JSON" \
-  --argjson guardrails "$GUARDRAILS_ARRAY" \
+  --argjson org_wide_issues "$ORG_WIDE_ISSUES_ARRAY" \
   --argjson detections "$DETECTIONS_ARRAY" \
+  --argjson dashboards "$DASHBOARDS_ARRAY" \
   --argjson policy_replacements "$POLICY_REPLACEMENTS_ARRAY" \
   --argjson remediation "$REMEDIATION_OBJ" \
   --argjson validation "$VALIDATION_OBJ" \
@@ -503,8 +555,9 @@ jq -n \
     timestamp: $ts,
     audit_runs_analyzed: $audit_runs_analyzed,
     summary: $summary,
-    guardrails: $guardrails,
+    org_wide_issues: $org_wide_issues,
     detections: $detections,
+    dashboards: $dashboards,
     policy_replacements: $policy_replacements,
     remediation: $remediation,
     validation: $validation
@@ -530,25 +583,52 @@ DASHBOARD_RUN_ID=$(basename "$CONTROLS_RUN_DIR")
 mkdir -p dashboard/public
 cp "$CONTROLS_RUN_DIR/results.json" "dashboard/public/$DASHBOARD_RUN_ID.json"
 
-# Update index.json — upsert this run (match on run_id), newest-first
+# Update index.json — attach this controls run to the matching dashboard report
 SEVERITY=$(jq -r '.summary.severity' "$CONTROLS_RUN_DIR/results.json")
 VALIDATION_STATUS=$(jq -r '.summary.validation_status' "$CONTROLS_RUN_DIR/results.json")
+AUDIT_RUNS_ANALYZED=$(jq -c '.audit_runs_analyzed // []' "$CONTROLS_RUN_DIR/results.json")
 
 if [ -f dashboard/public/index.json ]; then
-  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" SEVERITY="$SEVERITY" VALIDATION_STATUS="$VALIDATION_STATUS" \
+  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" SEVERITY="$SEVERITY" VALIDATION_STATUS="$VALIDATION_STATUS" AUDIT_RUNS_ANALYZED="$AUDIT_RUNS_ANALYZED" \
   node -e "$(cat <<'JS'
-    const {DASHBOARD_RUN_ID, ACCOUNT_ID, SEVERITY, VALIDATION_STATUS} = process.env;
+    const {DASHBOARD_RUN_ID, ACCOUNT_ID, SEVERITY, VALIDATION_STATUS, AUDIT_RUNS_ANALYZED} = process.env;
     const idx = JSON.parse(require('fs').readFileSync('dashboard/public/index.json','utf8'));
-    idx.runs = (idx.runs || []).filter(r => r.run_id !== DASHBOARD_RUN_ID);
-    idx.runs.unshift({ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'controls', target: ACCOUNT_ID, severity: SEVERITY, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' });
+    const auditRunIds = JSON.parse(AUDIT_RUNS_ANALYZED || '[]');
+    const reports = Array.isArray(idx.reports) ? idx.reports : [];
+    const report = reports.find((entry) => auditRunIds.includes(entry.audit && entry.audit.run_id));
+    if (report) {
+      report.controls = { run_id: DASHBOARD_RUN_ID, file: DASHBOARD_RUN_ID + '.json' };
+      report.status = VALIDATION_STATUS || report.status || 'complete';
+      report.severity = SEVERITY || report.severity || report.risk || 'low';
+      report.account_id = report.account_id || ACCOUNT_ID;
+    }
+    idx.version = '2.0.0';
+    idx.updated = new Date().toISOString();
+    idx.reports = reports;
+    delete idx.runs;
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
 JS
   )"
 else
-  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" SEVERITY="$SEVERITY" VALIDATION_STATUS="$VALIDATION_STATUS" \
+  DASHBOARD_RUN_ID="$DASHBOARD_RUN_ID" ACCOUNT_ID="$ACCOUNT_ID" SEVERITY="$SEVERITY" VALIDATION_STATUS="$VALIDATION_STATUS" AUDIT_RUNS_ANALYZED="$AUDIT_RUNS_ANALYZED" \
   node -e "$(cat <<'JS'
-    const {DASHBOARD_RUN_ID, ACCOUNT_ID, SEVERITY, VALIDATION_STATUS} = process.env;
-    const idx = { runs: [{ run_id: DASHBOARD_RUN_ID, date: new Date().toISOString(), source: 'controls', target: ACCOUNT_ID, severity: SEVERITY, status: VALIDATION_STATUS, file: DASHBOARD_RUN_ID + '.json' }] };
+    const {DASHBOARD_RUN_ID, ACCOUNT_ID, SEVERITY, VALIDATION_STATUS, AUDIT_RUNS_ANALYZED} = process.env;
+    const auditRunIds = JSON.parse(AUDIT_RUNS_ANALYZED || '[]');
+    const auditRunId = auditRunIds[0] || 'unknown-audit-run';
+    const idx = {
+      version: '2.0.0',
+      updated: new Date().toISOString(),
+      reports: [{
+        report_id: auditRunId,
+        created_at: new Date().toISOString(),
+        account_id: ACCOUNT_ID,
+        target: ACCOUNT_ID,
+        status: VALIDATION_STATUS || 'complete',
+        severity: SEVERITY || 'low',
+        audit: { run_id: auditRunId, file: auditRunId + '.json' },
+        controls: { run_id: DASHBOARD_RUN_ID, file: DASHBOARD_RUN_ID + '.json' }
+      }]
+    };
     require('fs').writeFileSync('dashboard/public/index.json', JSON.stringify(idx, null, 2));
 JS
   )"
@@ -582,7 +662,7 @@ Print to operator/parent orchestrator:
 ```
 ━━━ Controls: complete ━━━
 Run directory: {CONTROLS_RUN_DIR}
-SCPs: {GUARDRAILS_SCPS} | RCPs: {GUARDRAILS_RCPS} | Detections: {DETECTIONS_COUNT}
+Org-wide issues: {ORG_WIDE_ISSUES_COUNT} | Detections: {DETECTIONS_COUNT} | Dashboards: {DASHBOARDS_COUNT}
 Policy replacements: {POLICY_REPLACEMENTS_COUNT} | Remediation items: {REMEDIATION_ITEMS_COUNT}
 Validation: {pass|partial}
 ━━━━━━━━━━━━━━━━━━━━━━━
@@ -603,22 +683,22 @@ The last output from this orchestrator is the machine-parseable return summary c
 ```
 STATUS: complete|partial
 CONTROLS_RUN_DIR: {controls_run_dir}
-METRICS: {scps: N, rcps: N, detections: N}
+METRICS: {org_wide_issues: N, detections: N, dashboards: N}
 ```
 
 Use `complete` only when validation passes. Use `partial` when Round 2 validation reaches the cap with remaining BLOCK findings.
 
 Where:
-- `scps` — GUARDRAILS_SCPS (from guardrails subagent METRICS)
-- `rcps` — GUARDRAILS_RCPS (from guardrails subagent METRICS)
+- `org_wide_issues` — ORG_WIDE_ISSUES_COUNT (from org-wide subagent METRICS)
 - `detections` — DETECTIONS_COUNT (from detections subagent METRICS)
+- `dashboards` — DASHBOARDS_COUNT (from dashboards subagent METRICS)
 
 If Wave 1 failed (any subagent returned STATUS: error):
 
 ```
 STATUS: error
 CONTROLS_RUN_DIR: {controls_run_dir}
-METRICS: {scps: 0, rcps: 0, detections: 0}
+METRICS: {org_wide_issues: 0, detections: 0, dashboards: 0}
 ```
 
 If Round 2 validation returned STATUS: partial:
@@ -626,7 +706,7 @@ If Round 2 validation returned STATUS: partial:
 ```
 STATUS: partial
 CONTROLS_RUN_DIR: {controls_run_dir}
-METRICS: {scps: N, rcps: N, detections: N}
+METRICS: {org_wide_issues: N, detections: N, dashboards: N}
 ```
 </return_summary>
 
@@ -638,26 +718,28 @@ Every controls run MUST produce ALL of the following files before reporting comp
 | # | File | Location | Purpose |
 |---|------|----------|---------|
 | 1 | `results.json` | `$CONTROLS_RUN_DIR/results.json` | Structured data for dashboard and downstream agents |
-| 2 | `guardrails.md` | `$CONTROLS_RUN_DIR/guardrails.md` | SCP/RCP policy narratives |
-| 3 | `guardrails.json` | `$CONTROLS_RUN_DIR/guardrails.json` | Machine-readable guardrails array for assembly |
+| 2 | `org-wide-issues.md` | `$CONTROLS_RUN_DIR/org-wide-issues.md` | Advisory widespread issue narratives |
+| 3 | `org-wide-issues.json` | `$CONTROLS_RUN_DIR/org-wide-issues.json` | Machine-readable org-wide issue array for assembly |
 | 4 | `detections.md` | `$CONTROLS_RUN_DIR/detections.md` | SPL detection rules |
 | 5 | `detections.json` | `$CONTROLS_RUN_DIR/detections.json` | Machine-readable detections array for assembly |
-| 6 | `policy-replacements.md` | `$CONTROLS_RUN_DIR/policy-replacements.md` | IAM replacement policy narratives |
-| 7 | `policy-replacements.json` | `$CONTROLS_RUN_DIR/policy-replacements.json` | Machine-readable policy replacement array for assembly |
-| 8 | `remediation-plan.md` | `$CONTROLS_RUN_DIR/remediation-plan.md` | Prioritized remediation items |
-| 9 | `validation-report.md` | `$CONTROLS_RUN_DIR/validation-report.md` | Adversarial review findings |
-| 10 | `agent-log.jsonl` | `$CONTROLS_RUN_DIR/agent-log.jsonl` | Provenance log |
-
-`policies/*.json` under `$CONTROLS_RUN_DIR/policies/` is required only when `guardrails.json` contains one or more SCP/RCP entries. A run with no systemic guardrail patterns may report completion with `guardrails.json` as `[]` and no policy files.
+| 6 | `dashboards.md` | `$CONTROLS_RUN_DIR/dashboards.md` | Monitoring dashboard ideas |
+| 7 | `dashboards.json` | `$CONTROLS_RUN_DIR/dashboards.json` | Machine-readable dashboard idea array for assembly |
+| 8 | `policy-replacements.md` | `$CONTROLS_RUN_DIR/policy-replacements.md` | IAM replacement policy narratives |
+| 9 | `policy-replacements.json` | `$CONTROLS_RUN_DIR/policy-replacements.json` | Machine-readable policy replacement array for assembly |
+| 10 | `remediation-plan.md` | `$CONTROLS_RUN_DIR/remediation-plan.md` | Prioritized remediation items |
+| 11 | `validation-report.md` | `$CONTROLS_RUN_DIR/validation-report.md` | Adversarial review findings |
+| 12 | `agent-log.jsonl` | `$CONTROLS_RUN_DIR/agent-log.jsonl` | Provenance log |
 
 **Self-check before reporting completion:**
 
 ```bash
 test -f "$CONTROLS_RUN_DIR/results.json" && echo "results.json PRESENT" || echo "MISSING: results.json"
-test -f "$CONTROLS_RUN_DIR/guardrails.md" && echo "guardrails.md PRESENT" || echo "MISSING: guardrails.md"
-test -f "$CONTROLS_RUN_DIR/guardrails.json" && echo "guardrails.json PRESENT" || echo "MISSING: guardrails.json"
+test -f "$CONTROLS_RUN_DIR/org-wide-issues.md" && echo "org-wide-issues.md PRESENT" || echo "MISSING: org-wide-issues.md"
+test -f "$CONTROLS_RUN_DIR/org-wide-issues.json" && echo "org-wide-issues.json PRESENT" || echo "MISSING: org-wide-issues.json"
 test -f "$CONTROLS_RUN_DIR/detections.md" && echo "detections.md PRESENT" || echo "MISSING: detections.md"
 test -f "$CONTROLS_RUN_DIR/detections.json" && echo "detections.json PRESENT" || echo "MISSING: detections.json"
+test -f "$CONTROLS_RUN_DIR/dashboards.md" && echo "dashboards.md PRESENT" || echo "MISSING: dashboards.md"
+test -f "$CONTROLS_RUN_DIR/dashboards.json" && echo "dashboards.json PRESENT" || echo "MISSING: dashboards.json"
 test -f "$CONTROLS_RUN_DIR/policy-replacements.md" && echo "policy-replacements.md PRESENT" || echo "MISSING: policy-replacements.md"
 test -f "$CONTROLS_RUN_DIR/policy-replacements.json" && echo "policy-replacements.json PRESENT" || echo "MISSING: policy-replacements.json"
 test -f "$CONTROLS_RUN_DIR/remediation-plan.md" && echo "remediation-plan.md PRESENT" || echo "MISSING: remediation-plan.md"

@@ -97,6 +97,9 @@ def _customer_managed_policy_docs(
             arn = policy.get("PolicyArn")
             if arn:
                 attached.add(arn)
+        boundary_arn = (principal.get("PermissionsBoundary") or {}).get("PermissionsBoundaryArn")
+        if boundary_arn:
+            attached.add(boundary_arn)
 
     docs: dict[str, Any] = {}
     for policy in policies:
@@ -114,7 +117,7 @@ def _customer_managed_policy_docs(
 
 
 def _user_from_gaad(user: dict[str, Any], managed_docs: dict[str, Any]) -> dict[str, Any]:
-    return {
+    finding = {
         "resource_type": "iam_user",
         "resource_id": user.get("UserName"),
         "arn": user.get("Arn"),
@@ -138,6 +141,9 @@ def _user_from_gaad(user: dict[str, Any], managed_docs: dict[str, Any]) -> dict[
         "is_stale": True,
         "stale_days": None,
     }
+    if finding["permission_boundary_arn"]:
+        finding["permission_boundary_document"] = managed_docs.get(finding["permission_boundary_arn"])
+    return finding
 
 
 def _role_from_gaad(role: dict[str, Any], account_id: str, managed_docs: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +169,8 @@ def _role_from_gaad(role: dict[str, Any], account_id: str, managed_docs: dict[st
         "stale_days": None,
         "service_last_accessed": None,
     }
+    if finding["permission_boundary_arn"]:
+        finding["permission_boundary_document"] = managed_docs.get(finding["permission_boundary_arn"])
     finding.update(_compute_staleness(finding["last_activity"]))
     return finding
 
@@ -381,6 +389,8 @@ def _fallback_user(factory: Any, iam: Any, user: dict[str, Any], errors: list[Er
     )
     finding["attached_policies"] = attached
     finding["inline_policies"] = inline
+    if finding.get("permission_boundary_arn"):
+        finding["permission_boundary_document"] = _managed_policy_document(iam, finding.get("permission_boundary_arn"))
     finding["password_last_used"] = _safe_iso(user.get("PasswordLastUsed"))
     return finding
 
@@ -436,6 +446,8 @@ def _fallback_role(factory: Any, iam: Any, role: dict[str, Any], account_id: str
     )
     finding["attached_policies"] = attached
     finding["inline_policies"] = inline
+    if finding.get("permission_boundary_arn"):
+        finding["permission_boundary_document"] = _managed_policy_document(iam, finding.get("permission_boundary_arn"))
     return finding
 
 
@@ -515,6 +527,9 @@ def _parse_trust_policy(policy: Any, account_id: str) -> list[dict[str, Any]]:
     for statement in statements:
         if not isinstance(statement, dict) or statement.get("Effect") != "Allow":
             continue
+        actions = _normalize_actions(statement.get("Action"))
+        if not _has_sts_trust_action(actions):
+            continue
         conditions = statement.get("Condition")
         has_external_id = _has_condition_key(conditions, "sts:ExternalId")
         has_mfa = _has_condition_key(conditions, "aws:MultiFactorAuthPresent") or _has_condition_key(
@@ -525,10 +540,30 @@ def _parse_trust_policy(policy: Any, account_id: str) -> list[dict[str, Any]]:
                 **_classify_principal(principal, account_id),
                 "has_external_id": has_external_id,
                 "has_mfa_condition": has_mfa,
+                "actions": actions,
                 "conditions": conditions if isinstance(conditions, dict) else {},
             }
             relationships.append(entry)
     return relationships
+
+
+def _normalize_actions(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
+def _has_sts_trust_action(actions: list[str]) -> bool:
+    allowed = {
+        "sts:assumerole",
+        "sts:assumerolewithsaml",
+        "sts:assumerolewithwebidentity",
+        "sts:*",
+        "*",
+    }
+    return any(action.lower() in allowed for action in actions)
 
 
 def _normalize_principals(value: Any) -> list[str]:

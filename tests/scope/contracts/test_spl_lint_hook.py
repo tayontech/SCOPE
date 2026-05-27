@@ -58,20 +58,21 @@ index=* earliest=-24h latest=now eventName=CreateUser
     assert_blocked(result, "'index=*' is not allowed")
 
 
-def test_spl_lint_hook_covers_controls_detections_json(tmp_path: Path) -> None:
+def test_spl_lint_hook_allows_transaction_and_streamstats_choices(tmp_path: Path) -> None:
     result = run_hook(
         tmp_path / "runs/audit-1/controls/controls-1/detections.json",
         json.dumps(
             [
                 {
-                    "name": "Bad Composite",
+                    "name": "Composite Design Guidance Only",
                     "spl": "index=cloudtrail earliest=-1h latest=now [COMPOSITE] eventName=CreateUser | transaction userIdentity.arn",
                 }
             ]
         ),
     )
 
-    assert_blocked(result, "Composite detection uses 'transaction'")
+    assert result.returncode == 0, result.stderr
+    assert parse_decision(result.stdout) is None
 
 
 def test_spl_lint_hook_ignores_unrelated_files(tmp_path: Path) -> None:
@@ -82,3 +83,72 @@ def test_spl_lint_hook_ignores_unrelated_files(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert parse_decision(result.stdout) is None
+
+
+def test_spl_lint_hook_blocks_outputlookup_in_detections(tmp_path: Path) -> None:
+    result = run_hook(
+        tmp_path / "runs/audit-1/controls/controls-1/detections.md",
+        """
+# SPL Detections
+
+```spl
+index=aws_api earliest=-24h latest=now eventName=CreateUser
+| stats count by userIdentity.arn
+| outputlookup generated_detection_baseline.csv
+```
+""",
+    )
+
+    assert_blocked(result, "'outputlookup' is not allowed")
+
+
+def test_spl_lint_hook_blocks_expensive_correlation_commands(tmp_path: Path) -> None:
+    for command in ["join", "append", "appendcols", "selfjoin", "map"]:
+        result = run_hook(
+            tmp_path / f"runs/audit-1/controls/controls-1/{command}-detections.md",
+            f"""
+# SPL Detections
+
+```spl
+index=aws_api earliest=-24h latest=now eventName=CreateUser
+| {command} userIdentity.arn
+```
+""",
+        )
+
+        assert_blocked(result, "Expensive correlation/fan-out command detected")
+
+
+def test_spl_lint_hook_blocks_side_effect_commands(tmp_path: Path) -> None:
+    for command in ["collect", "mcollect", "tscollect", "outputcsv", "delete", "sendemail", "sendalert", "script", "run"]:
+        result = run_hook(
+            tmp_path / f"runs/audit-1/controls/controls-1/{command}-detections.md",
+            f"""
+# SPL Detections
+
+```spl
+index=aws_api earliest=-24h latest=now eventName=CreateUser
+| {command} generated_target
+```
+""",
+        )
+
+        assert_blocked(result, "Side-effect command detected")
+
+
+def test_spl_lint_hook_allows_environment_dependent_commands(tmp_path: Path) -> None:
+    for command in ["rest", "lookup", "inputlookup", "tstats"]:
+        result = run_hook(
+            tmp_path / f"runs/audit-1/controls/controls-1/{command}-detections.md",
+            f"""
+# SPL Detections
+
+```spl
+index=aws_api earliest=-24h latest=now eventName=CreateUser
+| {command} generated_target
+```
+""",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert parse_decision(result.stdout) is None

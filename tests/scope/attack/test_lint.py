@@ -96,6 +96,36 @@ def _final_path(candidate_id: str = "cap-001") -> dict[str, object]:
     }
 
 
+def _path_group() -> dict[str, object]:
+    return {
+        "id": "apg-001",
+        "name": "Grouped public API path",
+        "severity": "high",
+        "category": "data_exposure",
+        "validation_statuses": ["validated"],
+        "primitive": "public_invoke",
+        "impact": {
+            "action": "execute-api:Invoke",
+            "resource": "compute:lambda:handler",
+            "resulting_context": "compute:lambda:handler",
+        },
+        "representative_path_id": "ap-001",
+        "member_path_ids": ["ap-001"],
+        "member_count": 1,
+        "source_principals": ["external:*"],
+        "leveraging_assets": [
+            {
+                "id": "external:*",
+                "type": "external",
+                "arn": None,
+                "path_ids": ["ap-001"],
+            }
+        ],
+        "affected_resources": ["arn:aws:s3:::sensitive"],
+        "description": "One final path reaches Lambda.",
+    }
+
+
 def _results(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "graph": {"nodes": [], "edges": [{"id": EDGE_ID}]},
@@ -235,6 +265,99 @@ def test_duplicate_attack_paths_id_rejected(tmp_path: Path) -> None:
     errors = lint_results_file(path, stage="validation")
 
     assert any("duplicate attack_paths id ap-001" in e for e in errors)
+
+
+def test_validation_stage_accepts_grouped_attack_paths(tmp_path: Path) -> None:
+    path = _write_results(
+        tmp_path,
+        _results(
+            candidate_attack_paths=[_candidate()],
+            attack_validation=[_validation()],
+            attack_paths=[_final_path()],
+            attack_path_groups=[_path_group()],
+        ),
+    )
+
+    assert lint_results_file(path, stage="validation") == []
+
+
+def test_validation_stage_rejects_stale_summary_stage(tmp_path: Path) -> None:
+    path = _write_results(
+        tmp_path,
+        _results(
+            summary={"attack_analysis_stage": "candidates"},
+            candidate_attack_paths=[_candidate()],
+            attack_validation=[_validation()],
+            attack_paths=[_final_path()],
+            attack_path_groups=[_path_group()],
+        ),
+    )
+
+    errors = lint_results_file(path, stage="validation")
+
+    assert any("summary.attack_analysis_stage must be validation" in e for e in errors)
+
+
+def test_validation_stage_rejects_unlinked_promoted_public_exposure(
+    tmp_path: Path,
+) -> None:
+    path = _write_results(
+        tmp_path,
+        _results(
+            public_exposure_findings=[
+                {
+                    "id": "pe-001",
+                    "source_entrypoint_id": "gateway:apigw:api",
+                    "reason_not_attack_path": "Not promoted.",
+                }
+            ],
+            candidate_attack_paths=[_candidate()],
+            attack_validation=[_validation()],
+            attack_paths=[_final_path()],
+            attack_path_groups=[_path_group()],
+        ),
+    )
+
+    errors = lint_results_file(path, stage="validation")
+
+    assert any("missing promoted_attack_path_ids ap-001" in e for e in errors)
+
+
+def test_validation_stage_rejects_group_with_unknown_member(tmp_path: Path) -> None:
+    group = _path_group()
+    group["member_path_ids"] = ["ap-missing"]
+    path = _write_results(
+        tmp_path,
+        _results(
+            candidate_attack_paths=[_candidate()],
+            attack_validation=[_validation()],
+            attack_paths=[_final_path()],
+            attack_path_groups=[group],
+        ),
+    )
+
+    errors = lint_results_file(path, stage="validation")
+
+    assert any("unknown member_path_id ap-missing" in e for e in errors)
+
+
+def test_validation_stage_rejects_ungrouped_final_path_when_groups_exist(tmp_path: Path) -> None:
+    group = _path_group()
+    group["member_path_ids"] = ["ap-other"]
+    group["representative_path_id"] = "ap-001"
+    path = _write_results(
+        tmp_path,
+        _results(
+            candidate_attack_paths=[_candidate()],
+            attack_validation=[_validation()],
+            attack_paths=[_final_path()],
+            attack_path_groups=[group],
+        ),
+    )
+
+    errors = lint_results_file(path, stage="validation")
+
+    assert any("final path ap-001 is not grouped" in e for e in errors)
 
 
 def test_cli_help_uses_module_command_name(capsys) -> None:

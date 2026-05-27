@@ -138,6 +138,7 @@
       "enum": [
         "apigateway",
         "bedrock",
+        "cloudfront",
         "codebuild",
         "cognito",
         "dynamodb",
@@ -146,6 +147,7 @@
         "kms",
         "lambda",
         "rds",
+        "route53",
         "s3",
         "secrets",
         "sns",
