@@ -48,6 +48,14 @@ SERVICE_MODULES = {
 
 NO_REGION_MODULES = {"cloudfront", "iam", "route53", "s3", "sts"}
 
+# Compute services that run with an execution/instance role — their attack-path
+# analysis needs IAM context. Targeting only services outside this set must not
+# trigger a full IAM enumeration. Limited to currently-enumerable services
+# (eks/kinesis/sagemaker are not yet supported targets). The broader question of
+# replacing this bulk-GAAD-then-filter context pull with lazy MCP resolution in
+# the attack-path layer is tracked as ISSUE-015 (deferred to the redesign).
+IAM_CONTEXT_SERVICES = {"lambda", "ec2", "ecs", "codebuild", "rds"}
+
 RESOURCE_TYPE_ALIASES = {
     ("apigateway", "restapis"): {"apigateway_rest_api", "apigateway_restapis"},
     ("bedrock", "agent"): {"bedrock_agent"},
@@ -173,7 +181,9 @@ def required_work_items_for_targets(targets: list[TargetScope]) -> list[tuple[st
             seen.add(pair)
             pairs.append(pair)
 
-    for pair in (("iam", "global"), ("sts", "global")):
+    context_pairs = [("iam", "global")] if any(target.service in IAM_CONTEXT_SERVICES for target in targets) else []
+    context_pairs.append(("sts", "global"))
+    for pair in context_pairs:
         if pair not in seen:
             seen.add(pair)
             pairs.append(pair)

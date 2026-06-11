@@ -769,7 +769,7 @@ def test_audit_target_file_combines_targets_in_one_run(monkeypatch, tmp_path: Pa
 
     assert result == 0
     pairs = [(command[command.index("enum") + 1], command[command.index("--logical-region") + 1]) for command in commands]
-    assert set(pairs) == {("s3", "global"), ("sns", "us-west-2"), ("iam", "global"), ("sts", "global")}
+    assert set(pairs) == {("s3", "global"), ("sns", "us-west-2"), ("sts", "global")}
     assert (run_dir / "manifest.json").exists()
     assert (run_dir / "summary.json").exists()
     assert (run_dir / "results.json").exists()
