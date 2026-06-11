@@ -92,6 +92,67 @@ def _minimal_bucket_ops(**overrides):
     return operations
 
 
+def _selector(*bucket_names: str) -> list[dict]:
+    return [
+        {
+            "service": "s3",
+            "module": "s3",
+            "region": "global",
+            "resource_type": "bucket",
+            "resource_id": name,
+            "arn": f"arn:aws:s3:::{name}",
+        }
+        for name in bucket_names
+    ]
+
+
+def test_s3_selector_skips_list_buckets_and_enumerates_targets_only():
+    s3 = FakeClient(_minimal_bucket_ops())
+
+    envelope = run(FakeFactory(s3=s3), "global", selector=_selector("my-test-bucket"))
+
+    assert s3.call_counts["list_buckets"] == 0
+    assert [resource["resource_id"] for resource in envelope.resources] == ["my-test-bucket"]
+    assert envelope.status == "complete"
+    assert all(entry.check != "list_buckets" for entry in envelope.coverage)
+    assert s3.call_counts["get_bucket_location"] == 1
+
+
+def test_s3_selector_missing_bucket_records_resource_failure():
+    operations = _minimal_bucket_ops()
+    location_error = ClientError(
+        {"Error": {"Code": "NoSuchBucket", "Message": "missing"}},
+        "GetBucketLocation",
+    )
+
+    def get_bucket_location(Bucket: str):
+        if Bucket == "ghost-bucket":
+            raise location_error
+        return {"LocationConstraint": "us-east-1"}
+
+    operations["get_bucket_location"] = get_bucket_location
+    s3 = FakeClient(operations)
+
+    envelope = run(FakeFactory(s3=s3), "global", selector=_selector("my-test-bucket", "ghost-bucket"))
+
+    assert s3.call_counts["list_buckets"] == 0
+    assert [resource["resource_id"] for resource in envelope.resources] == ["my-test-bucket"]
+    error = next(err for err in envelope.errors if err.operation == "s3.GetBucketLocation")
+    assert error.resource == "arn:aws:s3:::ghost-bucket"
+    assert error.code == "NoSuchBucket"
+    coverage = next(entry for entry in envelope.coverage if entry.check == "bucket_location")
+    assert coverage.failed == 1
+
+
+def test_s3_without_selector_lists_buckets_unchanged():
+    s3 = FakeClient(_minimal_bucket_ops())
+
+    envelope = run(FakeFactory(s3=s3), "global", selector=None)
+
+    assert s3.call_counts["list_buckets"] == 1
+    assert [resource["resource_id"] for resource in envelope.resources] == ["my-test-bucket"]
+
+
 def test_s3_list_buckets_failure_returns_error_envelope():
     s3 = FakeClient(
         {
