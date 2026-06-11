@@ -48,12 +48,10 @@ SERVICE_MODULES = {
 
 NO_REGION_MODULES = {"cloudfront", "iam", "route53", "s3", "sts"}
 
-# Compute services that run with an execution/instance role — their attack-path
-# analysis needs IAM context. Targeting only services outside this set must not
-# trigger a full IAM enumeration. Limited to currently-enumerable services
-# (eks/kinesis/sagemaker are not yet supported targets). The broader question of
-# replacing this bulk-GAAD-then-filter context pull with lazy MCP resolution in
-# the attack-path layer is tracked as ISSUE-015 (deferred to the redesign).
+# Compute services that run with an execution/instance role. Their attack-path
+# analysis needs IAM context. ISSUE-015 settled the broader design choice:
+# keep bulk local GAAD for these compute targets, but avoid IAM enumeration for
+# data, storage, messaging, and public-edge targets.
 IAM_CONTEXT_SERVICES = {"lambda", "ec2", "ecs", "codebuild", "rds"}
 
 RESOURCE_TYPE_ALIASES = {
