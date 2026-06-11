@@ -163,6 +163,46 @@ def test_required_work_items_for_targets_uses_target_regions_and_context():
     ]
 
 
+def test_required_work_items_skips_iam_for_non_context_services():
+    targets = parse_targets(
+        [
+            "arn:aws:s3:::my-bucket",
+            "arn:aws:sns:us-west-2:123456789012:alerts",
+        ]
+    )
+
+    pairs = required_work_items_for_targets(targets)
+
+    assert pairs == [
+        ("s3", "global"),
+        ("sns", "us-west-2"),
+        ("sts", "global"),
+    ]
+
+
+def test_required_work_items_adds_iam_for_context_services():
+    targets = parse_targets(["arn:aws:lambda:us-east-1:123456789012:function:my-func"])
+
+    pairs = required_work_items_for_targets(targets)
+
+    assert pairs == [
+        ("lambda", "us-east-1"),
+        ("iam", "global"),
+        ("sts", "global"),
+    ]
+
+
+def test_required_work_items_keeps_iam_when_explicitly_targeted():
+    targets = parse_targets(["arn:aws:iam::123456789012:role/Admin"])
+
+    pairs = required_work_items_for_targets(targets)
+
+    assert pairs == [
+        ("iam", "global"),
+        ("sts", "global"),
+    ]
+
+
 def test_build_scope_metadata_serializes_target_mode():
     targets = parse_targets(["arn:aws:s3:::my-bucket"])
 

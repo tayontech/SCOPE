@@ -12,26 +12,33 @@ PRIMARY_CHECKS = ["list_buckets"]
 REQUIRED_CHECKS = ["bucket_policy", "bucket_acl", "bucket_public_access_block"]
 
 
-def run(factory: Any, region: str) -> ModuleEnvelope:
+def run(factory: Any, region: str, selector: Any | None = None) -> ModuleEnvelope:
     tracker = CoverageTracker(primary=PRIMARY_CHECKS, required=REQUIRED_CHECKS)
     s3 = factory.client("s3")
     findings: list[dict[str, Any]] = []
 
-    try:
-        buckets = (s3.list_buckets().get("Buckets") or [])
-        tracker.record_ok("list_buckets", resource="buckets")
-    except Exception as err:
-        tracker.record_module_failure("list_buckets", operation="s3.ListBuckets", err=err)
-        coverage, errors = tracker.to_envelope_fields()
-        return ModuleEnvelope(
-            module="s3",
-            account_id=factory.account_id,
-            region=region,
-            status=tracker.derive_status(),
-            resources=[],
-            coverage=coverage,
-            errors=errors,
-        )
+    target_buckets = _selector_bucket_names(selector)
+    if target_buckets is not None:
+        # Targets-down mode: the dispatcher scoped this run to specific buckets.
+        # Skip ListBuckets entirely; no coverage event is recorded for it, so
+        # status derives from the per-bucket required checks alone.
+        buckets = [{"Name": name} for name in target_buckets]
+    else:
+        try:
+            buckets = (s3.list_buckets().get("Buckets") or [])
+            tracker.record_ok("list_buckets", resource="buckets")
+        except Exception as err:
+            tracker.record_module_failure("list_buckets", operation="s3.ListBuckets", err=err)
+            coverage, errors = tracker.to_envelope_fields()
+            return ModuleEnvelope(
+                module="s3",
+                account_id=factory.account_id,
+                region=region,
+                status=tracker.derive_status(),
+                resources=[],
+                coverage=coverage,
+                errors=errors,
+            )
 
     for bucket in buckets:
         bucket_name = bucket.get("Name")
@@ -40,7 +47,15 @@ def run(factory: Any, region: str) -> ModuleEnvelope:
             location = s3.get_bucket_location(Bucket=bucket_name)
             bucket_region = _normalize_bucket_region(location.get("LocationConstraint"))
         except Exception as err:
-            tracker.record_skipped("bucket_location", resource=bucket_arn, reason=_error_code(err))
+            if target_buckets is not None:
+                tracker.record_resource_failure(
+                    "bucket_location",
+                    resource=bucket_arn,
+                    operation="s3.GetBucketLocation",
+                    err=err,
+                )
+            else:
+                tracker.record_skipped("bucket_location", resource=bucket_arn, reason=_error_code(err))
             continue
 
         if region != "global" and bucket_region != region:
@@ -197,6 +212,17 @@ def _normalize_bucket_region(location_constraint: str | None) -> str:
     if location_constraint == "EU":
         return "eu-west-1"
     return location_constraint
+
+
+def _selector_bucket_names(selector: Any) -> list[str] | None:
+    if not isinstance(selector, list):
+        return None
+    names = [
+        entry["resource_id"]
+        for entry in selector
+        if isinstance(entry, dict) and entry.get("module") == "s3" and entry.get("resource_id")
+    ]
+    return names or None
 
 
 def _safe_get(call: Callable[[], dict[str, Any]], not_found_codes: set[str]) -> dict[str, Any] | None:

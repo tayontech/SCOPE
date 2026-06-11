@@ -48,6 +48,12 @@ SERVICE_MODULES = {
 
 NO_REGION_MODULES = {"cloudfront", "iam", "route53", "s3", "sts"}
 
+# Compute services that run with an execution/instance role. Their attack-path
+# analysis needs IAM context. ISSUE-015 settled the broader design choice:
+# keep bulk local GAAD for these compute targets, but avoid IAM enumeration for
+# data, storage, messaging, and public-edge targets.
+IAM_CONTEXT_SERVICES = {"lambda", "ec2", "ecs", "codebuild", "rds"}
+
 RESOURCE_TYPE_ALIASES = {
     ("apigateway", "restapis"): {"apigateway_rest_api", "apigateway_restapis"},
     ("bedrock", "agent"): {"bedrock_agent"},
@@ -173,7 +179,9 @@ def required_work_items_for_targets(targets: list[TargetScope]) -> list[tuple[st
             seen.add(pair)
             pairs.append(pair)
 
-    for pair in (("iam", "global"), ("sts", "global")):
+    context_pairs = [("iam", "global")] if any(target.service in IAM_CONTEXT_SERVICES for target in targets) else []
+    context_pairs.append(("sts", "global"))
+    for pair in context_pairs:
         if pair not in seen:
             seen.add(pair)
             pairs.append(pair)
