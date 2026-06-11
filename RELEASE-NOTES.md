@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.15.1 - 2026-06-11
+
+- Scoped target-file S3 audits to listed buckets and limited automatic IAM enumeration to compute-context targets.
+
 ## 1.15.0 - 2026-05-24
 
 - Switched installation to `uv run python -m scope.install`; Node remains dashboard/MCP-only.
