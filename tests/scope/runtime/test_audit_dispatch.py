@@ -775,6 +775,78 @@ def test_audit_target_file_combines_targets_in_one_run(monkeypatch, tmp_path: Pa
     assert (run_dir / "results.json").exists()
 
 
+def test_audit_target_mode_passes_selector_json_to_targeted_modules(monkeypatch, tmp_path: Path):
+    target_file = tmp_path / "targets.txt"
+    target_file.write_text(
+        "arn:aws:s3:::my-bucket\n"
+        "arn:aws:s3:::other-bucket\n"
+        "arn:aws:lambda:us-east-1:123456789012:function:my-func\n",
+        encoding="utf-8",
+    )
+    commands = []
+
+    def fake_run_command(command, log_path: Path):
+        commands.append(command)
+        module = command[command.index("enum") + 1]
+        region = command[command.index("--logical-region") + 1]
+        run_dir = Path(command[command.index("--run-dir") + 1])
+        resources = []
+        if module == "s3":
+            resources = [
+                {"resource_type": "s3_bucket", "resource_id": "my-bucket", "arn": "arn:aws:s3:::my-bucket"},
+                {"resource_type": "s3_bucket", "resource_id": "other-bucket", "arn": "arn:aws:s3:::other-bucket"},
+            ]
+        if module == "lambda":
+            resources = [
+                {
+                    "resource_type": "lambda_function",
+                    "resource_id": "my-func",
+                    "arn": "arn:aws:lambda:us-east-1:123456789012:function:my-func",
+                }
+            ]
+        payload = {
+            "module": module,
+            "account_id": "123456789012",
+            "region": region,
+            "status": "complete",
+            "resources": resources,
+            "coverage": [],
+            "errors": [],
+        }
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / f"{module}.json").write_text(json.dumps(payload), encoding="utf-8")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(audit, "ClientFactory", FakeClientFactory)
+    monkeypatch.setattr(audit, "_run_command", fake_run_command)
+
+    result = audit.main(["--target-file", str(target_file), "--run-dir", str(tmp_path / "run")])
+
+    assert result == 0
+    selectors_by_module = {}
+    for command in commands:
+        module = command[command.index("enum") + 1]
+        if "--selector-json" in command:
+            selectors_by_module[module] = json.loads(command[command.index("--selector-json") + 1])
+        else:
+            selectors_by_module[module] = None
+
+    assert [entry["resource_id"] for entry in selectors_by_module["s3"]] == ["my-bucket", "other-bucket"]
+    assert selectors_by_module["s3"][0] == {
+        "service": "s3",
+        "module": "s3",
+        "region": "global",
+        "resource_type": "bucket",
+        "resource_id": "my-bucket",
+        "arn": "arn:aws:s3:::my-bucket",
+    }
+    assert [entry["resource_id"] for entry in selectors_by_module["lambda"]] == ["my-func"]
+    assert selectors_by_module["iam"] is None
+    assert selectors_by_module["sts"] is None
+
+
 def test_module_cli_forwards_audit_output_dir_and_concurrency(monkeypatch):
     forwarded = []
 

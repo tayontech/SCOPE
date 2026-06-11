@@ -25,9 +25,12 @@ from scope.runtime.targets import (
     TargetScope,
     build_scope_metadata,
     filter_module_envelopes_for_targets,
+    module_for_target,
     parse_targets,
     read_target_file,
     required_work_items_for_targets,
+    selector_for_target,
+    selector_to_json,
 )
 
 
@@ -66,6 +69,7 @@ class WorkItem:
     output_path: Path
     log_path: Path
     execution_region: str | None = None
+    selector_payload: str | None = None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         modules=modules,
         regions=regions,
         explicit_pairs=explicit_pairs,
+        target_scopes=target_scopes if scope_mode == "target" else None,
     )
     scope = build_scope_metadata(mode=scope_mode, targets=target_scopes)
     manifest = {
@@ -270,6 +275,7 @@ def _build_work_items(
     modules: list[str],
     regions: list[str],
     explicit_pairs: list[tuple[str, str]] | None = None,
+    target_scopes: list[TargetScope] | None = None,
 ) -> list[WorkItem]:
     items: list[WorkItem] = []
     if explicit_pairs is not None:
@@ -282,7 +288,12 @@ def _build_work_items(
             for module in modules
             for region in _module_regions(module, regions)
         ]
+    selectors_by_pair: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for target in target_scopes or []:
+        pair = (module_for_target(target), target.region or "global")
+        selectors_by_pair.setdefault(pair, []).append(selector_to_json(selector_for_target(target)))
     for module, region in pairs:
+        selectors = selectors_by_pair.get((module, region))
         items.append(
             WorkItem(
                 module=module,
@@ -291,6 +302,7 @@ def _build_work_items(
                 output_path=_module_region_path(run_dir, module, region),
                 log_path=run_dir / "logs" / f"{module}-{region}.log",
                 execution_region=_execution_region(module, region),
+                selector_payload=json.dumps(selectors) if selectors else None,
             )
         )
     return items
@@ -378,6 +390,8 @@ def _run_work_item(item: WorkItem, profile: str | None) -> dict:
     ]
     if profile:
         command.extend(["--profile", profile])
+    if item.selector_payload:
+        command.extend(["--selector-json", item.selector_payload])
     returncode = _run_command(command, item.log_path)
     envelope_path = item.enum_run_dir / f"{item.module}.json"
     result = {
