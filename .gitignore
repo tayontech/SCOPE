@@ -64,3 +64,6 @@ scope-dashboard-*.png
 
 # Config (user-specific)
 config/accounts.json
+
+# Root npm dependencies (shadcn MCP tooling)
+node_modules/
